@@ -1,0 +1,60 @@
+/* Ogólne ustawienia dla całej aplikacji */
+QWidget {
+    background-color: #2E2E2E;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 14px;
+    color: #E0E0E0;
+}
+
+/* Przycisk */
+QPushButton {
+    background-color: #3A3A3A;
+    color: #E0E0E0;
+    border: none;
+    border-radius: 5px;
+    padding: 8px 16px;
+}
+QPushButton:hover {
+    background-color: #505050;
+}
+QPushButton:pressed {
+    background-color: #696969;
+}
+
+/* Pola tekstowe */
+QLineEdit {
+    border: 1px solid #555;
+    border-radius: 5px;
+    padding: 6px 10px;
+    background-color: #3A3A3A;
+    color: #E0E0E0;
+}
+
+/* QTabWidget i zakładki */
+QTabWidget::pane {
+    border: 1px solid #555;
+    background-color: #3A3A3A;
+}
+QTabBar::tab {
+    background-color: #4A4A4A;
+    padding: 10px 20px;
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background-color: #3A3A3A;
+    border-bottom: 2px solid #696969;
+}
+
+/* Etykiety */
+QLabel {
+    color: #E0E0E0;
+}
+
+/* Okno logowania */
+QDialog {
+    background-color: #3A3A3A;
+    border: 1px solid #555;
+    border-radius: 10px;
+}

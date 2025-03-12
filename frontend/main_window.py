@@ -1,4 +1,5 @@
 from PyQt5 import QtWidgets
+from archive_tab import ArchiveTab
 from count_tab import CountTab
 from train_tab import TrainTab
 from models_tab import ModelsTab
@@ -20,6 +21,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.count_tab = CountTab()
         self.train_tab = TrainTab()
         self.models_tab = ModelsTab()
+        self.archive_tab = ArchiveTab()
 
         self.tabs.addTab(self.count_tab, "Zliczanie")
         self.tabs.addTab(self.train_tab, "Trening")
@@ -28,6 +30,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.user_role == "admin":
             self.users_tab = UsersTab()
             self.tabs.addTab(self.users_tab, "Użytkownicy")
+            self.tabs.addTab(self.archive_tab, "Historia")
             
     def create_toolbar(self):
         toolbar = self.addToolBar("Główna")

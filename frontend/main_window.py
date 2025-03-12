@@ -9,7 +9,7 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.user_role = user_role
         self.setWindowTitle("System Maszynowego Liczenia Elementów")
-        self.setGeometry(100, 100, 900, 700)
+        self.setGeometry(100, 100, 1600, 900)
         self.init_ui()
         self.create_toolbar()
 

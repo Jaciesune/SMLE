@@ -1,0 +1,41 @@
+
+services:
+  backend:
+    build: .
+    container_name: backend-app
+    depends_on:
+      - mysql
+    environment:
+      DATABASE_URL: mysql+asyncmy://user:password@mysql:3306/smle-database
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend  # Mapowanie plików backendu
+    command: ["python", "/app/backend/main.py"]
+
+  mysql:
+    image: mysql:latest
+    container_name: mysql-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: smle-database
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./smle_database_dump.sql:/docker-entrypoint-initdb.d/smle_database_dump.sql
+
+  frontend:
+    build: .
+    container_name: frontend-app
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app/frontend  # Mapowanie plików frontendu
+    command: ["python", "/app/frontend/main.py"]
+
+volumes:
+  mysql_data:

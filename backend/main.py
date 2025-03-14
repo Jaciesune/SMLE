@@ -1,57 +1,81 @@
-import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import urllib.parse
+import time
+import mysql.connector
+from fastapi import FastAPI, HTTPException
 
+# Funkcja do czekania na bazę danych
+def wait_for_db():
+    while True:
+        try:
+            conn = mysql.connector.connect(
+                host="mysql-db",
+                port=3306,
+                user="user",
+                password="password",
+                database="smle-database"
+            )
+            conn.close()
+            print("✅ Baza danych jest dostępna!")
+            break
+        except mysql.connector.Error as err:
+            print("⏳ Czekam na bazę danych...", err)
+            time.sleep(5)
 
-# Przykładowa baza danych użytkowników (może być w pliku JSON lub SQL, ale tu zrobimy ją prostą)
-users = {
-    "user1": {"password": "password123", "role": "admin"},
-    "user2": {"password": "password456", "role": "user"},
-}
+# Czekamy na dostępność bazy danych przed startem
+wait_for_db()
 
-# Klasa obsługująca zapytania HTTP
-class RequestHandler(BaseHTTPRequestHandler):
-    # Metoda obsługująca żądanie POST
-    def do_POST(self):
-        # Parsowanie ścieżki URL
-        path = self.path
-        if path == "/login":
-            # Parsowanie danych JSON w zapytaniu POST
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode("utf-8"))
-            
-            username = data.get('username')
-            password = data.get('password')
-            
-            # Logika logowania
-            if username in users and users[username]["password"] == password:
-                response = {
-                    "token": "example_token",  # Możesz tutaj wygenerować prawdziwy token
-                    "role": users[username]["role"]
-                }
-                self.send_response(200)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                response = {"error": "Invalid credentials"}
-                self.send_response(400)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(response).encode())
-        else:
-            # Obsługuje inne zapytania (np. GET), może odpowiedzieć 404
-            self.send_response(404)
-            self.end_headers()
+# Inicjalizacja FastAPI
+app = FastAPI()
 
-# Funkcja uruchamiająca serwer
-def run(server_class=HTTPServer, handler_class=RequestHandler, port=5000):
-    server_address = ('', port)
-    httpd = server_class(server_address, handler_class)
-    print(f'Starting server on port {port}...')
-    httpd.serve_forever()
+# Funkcja do połączenia z bazą
+def get_db_connection():
+    return mysql.connector.connect(
+        host="mysql-db",
+        port=3306,
+        user="user",
+        password="password",
+        database="smle-database"
+    )
 
-# Uruchomienie serwera
-if __name__ == '__main__':
-    run()
+# Endpoint pobierający listę użytkowników
+@app.get("/users")
+def get_users():
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # Zmiana zapytania SQL, aby używać "last_login_date"
+        cursor.execute("SELECT id, name, register_date, last_login_date, status FROM user")  
+        users = cursor.fetchall()
+    except mysql.connector.Error as err:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Błąd zapytania: {err}")
+    
+    cursor.close()
+    conn.close()
+    
+    return users
+
+# Endpoint dodający użytkownika
+@app.post("/users")
+def create_user(username: str, email: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("INSERT INTO user (name, password, register_date, status) VALUES (%s, %s, NOW(), 'active')", (username, email))
+        conn.commit()
+    except mysql.connector.Error as err:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"Błąd: {err}")
+    
+    cursor.close()
+    conn.close()
+    
+    return {"message": "Użytkownik dodany!"}
+
+# Pętla podtrzymująca działanie aplikacji
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

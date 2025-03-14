@@ -4,7 +4,7 @@ FROM python:3.10
 # Ustawienie katalogu roboczego
 WORKDIR /app
 
-# Instalacja zależności systemowych dla PyQt5 i Qt
+# Instalacja zależności systemowych dla PyQt5 i Qt (potrzebne tylko do backendu, jeśli używasz PyQt do backendu)
 RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx \
     libxcb1 \
@@ -17,24 +17,16 @@ RUN apt-get update && apt-get install -y \
 
 # Kopiowanie zależności backendu
 COPY backend/requirements.txt ./backend/requirements.txt
-COPY frontend/requirements.txt ./frontend/requirements.txt
 
 # Instalowanie zależności backendu
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
-# Instalowanie zależności frontendu
-RUN pip install --no-cache-dir -r frontend/requirements.txt
-
-# Kopiowanie całego kodu (backend i frontend) do kontenera
+# Kopiowanie całego kodu (backend) do kontenera
 COPY . /app
 
-# Ustawienie zmiennej środowiskowej dla Qt, aby działało w trybie offscreen
+# Ustawienie zmiennej środowiskowej dla Qt, aby działało w trybie offscreen (jeśli jest używane w backendzie)
 ENV QT_QPA_PLATFORM=offscreen
-
 ENV XDG_RUNTIME_DIR=/tmp/runtime-root
 
-
-# Uruchomienie backendu i frontendu jednocześnie
-CMD bash -c "python /app/backend/main.py & python /app/frontend/main.py"
-
-
+# Uruchomienie backendu
+CMD ["python", "/app/backend/main.py"]

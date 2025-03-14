@@ -1,5 +1,7 @@
 {
     "python.analysis.extraPaths": [
-        "./frontend"
+        "./frontend",
+        "./backend/Controllers",
+        "./backend/Models"
     ]
 }

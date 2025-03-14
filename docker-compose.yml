@@ -1,7 +1,10 @@
+version: '3.8'
 
 services:
   backend:
-    build: .
+    build:
+      context: .  # Ścieżka do katalogu z Dockerfile
+      dockerfile: Dockerfile  # Upewnij się, że Dockerfile jest w głównym katalogu
     container_name: backend-app
     depends_on:
       - mysql
@@ -10,7 +13,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app/backend  # Mapowanie plików backendu
+      - ./backend:/app/backend
     command: ["python", "/app/backend/main.py"]
 
   mysql:
@@ -25,17 +28,12 @@ services:
       - "3306:3306"
     volumes:
       - ./smle_database_dump.sql:/docker-entrypoint-initdb.d/smle_database_dump.sql
-
-  frontend:
-    build: .
-    container_name: frontend-app
-    depends_on:
-      - backend
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app/frontend  # Mapowanie plików frontendu
-    command: ["python", "/app/frontend/main.py"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
 
 volumes:
   mysql_data:

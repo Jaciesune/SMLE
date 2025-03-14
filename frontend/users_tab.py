@@ -1,9 +1,12 @@
+import sys
+import requests
 from PyQt5 import QtWidgets, QtCore
 
 class UsersTab(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
+        self.load_users()  # Załaduj użytkowników przy starcie
 
     def init_ui(self):
         layout = QtWidgets.QVBoxLayout()
@@ -12,64 +15,56 @@ class UsersTab(QtWidgets.QWidget):
 
         # Tworzymy tabelę do wyświetlania użytkowników
         self.users_table = QtWidgets.QTableWidget()
-        self.users_table.setRowCount(2)  # Dodajemy 2 wiersze (przykładowi użytkownicy)
+        self.users_table.setRowCount(0)  # Zaczynamy od pustej tabeli
         self.users_table.setColumnCount(4)  # 4 kolumny: Nazwa Użytkownika, Data Rejestracji, Ostatnie Logowanie, Status
 
         # Ustawiamy nagłówki kolumn
         self.users_table.setHorizontalHeaderLabels(["Nazwa Użytkownika", "Data Rejestracji", "Ostatnie Logowanie", "Status"])
-
-        # Wypełniamy tabelę przykładowymi danymi
-        self.users_table.setItem(0, 0, QtWidgets.QTableWidgetItem("Uzytkownik_TEST"))
-        self.users_table.setItem(0, 1, QtWidgets.QTableWidgetItem("09:33 07.03.2025"))
-        self.users_table.setItem(0, 2, QtWidgets.QTableWidgetItem("08:11 08.03.2025"))
-        self.users_table.setItem(0, 3, QtWidgets.QTableWidgetItem("Aktywne"))
-
-        self.users_table.setItem(1, 0, QtWidgets.QTableWidgetItem("Uzytkownik_TEST2"))
-        self.users_table.setItem(1, 1, QtWidgets.QTableWidgetItem("09:45 08.03.2025"))
-        self.users_table.setItem(1, 2, QtWidgets.QTableWidgetItem("09:50 08.03.2025"))
-        self.users_table.setItem(1, 3, QtWidgets.QTableWidgetItem("Aktywne"))
 
         # Zablokowanie edytowania danych
         self.users_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
 
         # Zablokowanie zmiany rozmiaru kolumn
         self.users_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-        self.users_table.setColumnWidth(0, 200)  # Szerokość pierwszej kolumny
-        self.users_table.setColumnWidth(1, 200)  # Szerokość drugiej kolumny
-        self.users_table.setColumnWidth(2, 200)  # Szerokość trzeciej kolumny
-        self.users_table.setColumnWidth(3, 150)  # Szerokość czwartej kolumny
+        self.users_table.setColumnWidth(0, 200)
+        self.users_table.setColumnWidth(1, 200)
+        self.users_table.setColumnWidth(2, 200)
+        self.users_table.setColumnWidth(3, 150)
 
         # Dodajemy tabelę do layoutu
         layout.addWidget(self.users_table)
 
-        # Formularz do rejestracji nowego użytkownika
-        form_layout = QtWidgets.QFormLayout()
-        self.new_username = QtWidgets.QLineEdit()
-        self.new_password = QtWidgets.QLineEdit()
-        self.new_password.setEchoMode(QtWidgets.QLineEdit.Password)
-        form_layout.addRow("Nazwa użytkownika:", self.new_username)
-        form_layout.addRow("Hasło:", self.new_password)
-        layout.addLayout(form_layout)
-
-        # Przycisk rejestracji
-        self.register_btn = QtWidgets.QPushButton("Zarejestruj użytkownika")
-        self.register_btn.clicked.connect(self.register_user)
-        layout.addWidget(self.register_btn)
-
         self.setLayout(layout)
 
-    def register_user(self):
-        username = self.new_username.text()
-        password = self.new_password.text()
-        if username and password:
-            # Dodajemy użytkownika do tabeli (na sztywno, bez danych rejestracji)
-            row_position = self.users_table.rowCount()
-            self.users_table.insertRow(row_position)
-            self.users_table.setItem(row_position, 0, QtWidgets.QTableWidgetItem(username))
-            self.users_table.setItem(row_position, 1, QtWidgets.QTableWidgetItem("09:00 10.03.2025"))  # przykładowa data rejestracji
-            self.users_table.setItem(row_position, 2, QtWidgets.QTableWidgetItem("00:00 10.03.2025"))  # przykładowa data ostatniego logowania
-            self.users_table.setItem(row_position, 3, QtWidgets.QTableWidgetItem("Aktywne"))  # status
+    def load_users(self):
+        """Pobiera użytkowników z API backendu i wyświetla w tabeli"""
+        try:
+            response = requests.get("http://localhost:8000/users")  # Połączenie z backendem
+            response.raise_for_status()  # Sprawdzenie, czy odpowiedź jest poprawna
 
-            QtWidgets.QMessageBox.information(self, "Rejestracja", f"Użytkownik {username} został zarejestrowany.")
-        else:
-            QtWidgets.QMessageBox.warning(self, "Błąd", "Podaj nazwę użytkownika oraz hasło.")
+            users = response.json()
+
+            # Dodanie logowania, aby sprawdzić strukturę danych
+            print("Odpowiedź z backendu:", users)
+
+            self.display_users(users)
+
+        except requests.exceptions.RequestException as e:
+            QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie udało się pobrać danych: {e}")
+
+
+    def display_users(self, users):
+        """Wypełnia tabelę użytkownikami"""
+        self.users_table.setRowCount(len(users))  # Ustawiamy liczbę wierszy na liczbę użytkowników
+        for row, user in enumerate(users):
+            # Zmieniamy "username" na "name"
+            self.users_table.setItem(row, 0, QtWidgets.QTableWidgetItem(user["name"]))  # Kolumna 0 to nazwa użytkownika
+
+            # Zmieniamy "registration_date" na "register_date" (lub jak jest w odpowiedzi z API)
+            self.users_table.setItem(row, 1, QtWidgets.QTableWidgetItem(user["register_date"]))
+
+            # Zmieniamy "last_login" na odpowiednią nazwę (jeśli taka kolumna jest w odpowiedzi z backendu)
+            self.users_table.setItem(row, 2, QtWidgets.QTableWidgetItem(user.get("last_login", "Brak danych")))  # Używamy get, aby uniknąć błędu, gdy brak danych
+
+            # Zmieniamy "status" na odpowiednią nazwę (w backendzie jest to "status")
+            self.users_table.setItem(row, 3, QtWidgets.QTableWidgetItem(user["status"]))

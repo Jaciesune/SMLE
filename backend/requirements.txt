@@ -1,0 +1,5 @@
+fastapi
+sqlalchemy
+asyncmy
+mysql-connector-python
+uvicorn

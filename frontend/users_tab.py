@@ -57,8 +57,8 @@ class UsersTab(QtWidgets.QWidget):
 
             users = response.json()
 
-            print("Odpowiedź z backendu:", users)
-            self.display_users(users)
+            #print("Odpowiedź z backendu:", users)
+            #self.display_users(users)
         except requests.exceptions.RequestException as e:
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie udało się pobrać danych: {e}")
 

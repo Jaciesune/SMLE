@@ -18,6 +18,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
 
+        # Tworzymy odpowiednie zakładki
         self.count_tab = CountTab()
         self.train_tab = TrainTab()
         self.models_tab = ModelsTab()
@@ -28,10 +29,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.addTab(self.models_tab, "Modele")
 
         if self.user_role == "admin":
+            # Jeśli rola to admin, dodajemy te karty
             self.users_tab = UsersTab()
             self.tabs.addTab(self.users_tab, "Użytkownicy")
             self.tabs.addTab(self.archive_tab, "Historia")
-            
+
     def create_toolbar(self):
         toolbar = self.addToolBar("Główna")
         toolbar.setMovable(False)
@@ -39,4 +41,3 @@ class MainWindow(QtWidgets.QMainWindow):
         exit_action = QtWidgets.QAction("Wyjście", self)
         exit_action.triggered.connect(self.close)
         toolbar.addAction(exit_action)
-

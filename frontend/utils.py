@@ -1,3 +1,5 @@
+import requests
+
 def load_stylesheet(filename):
     try:
         with open(filename, "r") as file:
@@ -7,13 +9,16 @@ def load_stylesheet(filename):
         return ""
 
 def verify_credentials(username, password):
-    # Prosta weryfikacja na potrzeby przykładu.
-    users_db = {
-        "admin": {"password": "admin", "role": "admin"},
-        "user": {"password": "user", "role": "user"},
-    }
+    # Wysyłamy zapytanie HTTP do backendu w formacie JSON
+    try:
+        response = requests.post("http://localhost:8000/login", json={"username": username, "password": password})
 
-    if username in users_db and users_db[username]["password"] == password:
-        return users_db[username]["role"]
-    else:
+        if response.status_code == 200:
+            # Jeśli odpowiedź jest pozytywna, zwróć rolę użytkownika
+            return response.json().get("role")
+        else:
+            # Jeśli logowanie się nie udało, zwróć None
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"Błąd połączenia z serwerem: {e}")
         return None

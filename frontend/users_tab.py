@@ -34,6 +34,19 @@ class UsersTab(QtWidgets.QWidget):
         # Dodajemy tabelę do layoutu
         layout.addWidget(self.users_table)
 
+        # Formularz do dodawania użytkownika
+        form_layout = QtWidgets.QFormLayout()
+        self.name_input = QtWidgets.QLineEdit()
+        self.password_input = QtWidgets.QLineEdit()
+        self.password_input.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.add_user_button = QtWidgets.QPushButton("Dodaj użytkownika")
+        self.add_user_button.clicked.connect(self.create_user)
+
+        form_layout.addRow("Nazwa użytkownika:", self.name_input)
+        form_layout.addRow("Hasło:", self.password_input)
+        form_layout.addWidget(self.add_user_button)
+
+        layout.addLayout(form_layout)
         self.setLayout(layout)
 
     def load_users(self):
@@ -44,27 +57,39 @@ class UsersTab(QtWidgets.QWidget):
 
             users = response.json()
 
-            # Dodanie logowania, aby sprawdzić strukturę danych
             print("Odpowiedź z backendu:", users)
-
             self.display_users(users)
-
         except requests.exceptions.RequestException as e:
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie udało się pobrać danych: {e}")
 
-
     def display_users(self, users):
         """Wypełnia tabelę użytkownikami"""
-        self.users_table.setRowCount(len(users))  # Ustawiamy liczbę wierszy na liczbę użytkowników
+        self.users_table.setRowCount(len(users))
         for row, user in enumerate(users):
-            # Zmieniamy "username" na "name"
-            self.users_table.setItem(row, 0, QtWidgets.QTableWidgetItem(user["name"]))  # Kolumna 0 to nazwa użytkownika
-
-            # Zmieniamy "registration_date" na "register_date" (lub jak jest w odpowiedzi z API)
+            self.users_table.setItem(row, 0, QtWidgets.QTableWidgetItem(user["name"]))
             self.users_table.setItem(row, 1, QtWidgets.QTableWidgetItem(user["register_date"]))
-
-            # Zmieniamy "last_login" na odpowiednią nazwę (jeśli taka kolumna jest w odpowiedzi z backendu)
-            self.users_table.setItem(row, 2, QtWidgets.QTableWidgetItem(user.get("last_login", "Brak danych")))  # Używamy get, aby uniknąć błędu, gdy brak danych
-
-            # Zmieniamy "status" na odpowiednią nazwę (w backendzie jest to "status")
+            self.users_table.setItem(row, 2, QtWidgets.QTableWidgetItem(user.get("last_login", "Brak danych")))
             self.users_table.setItem(row, 3, QtWidgets.QTableWidgetItem(user["status"]))
+    
+    def create_user(self):
+        """Wysyła dane nowego użytkownika do backendu"""
+        username = self.name_input.text().strip()
+        password = self.password_input.text().strip()
+
+        if not username or not password:
+            QtWidgets.QMessageBox.warning(self, "Błąd", "Wypełnij wszystkie pola!")
+            return
+
+        try:
+            response = requests.post("http://localhost:8000/users", params={"username": username, "email": password})
+            response.raise_for_status()
+            QtWidgets.QMessageBox.information(self, "Sukces", "Użytkownik dodany!")
+            self.load_users()  # Odśwież listę użytkowników
+        except requests.exceptions.RequestException as e:
+            QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie udało się dodać użytkownika: {e}")
+
+if __name__ == "__main__":
+    app = QtWidgets.QApplication(sys.argv)
+    window = UsersTab()
+    window.show()
+    sys.exit(app.exec_())

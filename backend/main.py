@@ -2,7 +2,7 @@ import time
 import mysql.connector
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from login import verify_credentials  # Importujemy funkcję z login.py
+from login import verify_credentials  # Importujemy poprawioną funkcję z login.py
 from users_tab import get_users, create_user
 
 # Funkcja do czekania na bazę danych
@@ -38,9 +38,9 @@ class LoginRequest(BaseModel):
 @app.post("/login")
 def login(request: LoginRequest):
     # Przekazujemy dane do funkcji verify_credentials
-    role = verify_credentials(request.username, request.password)
-    if role:
-        return {"role": role}  # Zwracamy rolę użytkownika
+    auth_response = verify_credentials(request.username, request.password)
+    if auth_response:
+        return {"role": auth_response["role"]}  # Zwracamy tylko pole "role"
     else:
         raise HTTPException(status_code=401, detail="Nieprawidłowe dane logowania")
 

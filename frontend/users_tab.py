@@ -16,22 +16,21 @@ class UsersTab(QtWidgets.QWidget):
         # Tworzymy tabelę do wyświetlania użytkowników
         self.users_table = QtWidgets.QTableWidget()
         self.users_table.setRowCount(0)  # Zaczynamy od pustej tabeli
-        self.users_table.setColumnCount(4)  # 4 kolumny: Nazwa Użytkownika, Data Rejestracji, Ostatnie Logowanie, Status
+        self.users_table.setColumnCount(5)  # Dodajemy kolumnę "Rola"
 
         # Ustawiamy nagłówki kolumn
-        self.users_table.setHorizontalHeaderLabels(["Nazwa Użytkownika", "Data Rejestracji", "Ostatnie Logowanie", "Status"])
+        self.users_table.setHorizontalHeaderLabels(["Nazwa Użytkownika", "Data Rejestracji", "Ostatnie Logowanie", "Status", "Rola"])
 
         # Zablokowanie edytowania danych
         self.users_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
 
-        # Zablokowanie zmiany rozmiaru kolumn
-        self.users_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-        self.users_table.setColumnWidth(0, 200)
-        self.users_table.setColumnWidth(1, 200)
-        self.users_table.setColumnWidth(2, 200)
-        self.users_table.setColumnWidth(3, 150)
+        # Ustawienie szerokości kolumn
+        self.users_table.setColumnWidth(0, 150)
+        self.users_table.setColumnWidth(1, 150)
+        self.users_table.setColumnWidth(2, 150)
+        self.users_table.setColumnWidth(3, 100)
+        self.users_table.setColumnWidth(4, 100)  # Kolumna "Rola"
 
-        # Dodajemy tabelę do layoutu
         layout.addWidget(self.users_table)
 
         # Formularz do dodawania użytkownika
@@ -56,9 +55,7 @@ class UsersTab(QtWidgets.QWidget):
             response.raise_for_status()  # Sprawdzenie, czy odpowiedź jest poprawna
 
             users = response.json()
-
-            #print("Odpowiedź z backendu:", users)
-            #self.display_users(users)
+            self.display_users(users)  # 🔥 Wywołujemy funkcję wyświetlania danych
         except requests.exceptions.RequestException as e:
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie udało się pobrać danych: {e}")
 
@@ -70,6 +67,7 @@ class UsersTab(QtWidgets.QWidget):
             self.users_table.setItem(row, 1, QtWidgets.QTableWidgetItem(user["register_date"]))
             self.users_table.setItem(row, 2, QtWidgets.QTableWidgetItem(user.get("last_login", "Brak danych")))
             self.users_table.setItem(row, 3, QtWidgets.QTableWidgetItem(user["status"]))
+            self.users_table.setItem(row, 4, QtWidgets.QTableWidgetItem(user["role"]))  # Dodanie kolumny "Rola"
     
     def create_user(self):
         """Wysyła dane nowego użytkownika do backendu"""
@@ -81,7 +79,7 @@ class UsersTab(QtWidgets.QWidget):
             return
 
         try:
-            response = requests.post("http://localhost:8000/users", params={"username": username, "email": password})
+            response = requests.post("http://localhost:8000/users", json={"username": username, "password": password})
             response.raise_for_status()
             QtWidgets.QMessageBox.information(self, "Sukces", "Użytkownik dodany!")
             self.load_users()  # Odśwież listę użytkowników

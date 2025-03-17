@@ -10,19 +10,17 @@ def load_stylesheet(filename):
 
 def verify_credentials(username, password):
     try:
-        # Wysyłamy zapytanie do backendu
         response = requests.post("http://localhost:8000/login", json={"username": username, "password": password})
-
-        print(f"Odpowiedź z backendu: {response.text}")  # Logowanie odpowiedzi z serwera
+        print(f"Odpowiedź z backendu: {response.text}")  # Debugowanie
 
         if response.status_code == 200:
-            # Sprawdzamy, czy odpowiedź zawiera dane roli
             data = response.json()
-
-            if "role" in data and "role" in data["role"]:  # Upewniamy się, że "role" jest w odpowiedzi
-                return data["role"]["role"]  # Zwracamy rolę użytkownika
+            print(f"Odpowiedź JSON: {data}")  # Sprawdzenie struktury odpowiedzi
+            
+            if "role" in data:
+                return data["role"]  # Pobieramy rolę bez dodatkowych poziomów
             else:
-                print("Brak roli w odpowiedzi serwera.")
+                print("Brak pola 'role' w odpowiedzi serwera.")
                 return None
         else:
             print(f"Niepoprawne dane logowania: {response.status_code} - {response.text}")

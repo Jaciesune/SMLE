@@ -17,7 +17,8 @@ def get_users():
     cursor = conn.cursor(dictionary=True)
     
     try:
-        cursor.execute("SELECT id, name, register_date, last_login_date, status FROM user")  
+        # Dodano kolumnę "role"
+        cursor.execute("SELECT id, name, register_date, last_login_date, status, role FROM user")  
         users = cursor.fetchall()
     except mysql.connector.Error as err:
         conn.close()
@@ -29,12 +30,20 @@ def get_users():
     return users
 
 # Endpoint dodający użytkownika
-def create_user(username: str, email: str):
+def create_user(data: dict):
+    username = data.get("username")
+    password = data.get("password")
+    role = data.get("role", "user")  # Domyślnie nowi użytkownicy dostają rolę "user"
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Nazwa użytkownika i hasło są wymagane")
+
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("INSERT INTO user (name, password, register_date, status) VALUES (%s, %s, NOW(), 'active')", (username, email))
+        cursor.execute("INSERT INTO user (name, password, register_date, status, role) VALUES (%s, %s, NOW(), 'active', %s)", 
+                       (username, password, role))
         conn.commit()
     except mysql.connector.Error as err:
         conn.rollback()

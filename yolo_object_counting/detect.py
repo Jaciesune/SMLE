@@ -66,11 +66,10 @@ def draw_bounding_boxes(orig_img, detections):
             cv2.putText(orig_img, f"Conf: {conf:.2f}", (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-def detect_images_in_folder(folder_path, model, weights_path, conf_threshold=0.75, iou_threshold=0.4, save_results=True):
-    """Wykrywa obiekty na obrazach w folderze."""
+def detect_images_in_folder(folder_path, model, weights_path, conf_threshold=0.7, iou_threshold=0.4, save_results=True):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.load_state_dict(torch.load(weights_path, map_location=device), strict=False)
-    model.to(device).float()  # ✅ Wymuszamy `float32`
+    model.to(device).float()
     model.eval()
 
     output_dir = "runs/detect/"
@@ -86,18 +85,19 @@ def detect_images_in_folder(folder_path, model, weights_path, conf_threshold=0.7
                 continue
 
             orig_img = img.copy()
-            input_img = preprocess_image(img).to(device)  # ✅ Usunięto podwójne wywołanie
+            input_img = preprocess_image(img).to(device)
 
             with torch.no_grad():
-                predictions = model(input_img)  
+                predictions = model(input_img)
                 B, H, W, num_anchors, _ = predictions.shape
                 predictions = predictions.view(B, -1, 6)[0]
 
-                print("Raw predictions:", predictions[:5])  
-                predictions = convert_to_xyxy(predictions)
-                print("Converted predictions:", predictions[:5])  
+                confidences = torch.sigmoid(predictions[:, 4])  # Poprawna normalizacja
+                print(f"Image: {image_name}, Confidence values (top 10): {confidences.topk(10).values}")
 
+                predictions = convert_to_xyxy(predictions)
                 detections = non_max_suppression([predictions], conf_threshold, iou_threshold)
+
                 print(f"Before NMS: {len(predictions)} boxes, After NMS: {len(detections[0]) if detections[0] is not None else 0} boxes")
 
                 if save_results:

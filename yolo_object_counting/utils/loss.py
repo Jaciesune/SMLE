@@ -35,50 +35,58 @@ def box_iou(box1, box2):
     
     return iou
 
+
 class YOLOLoss(nn.Module):
     def __init__(self, lambda_coord=5, lambda_noobj=0.5):
         super(YOLOLoss, self).__init__()
-        self.bce = nn.BCEWithLogitsLoss(reduction='sum', pos_weight=torch.tensor([1.5]))  
-        self.mse = nn.MSELoss(reduction='sum')
+        self.bce = nn.BCEWithLogitsLoss(reduction='mean')
+        self.mse = nn.MSELoss(reduction='mean')
         self.lambda_coord = lambda_coord
-        self.lambda_noobj = 0.00005  # Zmniejszamy karę za brak obiektu
-
+        self.lambda_noobj = lambda_noobj
 
     def forward(self, predictions, targets):
+        # Debug: Sprawdź wartości wejściowe
+        if torch.isnan(predictions).any() or torch.isinf(predictions).any():
+            print("Warning: NaN or Inf detected in predictions!")
+        if torch.isnan(targets).any() or torch.isinf(targets).any():
+            print("Warning: NaN or Inf detected in targets!")
+
         # Object and no-object masks
         obj_mask = targets[..., 4] == 1
-        threshold = 0.05  # Minimalna wartość pewności, żeby liczyć jako "noobj"
-        noobj_mask = (targets[..., 4] == 0) & (torch.sigmoid(predictions[..., 4]) < threshold)
-        print(f"Obiekty: {obj_mask.sum().item()}, Brak obiektów: {noobj_mask.sum().item()}")
+        threshold = 0.3
+        # Uproszczona maska noobj, bez warunku na predykcje
+        noobj_mask = targets[..., 4] == 0
 
+        # Liczba obiektów i brak obiektów
+        obj_count = obj_mask.sum().item()
+        noobj_count = noobj_mask.sum().item()
+        print(f"Obiekty: {obj_count}, Brak obiektów: {noobj_count}")
 
         # Confidence loss
-        pred_conf = torch.sigmoid(predictions[..., 4])  # Upewniamy się, że wartości są w zakresie [0, 1]
+        pred_conf = predictions[..., 4]
         target_conf = targets[..., 4]
-        loss_conf = self.bce(pred_conf[obj_mask], target_conf[obj_mask]) # Use BCEWithLogitsLoss
+        loss_conf = self.bce(pred_conf[obj_mask], target_conf[obj_mask]) if obj_count > 0 else torch.tensor(0.0)
 
-        # No object loss
-        loss_noobj = self.bce(pred_conf[noobj_mask], target_conf[noobj_mask])
+        # No object loss (obsługa przypadku pustej maski)
+        loss_noobj = self.bce(pred_conf[noobj_mask], target_conf[noobj_mask]) if noobj_count > 0 else torch.tensor(0.0)
 
         # Classification loss
         pred_cls = predictions[..., 5:]
         target_cls = targets[..., 5:]
-        loss_class = self.bce(pred_cls[obj_mask], target_cls[obj_mask]) # Use BCEWithLogitsLoss
+        loss_class = self.bce(pred_cls[obj_mask], target_cls[obj_mask]) if obj_count > 0 else torch.tensor(0.0)
 
-        # Localization loss (MSE for bounding box coordinates)
+        # Localization loss
         pred_boxes = predictions[..., :4]
         target_boxes = targets[..., :4]
         pred_boxes_wh = torch.sqrt(torch.abs(pred_boxes[..., 2:4]) + 1e-6)
-        target_boxes_wh = torch.sqrt(target_boxes[..., 2:4])
         target_boxes_wh = torch.sqrt(target_boxes[..., 2:4] + 1e-6)
 
         loss_coord = self.mse(
-            torch.cat((pred_boxes[..., :2], pred_boxes_wh), dim=-1)[obj_mask], 
+            torch.cat((pred_boxes[..., :2], pred_boxes_wh), dim=-1)[obj_mask],
             torch.cat((target_boxes[..., :2], target_boxes_wh), dim=-1)[obj_mask]
-        ) * self.lambda_coord
-
+        ) * self.lambda_coord if obj_count > 0 else torch.tensor(0.0)
 
         # Total loss
         loss = loss_coord + loss_conf + self.lambda_noobj * loss_noobj + loss_class
-        print(f"Loss breakdown: Coord={loss_coord.item():.2f}, Conf={loss_conf.item():.2f}, NoObj={loss_noobj.item():.2f}, Class={loss_class.item():.2f}")
+        print(f"Loss breakdown: Coord={loss_coord.item() if obj_count > 0 else 0.0:.2f}, Conf={loss_conf.item() if obj_count > 0 else 0.0:.2f}, NoObj={loss_noobj.item() if noobj_count > 0 else 0.0:.2f}, Class={loss_class.item() if obj_count > 0 else 0.0:.2f}")
         return loss

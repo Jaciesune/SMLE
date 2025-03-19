@@ -1,64 +1,63 @@
-import argparse
 import torch
 from torch.utils.data import DataLoader
 from torchvision.datasets import CocoDetection
 from torchvision import transforms
-import multiprocessing
+import os
 
-# Domyślna liczba wątków
-DEFAULT_NUM_WORKERS = min(4, multiprocessing.cpu_count() - 2)  # Optymalizacja dla CPU
+def collate_fn(batch):
+    images, targets = zip(*batch)
+    images = list(images)
+    
+    valid_targets = []
+    for target in targets:
+        if isinstance(target, list): 
+            boxes = []
+            labels = []
+            for obj in target:
+                bbox = obj["bbox"]
+                label = obj["category_id"]
+                
+                x_min, y_min, width, height = bbox
+                x_max = x_min + width
+                y_max = y_min + height
 
-# Argumenty wiersza poleceń
-parser = argparse.ArgumentParser(description="Konfiguracja DataLoadera")
-parser.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS, help="Liczba wątków do przetwarzania danych")
-args, _ = parser.parse_known_args()  # Pobieranie argumentów bez błędów w innych skryptach
+                if width > 0 and height > 0:
+                    boxes.append([x_min, y_min, x_max, y_max])
+                    labels.append(label)
 
-# Pobieranie liczby wątków z argumentu
-num_workers = max(0, args.num_workers)  # Zapewnienie, że nie ma wartości ujemnych
+            valid_targets.append({
+                "boxes": torch.tensor(boxes, dtype=torch.float32),
+                "labels": torch.tensor(labels, dtype=torch.int64),
+            })
+        else:
+            valid_targets.append(target)
 
-# Ścieżki do zbiorów treningowych i testowych
-train_images = "dataset/train/images"
-train_annotations = "dataset/train/annotations.json"
-test_images = "dataset/test/images"
-test_annotations = "dataset/test/annotations.json"
+    return images, valid_targets
 
-# Transformacje obrazu (konwersja do tensora)
+def find_dataset_folder():
+    possible_paths = ["dataset", "../dataset", "../../dataset"]
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError("Nie znaleziono folderu dataset!")
+
+dataset_path = find_dataset_folder()
+
+train_images = os.path.join(dataset_path, "train/images")
+train_annotations = os.path.join(dataset_path, "train/annotations.json")
+test_images = os.path.join(dataset_path, "test/images")
+test_annotations = os.path.join(dataset_path, "test/annotations.json")
+
 transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-# Funkcja obsługi błędów w ładowaniu anotacji
-def load_dataset(images_path, annotations_path, transform):
-    try:
-        dataset = CocoDetection(root=images_path, annFile=annotations_path, transform=transform)
-        return dataset
-    except Exception as e:
-        print(f"Błąd wczytywania zbioru {annotations_path}: {e}")
-        return None
+train_dataset = CocoDetection(root=train_images, annFile=train_annotations, transform=transform)
+test_dataset = CocoDetection(root=test_images, annFile=test_annotations, transform=transform)
 
-# Wczytanie zbioru treningowego i testowego
-train_dataset = load_dataset(train_images, train_annotations, transform)
-test_dataset = load_dataset(test_images, test_annotations, transform)
+def get_data_loaders(batch_size=2, num_workers=0):
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
 
-# Funkcja collate_fn do grupowania batchy
-def collate_fn(batch):
-    images, targets = zip(*batch)
-    return list(images), list(targets)
-
-# Pobieranie DataLoaderów
-def get_data_loaders():
-    if train_dataset is None or test_dataset is None:
-        print("Błąd: Jeden z datasetów nie został poprawnie załadowany!")
-        return None, None
-
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=4, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
-
-    print(f"DataLoader gotowy! Trening: {len(train_dataset)} obrazów, Test: {len(test_dataset)} obrazów")
-    print(f"Używana liczba wątków: {num_workers}")
-    
+    print(f"DataLoader gotowy! Liczba obrazów w treningu: {len(train_dataset)}, test: {len(test_dataset)}")
     return train_loader, test_loader
-
-# Uruchamianie testowe
-if __name__ == "__main__":
-    train_loader, test_loader = get_data_loaders()

@@ -2,13 +2,12 @@ import torch
 import torchvision.models.detection
 import torch.optim as optim
 import matplotlib.pyplot as plt
-import cv2
 import numpy as np
-from dataLoader import get_data_loaders
 import argparse
 import time
 import os
 from datetime import datetime
+from dataLoader import get_data_loaders
 
 # Pobranie modelu Faster R-CNN
 def get_model(num_classes, device):
@@ -48,28 +47,6 @@ def train_one_epoch(model, dataloader, optimizer, device):
     print(f"Czas epoki: {epoch_time:.2f}s")
     return total_loss / len(dataloader), batch_losses
 
-# Funkcja testowania modelu (z poprawionym rysowaniem)
-def test_model(model, dataloader, device, model_name):
-    model.eval()
-    os.makedirs("test", exist_ok=True)
-
-    with torch.no_grad():
-        for idx, (images, targets) in enumerate(dataloader):
-            images = [image.to(device) for image in images]
-            outputs = model(images)
-
-            for i, (image, output) in enumerate(zip(images, outputs)):
-                image_np = (image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
-                image_np = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)  # Poprawiony format obrazu
-
-                for box in output["boxes"]:
-                    x_min, y_min, x_max, y_max = map(int, box.cpu().numpy())
-                    cv2.rectangle(image_np, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
-
-                filename = f"test/{model_name}_result_{idx}_{i}.png"
-                cv2.imwrite(filename, image_np)
-                print(f"Zapisano wynik testu: {filename}")
-
 # Funkcja rysowania wykresu strat
 def plot_losses(train_losses, model_name):
     os.makedirs("train", exist_ok=True)
@@ -96,7 +73,7 @@ if __name__ == "__main__":
     device = torch.device("cpu")
 
     print("Wczytywanie danych...")
-    train_loader, test_loader = get_data_loaders(batch_size=args.batch_size, num_workers=args.num_workers)
+    train_loader, val_loader, test_loader = get_data_loaders(batch_size=args.batch_size, num_workers=args.num_workers)
     print("Dane załadowane!")
 
     model = get_model(num_classes=2, device=device)
@@ -130,8 +107,7 @@ if __name__ == "__main__":
         # Rysowanie wykresu strat
         plot_losses(train_losses, custom_name if custom_name else f"faster_rcnn_{timestamp}")
 
-        # Testowanie modelu
-        test_model(model, test_loader, device, custom_name if custom_name else f"faster_rcnn_{timestamp}")
+        print("\nModel zapisany! Jeśli chcesz go przetestować, uruchom `fasterRCNNTest.py`.")
 
     else:
         print("Model nie został zapisany.")

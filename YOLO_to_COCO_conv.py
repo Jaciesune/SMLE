@@ -8,9 +8,9 @@ from PIL import Image
 #output_json = "dataset/train/annotations.json"
 
 # Ścieżki do katalogu dla zbioru testowego (z annotacjami) - odpalic po uruchomieniu treningowego 
-image_dir = "dataset/test/images"
-label_dir = "dataset/test/annotations"
-output_json = "dataset/test/annotations.json"
+image_dir = "dataset/val/images"
+label_dir = "dataset/val/annotations"
+output_json = "dataset/val/annotations.json"
 
 # Definicja kategorii (jedna klasa: "rura")
 categories = [{"id": 1, "name": "rura"}]

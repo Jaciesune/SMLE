@@ -22,7 +22,7 @@ def get_model(num_classes, device):
 # Wizualizacja wyników po każdej epoce
 def visualize_predictions(model, dataloader, device, epoch, model_name, phase="train"):
     model.eval()
-    save_path = f"{phase}/{model_name}/epoch_{epoch}"
+    save_path = f"{phase}/{model_name}/epoch_{epoch:02d}"  # Foldery numerowane 01, 02, ...
     os.makedirs(save_path, exist_ok=True)
 
     with torch.no_grad():
@@ -124,6 +124,14 @@ if __name__ == "__main__":
     torch.set_num_interop_threads(args.num_workers)
     device = torch.device("cpu")
 
+    # Zapytanie o nazwę modelu na początku programu
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    model_name = input(f"Podaj nazwę modelu (Enter dla domyślnej: faster_rcnn_{timestamp}): ").strip() or f"faster_rcnn_{timestamp}"
+
+    # Tworzymy folder dla wyników tej sesji uczenia
+    os.makedirs(f"train/{model_name}", exist_ok=True)
+    os.makedirs(f"val/{model_name}", exist_ok=True)
+
     print("\nWczytywanie danych...")
     train_loader, val_loader, test_loader = get_data_loaders(batch_size=args.batch_size, num_workers=args.num_workers)
     print(f"DataLoader załadowany: Trening: {len(train_loader.dataset)} | Walidacja: {len(val_loader.dataset)} | Test: {len(test_loader.dataset)}")
@@ -136,27 +144,17 @@ if __name__ == "__main__":
     for epoch in range(1, args.epochs + 1):
         loss = train_one_epoch(model, train_loader, optimizer, device, epoch)
         train_losses.append(loss)
-        print(f"Epoka {epoch}/{args.epochs} zakończona, Strata: {loss:.4f}")
 
-        # Wizualizacja wyników po każdej epoce
-        visualize_predictions(model, train_loader, device, epoch, "train_model", "train")
+        # Każda epoka zapisywana w osobnym folderze
+        visualize_predictions(model, train_loader, device, epoch, model_name, "train")
+        visualize_predictions(model, val_loader, device, epoch, model_name, "val")
 
     print("\nTrening zakończony!")
 
-    # Pytanie o zapis modelu
-    save_model = input("\nCzy zapisać model? (Y/N): ").strip().lower()
-    
-    if save_model == "y":
-        os.makedirs("saved_models", exist_ok=True)
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        custom_name = input(f"Podaj nazwę modelu (Enter dla domyślnej: faster_rcnn_{timestamp}): ").strip()
-        model_name = custom_name or f"faster_rcnn_{timestamp}"
+    # Zapis modelu
+    model_filename = f"saved_models/{model_name}.pth"
+    torch.save(model.state_dict(), model_filename)
+    print(f"💾 Model zapisano jako: {model_filename}")
 
-        model_filename = f"saved_models/{model_name}.pth"
-        torch.save(model.state_dict(), model_filename)
-        print(f"Model zapisano jako: {model_filename}")
-
-        # Zapisanie wykresu strat
-        plot_losses(train_losses, model_name)
-    else:
-        print("Model nie został zapisany.")
+    # Zapis wykresu strat
+    plot_losses(train_losses, model_name)

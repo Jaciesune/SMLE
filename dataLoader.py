@@ -23,12 +23,12 @@ def collate_fn(batch):
                 x_max = x_min + width
                 y_max = y_min + height
 
-                # 🔧 Sprawdzenie, czy bounding box jest poprawny
+                # Sprawdzenie, czy bounding box jest poprawny
                 if width > 0 and height > 0 and x_max > x_min and y_max > y_min:
                     boxes.append([x_min, y_min, x_max, y_max])
                     labels.append(label)
                 else:
-                    print(f"⚠️ Usunięto błędny bbox: {bbox}")
+                    print(f"Usunięto błędny bbox: {bbox}")
 
             valid_targets.append({
                 "boxes": torch.tensor(boxes, dtype=torch.float32),

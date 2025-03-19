@@ -12,3 +12,4 @@ model.eval()  # Przełączenie w tryb ewaluacji
 
 print("Model Faster R-CNN załadowany na:", device)
 print("Using DirectML:", device)
+print(model.roi_heads.detections_per_img)

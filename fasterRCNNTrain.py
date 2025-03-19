@@ -154,7 +154,7 @@ if __name__ == "__main__":
     # Zapis modelu
     model_filename = f"saved_models/{model_name}.pth"
     torch.save(model.state_dict(), model_filename)
-    print(f"💾 Model zapisano jako: {model_filename}")
+    print(f"Model zapisano jako: {model_filename}")
 
     # Zapis wykresu strat
     plot_losses(train_losses, model_name)

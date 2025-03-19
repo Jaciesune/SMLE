@@ -4,6 +4,7 @@ from torchvision.datasets import CocoDetection
 from torchvision import transforms
 import os
 from PIL import Image
+from torchvision.transforms import functional as F
 
 def collate_fn(batch):
     images, targets = zip(*batch)
@@ -22,9 +23,12 @@ def collate_fn(batch):
                 x_max = x_min + width
                 y_max = y_min + height
 
-                if width > 0 and height > 0:
+                # 🔧 Sprawdzenie, czy bounding box jest poprawny
+                if width > 0 and height > 0 and x_max > x_min and y_max > y_min:
                     boxes.append([x_min, y_min, x_max, y_max])
                     labels.append(label)
+                else:
+                    print(f"⚠️ Usunięto błędny bbox: {bbox}")
 
             valid_targets.append({
                 "boxes": torch.tensor(boxes, dtype=torch.float32),
@@ -34,7 +38,6 @@ def collate_fn(batch):
             valid_targets.append(target)
 
     return images, valid_targets
-
 def find_dataset_folder():
     possible_paths = ["dataset", "../dataset", "../../dataset"]
     for path in possible_paths:
@@ -53,9 +56,12 @@ val_annotations = os.path.join(dataset_path, "val/annotations.json")
 
 test_images = os.path.join(dataset_path, "test/images")
 
-transform = transforms.Compose([
-    transforms.ToTensor(),
-])
+def custom_transform(image):
+    if isinstance(image, torch.Tensor):  # Jeśli już jest tensorem, zwróć bez zmian
+        return image
+    return F.to_tensor(image)  # Jeśli nie, skonwertuj do tensora
+
+transform = custom_transform
 
 # Wczytywanie train_dataset
 train_dataset = CocoDetection(root=train_images, annFile=train_annotations, transform=transform)

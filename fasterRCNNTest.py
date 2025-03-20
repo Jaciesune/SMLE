@@ -8,8 +8,8 @@ import shutil
 from dataLoader import get_data_loaders
 
 # KONFIGURACJA PROGU PEWNOŚCI
-CONFIDENCE_THRESHOLD = 0.27  # Próg pewności
-NMS_THRESHOLD = 40000 # Ilość propozycji
+CONFIDENCE_THRESHOLD = 0.35  # Próg pewności
+NMS_THRESHOLD = 50000 # Ilość propozycji
 
 # Usunięcie poprzednich wyników testowania
 def clear_previous_results(model_name):
@@ -28,16 +28,17 @@ def load_model(model_path, num_classes=2, device="cpu"):
 
     # Poprawione ustawienia RPN
     if isinstance(model.rpn.pre_nms_top_n, dict):  # Dla nowszych wersji
-        model.rpn.pre_nms_top_n["training"] = NMS_THRESHOLD  # 🔧 Zwiększenie liczby propozycji
+        model.rpn.pre_nms_top_n["training"] = NMS_THRESHOLD  # Zwiększenie liczby propozycji
         model.rpn.pre_nms_top_n["testing"] = NMS_THRESHOLD
-        model.rpn.post_nms_top_n["training"] = NMS_THRESHOLD  # 🔧 Zwiększenie po NMS
+        model.rpn.post_nms_top_n["training"] = NMS_THRESHOLD  # Zwiększenie po NMS
         model.rpn.post_nms_top_n["testing"] = NMS_THRESHOLD
     else:  # Dla starszych wersji
         model.rpn.pre_nms_top_n = lambda: NMS_THRESHOLD
         model.rpn.post_nms_top_n = lambda: NMS_THRESHOLD
 
-    model.roi_heads.score_thresh = CONFIDENCE_THRESHOLD  # 🔧 Użycie zmiennej dla progu pewności
-    model.roi_heads.nms_thresh = 0.4  # 🔧 Zmniejszenie progu NMS (ograniczenie nakładania ramek)
+    model.roi_heads.score_thresh = CONFIDENCE_THRESHOLD  # Użycie zmiennej dla progu pewności
+    model.roi_heads.nms_thresh = 0.4  # Zmniejszenie progu NMS (ograniczenie nakładania ramek)
+    model.roi_heads.detections_per_img = 5000 # Ilość znalezionych elementów na obrazie
 
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
@@ -90,7 +91,7 @@ def list_saved_models():
 # Wybór modelu przez użytkownika
 def choose_model(models):
     while True:
-        choice = input("\n🔍 Wybierz numer modelu do testowania: ").strip()
+        choice = input("\nWybierz numer modelu do testowania: ").strip()
         if choice.isdigit() and 1 <= int(choice) <= len(models):
             return models[int(choice) - 1]
         print("Błędny wybór, spróbuj ponownie.")
@@ -108,7 +109,7 @@ if __name__ == "__main__":
     model = load_model(f"saved_models/{selected_model}", device=device)
 
     print(f"\nZaładowano model: {selected_model}")
-    print("🔎 Rozpoczynam testowanie modelu...")
+    print("Rozpoczynam testowanie modelu...")
 
     test_model(model, test_loader, device, selected_model.split(".pth")[0])
     print("\nTestowanie zakończone!")

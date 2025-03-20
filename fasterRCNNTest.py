@@ -8,8 +8,8 @@ import shutil
 from dataLoader import get_data_loaders
 
 # KONFIGURACJA PROGU PEWNOŚCI
-CONFIDENCE_THRESHOLD = 0.35  # Próg pewności
-NMS_THRESHOLD = 50000 # Ilość propozycji
+CONFIDENCE_THRESHOLD = 0.9  # Próg pewności
+NMS_THRESHOLD = 900000 # Ilość propozycji
 
 # Usunięcie poprzednich wyników testowania
 def clear_previous_results(model_name):
@@ -37,7 +37,7 @@ def load_model(model_path, num_classes=2, device="cpu"):
         model.rpn.post_nms_top_n = lambda: NMS_THRESHOLD
 
     model.roi_heads.score_thresh = CONFIDENCE_THRESHOLD  # Użycie zmiennej dla progu pewności
-    model.roi_heads.nms_thresh = 0.4  # Zmniejszenie progu NMS (ograniczenie nakładania ramek)
+    model.roi_heads.nms_thresh = 0.2  # Zmniejszenie progu NMS (ograniczenie nakładania ramek)
     model.roi_heads.detections_per_img = 5000 # Ilość znalezionych elementów na obrazie
 
     model.load_state_dict(torch.load(model_path, map_location=device))

@@ -15,6 +15,7 @@ venv/
 ENV/
 env/
 SMLE_ENV_3_12/
+dml_venv/
 *.venv
 
 # 🏗 Pliki zależności i buildów

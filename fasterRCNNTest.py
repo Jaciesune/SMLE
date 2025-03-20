@@ -8,7 +8,7 @@ import shutil
 from dataLoader import get_data_loaders
 
 # KONFIGURACJA PROGU PEWNOŚCI
-CONFIDENCE_THRESHOLD = 0.9  # Próg pewności
+CONFIDENCE_THRESHOLD = 0.1  # Próg pewności
 NMS_THRESHOLD = 900000 # Ilość propozycji
 
 # Usunięcie poprzednich wyników testowania

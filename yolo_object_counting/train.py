@@ -1,187 +1,148 @@
+import os
 import torch
+import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torchvision import transforms
 from models.yolo import YOLO
 from utils.dataset import YOLODataset
 from utils.loss import YOLOLoss
-from torchvision import transforms
-import matplotlib.pyplot as plt
-import random
 import numpy as np
-import cv2
-import os
-import matplotlib.pyplot as plt
-loss_history = []
 
+def generate_anchors(dataset, num_anchors=8, grid_sizes=[104, 52, 26, 13]):
+    """
+    Generuje anchory na podstawie danych treningowych.
+    """
+    all_boxes = []
+    for i in range(len(dataset)):
+        _, target = dataset[i]
+        for box in target:
+            if len(box) > 0:
+                w, h = box[3], box[4]  # width, height
+                all_boxes.append([w, h])
+    
+    if len(all_boxes) == 0:
+        return torch.tensor([])
 
-def collate_fn(batch):
-    images = [item["image"] for item in batch]
-    boxes = [item["boxes"] for item in batch]
+    boxes = np.array(all_boxes)
+    kmeans = KMeans(n_clusters=num_anchors, random_state=0).fit(boxes)
+    anchors = kmeans.cluster_centers_
+    anchors = torch.tensor(anchors, dtype=torch.float32)
+    
+    print(f"Wygenerowane anchory (width, height): {anchors.numpy()}")
+    return anchors
 
+def custom_collate_fn(batch):
+    """
+    Niestandardowa funkcja kolacji dla DataLoader.
+    Zachowuje obrazy jako tensor [batch_size, C, H, W], a bounding boxy jako listę tensorów.
+    """
+    images = []
+    targets = []
+    
+    for img, boxes in batch:
+        images.append(img)
+        targets.append(boxes)
+    
+    # Złóż obrazy w tensor [batch_size, C, H, W]
     images = torch.stack(images, dim=0)
-    return {"image": images, "boxes": boxes}
+    
+    # Zachowaj targets jako listę tensorów
+    return images, targets
 
-def encode_targets(targets, grid_size, num_anchors, num_classes):
+def format_targets(targets, grid_sizes, num_anchors, num_classes, device):
+    """
+    Formatuje targety do postaci odpowiedniej dla YOLO.
+    """
     batch_size = len(targets)
-    target_tensor = torch.zeros((batch_size, grid_size, grid_size, num_anchors, 5 + num_classes))
+    formatted_targets = []
+    
+    for scale_idx, grid_size in enumerate(grid_sizes):
+        target_scale = torch.zeros(batch_size, grid_size, grid_size, num_anchors, 6, device=device)
+        for b in range(batch_size):
+            for box in targets[b]:
+                if len(box) == 0:
+                    continue
+                class_id, x, y, w, h = box
+                # Oblicz pozycję w siatce
+                grid_x = int(x * grid_size)
+                grid_y = int(y * grid_size)
+                if grid_x >= grid_size or grid_y >= grid_size:
+                    continue
+                # Znajdź najlepszy anchor
+                best_iou = 0
+                best_anchor = 0
+                for anchor_idx in range(num_anchors):
+                    anchor_w, anchor_h = anchors[anchor_idx]
+                    iou = min(w / anchor_w, anchor_w / w) * min(h / anchor_h, anchor_h / h)
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_anchor = anchor_idx
+                # Wypełnij target
+                target_scale[b, grid_y, grid_x, best_anchor, 0] = x * grid_size - grid_x
+                target_scale[b, grid_y, grid_x, best_anchor, 1] = y * grid_size - grid_y
+                target_scale[b, grid_y, grid_x, best_anchor, 2] = torch.log(w / anchors[best_anchor, 0] + 1e-16)
+                target_scale[b, grid_y, grid_x, best_anchor, 3] = torch.log(h / anchors[best_anchor, 1] + 1e-16)
+                target_scale[b, grid_y, grid_x, best_anchor, 4] = 1.0  # Obiekt jest obecny
+                target_scale[b, grid_y, grid_x, best_anchor, 5] = class_id
+        formatted_targets.append(target_scale)
+        print(f"Target shape for scale {scale_idx}: {target_scale.shape}")
+    
+    return formatted_targets
 
-    for b, boxes in enumerate(targets):
-        for box in boxes:
-            cls, x_center, y_center, width, height = box
-
-            # Calculate grid cell indices
-            grid_x = int(x_center * grid_size)
-            grid_y = int(y_center * grid_size)
-
-            # Ensure grid indices are within valid range
-            grid_x = min(grid_size - 1, max(0, grid_x))
-            grid_y = min(grid_size - 1, max(0, grid_y))
-
-            # Choose the best anchor (simplified for now)
-            best_anchor = 0
-
-            # Assign values to the target tensor
-            target_tensor[b, grid_y, grid_x, best_anchor, 0] = x_center
-            target_tensor[b, grid_y, grid_x, best_anchor, 1] = y_center
-            target_tensor[b, grid_y, grid_x, best_anchor, 2] = width
-            target_tensor[b, grid_y, grid_x, best_anchor, 3] = height
-            target_tensor[b, grid_y, grid_x, best_anchor, 4] = 1  # Confidence
-            target_tensor[b, grid_y, grid_x, best_anchor, 5 + int(cls)] = 1  # Class
-    return target_tensor
-
-def visualize_predictions(model, dataloader, device):
-    model.eval()
-    with torch.no_grad():
-        for batch in dataloader:
-            images = batch['image'].to(device)
-            outputs = model(images).cpu().numpy()
-
-            for i in range(len(images)):
-                image = images[i].permute(1, 2, 0).cpu().numpy()
-                predictions = outputs[i]
-
-                plt.imshow(image)
-
-                for anchor in range(predictions.shape[2]):
-                    for grid_y in range(predictions.shape[0]):
-                        for grid_x in range(predictions.shape[1]):
-                            if predictions.shape[-1] < 5:
-                                continue
-                            
-                            pred_box = predictions[grid_y, grid_x, anchor]
-                            confidence = torch.sigmoid(torch.tensor(pred_box[4])).item()  # Poprawna normalizacja
-
-                            if confidence > 0.7:  # Zwiększono próg do 0.7
-                                x_center_norm, y_center_norm, width_norm, height_norm = pred_box[:4]
-                                h, w, _ = image.shape
-                                x_center = int(x_center_norm * w)
-                                y_center = int(y_center_norm * h)
-                                width = int(width_norm * w)
-                                height = int(height_norm * h)
-
-                                x_min = x_center - width // 2
-                                y_min = y_center - height // 2
-                #                 rect = plt.Rectangle((x_min, y_min), width, height,
-                #                                      color='green', fill=False)
-                #                 plt.gca().add_patch(rect)
-                #                 plt.text(x_min, y_min - 5, f"Conf: {confidence:.2f}", color='green', fontsize=8)
-
-                # plt.title("Predykcje na zestawie testowym")
-                # plt.show()
-                break
-
-def transform_annotations(boxes, image_width, image_height, transform):
-    """Aktualizuje bounding boxy po transformacjach."""
-    new_boxes = []
-    for box in boxes:
-        cls_id, x_center, y_center, width, height = box
-
-        # Konwersja do formatu (x1, y1, x2, y2)
-        x1 = (x_center - width / 2) * image_width
-        y1 = (y_center - height / 2) * image_height
-        x2 = (x_center + width / 2) * image_width
-        y2 = (y_center + height / 2) * image_height
-
-        # Transformacja bounding boxa (odkomentowano i poprawiono)
-        transformed_box = transform.apply_box([x1, y1, x2, y2])
-        new_x_center = ((transformed_box[0] + transformed_box[2]) / 2) / image_width
-        new_y_center = ((transformed_box[1] + transformed_box[3]) / 2) / image_height
-        new_width = (transformed_box[2] - transformed_box[0]) / image_width
-        new_height = (transformed_box[3] - transformed_box[1]) / image_height
-        new_boxes.append([cls_id, new_x_center, new_y_center, new_width, new_height])
-    return new_boxes
-
-def train(epochs=50, batch_size=16, lr=5e-5, input_size=(416, 416)):
-    train_images = 'data/images/train'
-    train_labels = 'data/labels/train'
-
-    dataset = YOLODataset(train_images, train_labels, input_size=input_size)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=collate_fn)
-
-    model = YOLO(num_classes=1)
+def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    criterion = YOLOLoss(lambda_coord=5, lambda_noobj=0.5)
-
-    best_loss = float('inf')
-    patience = 10  # Liczba epok bez poprawy przed wczesnym zatrzymaniem
-    trigger_times = 0
-
-    for epoch in range(epochs):
-        running_loss = 0.0
-        for batch in dataloader:
-            images = batch['image'].to(device)
-            targets = batch['boxes']
-
+    
+    # Dataset i DataLoader
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+    ])
+    train_dataset = YOLODataset("data/images/train/", "data/labels/train/", transform=transform)
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0, collate_fn=custom_collate_fn)
+    
+    # Generowanie anchorów
+    global anchors
+    anchors = generate_anchors(train_dataset, num_anchors=8)  # 8 anchorów
+    anchors = anchors.to(device)
+    
+    # Model
+    model = YOLO(num_classes=1, num_anchors=8).to(device)  # 8 anchorów
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    criterion = YOLOLoss(lambda_coord=2.0, lambda_noobj=1.0).to(device)
+    
+    grid_sizes = [104, 52, 26, 13]
+    
+    num_epochs = 50
+    for epoch in range(num_epochs):
+        model.train()
+        total_loss = 0
+        for batch_idx, (images, targets) in enumerate(train_loader):
+            images = images.to(device)
+            targets = [[box.to(device) for box in target] for target in targets]
+            
             optimizer.zero_grad()
             outputs = model(images)
-
-            grid_size = 416 // 16
-            formatted_targets = encode_targets(targets, grid_size=grid_size, num_anchors=3, num_classes=1).to(device)
-
+            
+            # Formatowanie targetów
+            formatted_targets = format_targets(targets, grid_sizes, num_anchors=8, num_classes=1, device=device)
+            
+            # Obliczanie straty
             loss = criterion(outputs, formatted_targets)
-            if torch.isnan(loss) or torch.isinf(loss):
-                print("Warning: Loss is NaN or Inf, skipping this batch!")
-                continue
-
+            
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
-            running_loss += loss.item()
+            
+            total_loss += loss.item()
+            
+            if batch_idx % 10 == 0:
+                print(f"Epoch [{epoch+1}/{num_epochs}], Batch [{batch_idx}/{len(train_loader)}], Loss: {loss.item():.4f}")
+        
+        avg_loss = total_loss / len(train_loader)
+        print(f"Epoch [{epoch+1}/{num_epochs}], Average Loss: {avg_loss:.4f}")
+        
+        # Zapisz model
+        torch.save(model.state_dict(), "yolo_model.pth")
 
-        avg_loss = running_loss / len(dataloader) if running_loss > 0 else 0.0
-        print(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f}")
-        loss_history.append(avg_loss)
-
-        # Wczesne zatrzymanie
-        if avg_loss < best_loss:
-            best_loss = avg_loss
-            trigger_times = 0
-            torch.save(model.state_dict(), "yolo_model.pth")
-        else:
-            trigger_times += 1
-            if trigger_times >= patience:
-                print(f"Wczesne zatrzymanie na epoce {epoch+1}!")
-                break
-
-        if epoch % 2 == 0:
-            visualize_predictions(model, dataloader, device)
-
-    plt.plot(range(1, len(loss_history) + 1), loss_history, marker='o', linestyle='-')
-    plt.xlabel("Epoka")
-    plt.ylabel("Loss")
-    plt.title("Zmiana lossu podczas treningu")
-    plt.grid()
-    plt.show()
-
-if __name__ == '__main__':
-    # Ustawienie ziarna losowości dla powtarzalności wyników
-    seed_value = 42
-    torch.manual_seed(seed_value)
-    np.random.seed(seed_value)
-    random.seed(seed_value)
-    torch.cuda.manual_seed_all(seed_value)
-
+if __name__ == "__main__":
+    from sklearn.cluster import KMeans
     train()

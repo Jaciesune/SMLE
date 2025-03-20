@@ -1,76 +1,72 @@
 import torch
 
-def debug_boxes(box1, box2):
-    print("\n🧐 DEBUG - Sample Box1 & Box2 before IoU computation:")
-    print(f"Box1:\n{box1}")
-    print(f"Box2:\n{box2}")
-    print(f"Box1 min: {box1.min()}, max: {box1.max()}")
-    print(f"Box2 min: {box2.min()}, max: {box2.max()}")
-
-def box_iou(box1, box2):
-    """Oblicza IoU dla bboxów w formacie (x1, y1, x2, y2)"""
-    if box2.shape[0] == 0:
-        return torch.zeros((1, box1.shape[0]))
-
-    # 🔍 Debug: sprawdź, czy boxy mają poprawne wartości
-    debug_boxes(box1, box2)
-
-    # Oblicz przecięcie bboxów
-    inter_x1 = torch.max(box1[:, 0].unsqueeze(1), box2[:, 0].unsqueeze(0))
-    inter_y1 = torch.max(box1[:, 1].unsqueeze(1), box2[:, 1].unsqueeze(0))
-    inter_x2 = torch.min(box1[:, 2].unsqueeze(1), box2[:, 2].unsqueeze(0))
-    inter_y2 = torch.min(box1[:, 3].unsqueeze(1), box2[:, 3].unsqueeze(0))
-
-    inter_area = (inter_x2 - inter_x1).clamp(0) * (inter_y2 - inter_y1).clamp(0)
-
-    # Oblicz pola bboxów
-    box1_area = (box1[:, 2] - box1[:, 0]) * (box1[:, 3] - box1[:, 1])
-    box2_area = (box2[:, 2] - box2[:, 0]) * (box2[:, 3] - box2[:, 1])
-
-    union_area = box1_area.unsqueeze(1) + box2_area.unsqueeze(0) - inter_area
-
-    iou = inter_area / (union_area + 1e-6)
-
-    # 🛠️ Debug: Sprawdź podejrzane IoU
-    if (iou < 0).any():
-        print(f"⚠️ BŁĄD! Znaleziono ujemne wartości IoU:\n{iou}")
-
-    return iou
-
-
-
-def non_max_suppression(predictions, conf_threshold=0.9, iou_threshold=0.5):  # Zwiększono conf_threshold
-    output = []
+def soft_nms(predictions, conf_threshold=0.3, iou_threshold=0.6, sigma=0.5):
+    """
+    Wykonuje Soft-NMS na predykcjach modelu YOLO.
     
-    for pred in predictions:
-        if pred is None or not len(pred):
-            output.append(None)
-            continue
+    Args:
+        predictions (tensor): Tensor z predykcjami o kształcie [num_boxes, 6]
+                             (x_min, y_min, x_max, y_max, confidence, class_score).
+        conf_threshold (float): Próg ufności dla filtrowania predykcji.
+        iou_threshold (float): Próg IoU dla Soft-NMS.
+        sigma (float): Parametr kontrolujący miękkie tłumienie.
+    
+    Returns:
+        Tensor: Przefiltrowane predykcje po Soft-NMS.
+    """
+    if len(predictions) == 0:
+        return torch.tensor([], device=predictions.device)
 
-        scores = pred[:, 4]
-        mask = scores > conf_threshold
-        pred = pred[mask]
+    # Filtruj predykcje na podstawie progu ufności
+    confidences = predictions[:, 4]
+    mask = confidences >= conf_threshold
+    predictions = predictions[mask]
+    if len(predictions) == 0:
+        return torch.tensor([], device=predictions.device)
 
-        if not len(pred):
-            output.append(None)
-            continue
+    # Sortuj predykcje według ufności (malejąco)
+    _, indices = torch.sort(confidences[mask], descending=True)
+    predictions = predictions[indices]
 
-        _, indices = scores[mask].sort(descending=True)
-        pred = pred[indices]
-        
-        keep = []
-        while pred.size(0):
-            keep.append(pred[0].unsqueeze(0))
-            if len(pred) == 1:
-                break
+    keep = []
+    while len(predictions) > 0:
+        # Weź predykcję z najwyższą ufnością
+        keep.append(predictions[0])
+        if len(predictions) == 1:
+            break
 
-            box1 = pred[0, :4].unsqueeze(0)
-            box2 = pred[1:, :4]
-            ious = box_iou(box1, box2)
-            filtered_pred = pred[1:][ious[0] < iou_threshold]
-            pred = filtered_pred
+        # Oblicz IoU między wybraną predykcją a pozostałymi
+        ious = torch.tensor([calculate_iou(predictions[0, :4], pred[:4]) for pred in predictions[1:]], device=predictions.device)
 
-        final_detections = torch.cat(keep) if len(keep) else None
-        output.append(final_detections)
+        # Obniż ufność predykcji, które mają wysokie IoU
+        weights = torch.exp(-(ious ** 2) / sigma)
+        predictions[1:, 4] = predictions[1:, 4] * weights
 
-    return output
+        # Usuń predykcje z ufnością poniżej progu
+        mask = predictions[1:, 4] >= conf_threshold
+        predictions = predictions[1:][mask]
+
+    return torch.stack(keep) if keep else torch.tensor([], device=predictions.device)
+
+def calculate_iou(box1, box2):
+    """
+    Oblicza IoU (Intersection over Union) między dwoma bounding boxami.
+    
+    Args:
+        box1 (tensor): Pierwszy bounding box [x_min, y_min, x_max, y_max].
+        box2 (tensor): Drugi bounding box [x_min, y_min, x_max, y_max].
+    
+    Returns:
+        float: Wartość IoU.
+    """
+    x1 = torch.max(box1[0], box2[0])
+    y1 = torch.max(box1[1], box2[1])
+    x2 = torch.min(box1[2], box2[2])
+    y2 = torch.min(box1[3], box2[3])
+
+    intersection = torch.clamp(x2 - x1, min=0) * torch.clamp(y2 - y1, min=0)
+    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    union = area1 + area2 - intersection
+
+    return intersection / (union + 1e-6)

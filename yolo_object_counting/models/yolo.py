@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
 
 class YOLO(nn.Module):
-    def __init__(self, num_classes=1, num_anchors=9):
+    def __init__(self, num_classes=1, num_anchors=8):
         super(YOLO, self).__init__()
         self.num_classes = num_classes
         self.num_anchors = num_anchors
@@ -69,17 +68,21 @@ class YOLO(nn.Module):
         batch_size, _, grid_height, grid_width = out_104.size()
         out_104 = out_104.view(batch_size, self.num_anchors, 5 + self.num_classes, grid_height, grid_width)
         out_104 = out_104.permute(0, 3, 4, 1, 2).contiguous()
+        out_104[..., 0:2] = torch.sigmoid(out_104[..., 0:2])  # Normalizacja x, y do [0, 1]
 
         batch_size, _, grid_height, grid_width = out_52.size()
         out_52 = out_52.view(batch_size, self.num_anchors, 5 + self.num_classes, grid_height, grid_width)
         out_52 = out_52.permute(0, 3, 4, 1, 2).contiguous()
+        out_52[..., 0:2] = torch.sigmoid(out_52[..., 0:2])
 
         batch_size, _, grid_height, grid_width = out_26.size()
         out_26 = out_26.view(batch_size, self.num_anchors, 5 + self.num_classes, grid_height, grid_width)
         out_26 = out_26.permute(0, 3, 4, 1, 2).contiguous()
+        out_26[..., 0:2] = torch.sigmoid(out_26[..., 0:2])
 
         batch_size, _, grid_height, grid_width = out_13.size()
         out_13 = out_13.view(batch_size, self.num_anchors, 5 + self.num_classes, grid_height, grid_width)
         out_13 = out_13.permute(0, 3, 4, 1, 2).contiguous()
+        out_13[..., 0:2] = torch.sigmoid(out_13[..., 0:2])
 
         return [out_104, out_52, out_26, out_13]

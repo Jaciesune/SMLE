@@ -8,28 +8,21 @@ from models.yolo import YOLO
 from utils.dataset import YOLODataset
 from utils.loss import YOLOLoss
 import numpy as np
+from models.yolo import YOLO
 
-def generate_anchors(dataset, num_anchors=8, grid_sizes=[104, 52, 26, 13]):
-    """
-    Generuje anchory na podstawie danych treningowych.
-    """
-    all_boxes = []
-    for i in range(len(dataset)):
-        _, target = dataset[i]
-        for box in target:
-            if len(box) > 0:
-                w, h = box[3], box[4]  # width, height
-                all_boxes.append([w, h])
-    
-    if len(all_boxes) == 0:
-        return torch.tensor([])
-
-    boxes = np.array(all_boxes)
-    kmeans = KMeans(n_clusters=num_anchors, random_state=0).fit(boxes)
-    anchors = kmeans.cluster_centers_
-    anchors = torch.tensor(anchors, dtype=torch.float32)
-    
-    print(f"Wygenerowane anchory (width, height): {anchors.numpy()}")
+def generate_anchors(dataset, num_anchors=8, grid_sizes = [52, 26, 13, 7]):
+    # Ręcznie zdefiniowane anchory
+    anchors = torch.tensor([
+        [0.03, 0.05],
+        [0.05, 0.08],
+        [0.07, 0.10],
+        [0.02, 0.03],
+        [0.04, 0.06],
+        [0.08, 0.12],
+        [0.06, 0.09],
+        [0.10, 0.15]
+    ], dtype=torch.float32)
+    print(f"Używane anchory (width, height): {anchors.numpy()}")
     return anchors
 
 def custom_collate_fn(batch):
@@ -51,9 +44,6 @@ def custom_collate_fn(batch):
     return images, targets
 
 def format_targets(targets, grid_sizes, num_anchors, num_classes, device):
-    """
-    Formatuje targety do postaci odpowiedniej dla YOLO.
-    """
     batch_size = len(targets)
     formatted_targets = []
     
@@ -79,8 +69,9 @@ def format_targets(targets, grid_sizes, num_anchors, num_classes, device):
                         best_iou = iou
                         best_anchor = anchor_idx
                 # Wypełnij target
-                target_scale[b, grid_y, grid_x, best_anchor, 0] = x * grid_size - grid_x
-                target_scale[b, grid_y, grid_x, best_anchor, 1] = y * grid_size - grid_y
+                # Normalizuj x, y do [0, 1] w obrębie komórki
+                target_scale[b, grid_y, grid_x, best_anchor, 0] = (x * grid_size - grid_x)  # x w [0, 1]
+                target_scale[b, grid_y, grid_x, best_anchor, 1] = (y * grid_size - grid_y)  # y w [0, 1]
                 target_scale[b, grid_y, grid_x, best_anchor, 2] = torch.log(w / anchors[best_anchor, 0] + 1e-16)
                 target_scale[b, grid_y, grid_x, best_anchor, 3] = torch.log(h / anchors[best_anchor, 1] + 1e-16)
                 target_scale[b, grid_y, grid_x, best_anchor, 4] = 1.0  # Obiekt jest obecny
@@ -107,12 +98,12 @@ def train():
     
     # Model
     model = YOLO(num_classes=1, num_anchors=8).to(device)  # 8 anchorów
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    criterion = YOLOLoss(lambda_coord=2.0, lambda_noobj=1.0).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
+    criterion = YOLOLoss(lambda_coord=2.0, lambda_noobj=0.1).to(device)
     
     grid_sizes = [104, 52, 26, 13]
     
-    num_epochs = 50
+    num_epochs = 100  # Zwiększ do 100 epok
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0

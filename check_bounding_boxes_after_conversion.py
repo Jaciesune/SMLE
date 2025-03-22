@@ -42,7 +42,7 @@ def ckeck_annotations(image_dir, annotations_path, output_dir):
         output_path = os.path.join(output_dir, image_file)
         cv2.imwrite(output_path, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
 
-    print(f"✅ Wszystkie obrazy zostały sprawdzone i zapisane w folderze: {output_dir}")
+    print(f"Wszystkie obrazy zostały sprawdzone i zapisane w folderze: {output_dir}")
 
 # Sprawdzenie zbioru treningowego
 ckeck_annotations(

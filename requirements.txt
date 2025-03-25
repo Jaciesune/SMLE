@@ -54,4 +54,3 @@ torchvision            0.19.1
 tqdm                   4.67.1
 typing_extensions      4.12.2
 tzdata                 2025.1
-(SMLE_ENV_3_12) PS D:\Studia\Semestr VI\Project> 

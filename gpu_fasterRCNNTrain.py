@@ -121,7 +121,7 @@ if __name__ == "__main__":
 
     os.makedirs(f"train/{model_name}", exist_ok=True)
     os.makedirs(f"val/{model_name}", exist_ok=True)
-    os.makedirs("saved_models", exist_ok=True)
+    os.makedirs(f"saved_models/{model_name}", exist_ok=True)
 
     print("\nWczytywanie danych...")
     train_loader, val_loader, _ = get_data_loaders(batch_size=args.batch_size, num_workers=args.num_workers)
@@ -145,9 +145,14 @@ if __name__ == "__main__":
 
         print(f"Epoka {epoch}/{args.epochs} - Strata treningowa: {train_loss:.4f}, Strata walidacyjna: {val_loss:.4f}, Pred: {pred_count}, GT: {gt_count}")
 
-    model_filename = f"saved_models/{model_name}.pth"
-    torch.save(model.state_dict(), model_filename)
-    print(f"Model zapisano jako: {model_filename}")
+        if epoch % 5 == 0:
+            checkpoint_path = f"saved_models/{model_name}/model_epoch_{epoch}.pth"
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"Zapisano model po epoce {epoch}: {checkpoint_path}")
+
+    final_model_path = f"saved_models/{model_name}/model_final.pth"
+    torch.save(model.state_dict(), final_model_path)
+    print(f"Model końcowy zapisano jako: {final_model_path}")
 
     plt.figure(figsize=(10, 5))
     plt.plot(train_losses, label="Strata treningowa")

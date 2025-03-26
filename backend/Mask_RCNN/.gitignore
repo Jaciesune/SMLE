@@ -55,6 +55,7 @@ checkpoints/
 debug.log
 tests/__pycache__/
 tests/output/
+logs/
 
 # ⚠️ Pliki specyficzne dla systemów operacyjnych
 .DS_Store

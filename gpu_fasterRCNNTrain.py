@@ -31,7 +31,7 @@ def get_model(num_classes, device):
     model.roi_heads.detections_per_img = 5000
     model.roi_heads.score_thresh = CONFIDENCE_THRESHOLD
     model.to(device)
-    print(f"Model działa na: {device}")
+    print(f"Model działa na: {device} ({torch.cuda.get_device_name(device) if device.type == 'cuda' else 'CPU'})")
     return model
 
 # Funkcja walidacji
@@ -108,7 +108,13 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=10, help="Liczba epok treningowych")
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+        torch.cuda.set_device(device)
+        print(f"Używana karta graficzna: {torch.cuda.get_device_name(device)}")
+    else:
+        device = torch.device("cpu")
+        print("CUDA niedostępne - używana zostanie jednostka CPU")
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model_name = input(f"Podaj nazwę modelu (Enter dla domyślnej: faster_rcnn_{timestamp}): ").strip() or f"faster_rcnn_{timestamp}"

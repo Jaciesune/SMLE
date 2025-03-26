@@ -183,6 +183,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.001, help="Początkowa wartość learning rate")
     parser.add_argument("--patience", type=int, default=3, help="Liczba epok bez poprawy dla Early Stopping")
     parser.add_argument("--coco_gt_path", type=str, default="../data/val/annotations/instances_val.json", help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
+    parser.add_argument("--num_augmentations", type=int, default=1, help="Liczba augmentacji na obraz")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -194,8 +195,12 @@ if __name__ == "__main__":
     os.makedirs("../logs/saved_models", exist_ok=True)
 
     print("\nWczytywanie danych...")
-    train_loader, val_loader = get_data_loaders(args.dataset_dir, batch_size=args.batch_size, num_workers=args.num_workers)
-
+    train_loader, val_loader = get_data_loaders(
+        args.dataset_dir, 
+        batch_size=args.batch_size, 
+        num_workers=args.num_workers, 
+        num_augmentations=args.num_augmentations
+    )
     model = get_model(num_classes=2, device=device)  # Tło + rura
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
 

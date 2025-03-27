@@ -3,55 +3,45 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import CocoDetection
 from torchvision import transforms
 import os
-from PIL import Image
+from PIL import Image, ImageFilter
 from torchvision.transforms import functional as F
 import random
 import torchvision.transforms.v2 as transforms_v2
 import numpy as np
-import torchvision.transforms.functional as TF
 import cv2
 
-def collate_fn(batch):
-    images, targets = zip(*batch)
-    images = list(images)
-    valid_targets = []
-    for target in targets:
-        if isinstance(target, dict):
-            valid_targets.append(target)
-        else:
-            boxes = []
-            labels = []
-            for obj in target:
-                bbox = obj["bbox"]
-                label = obj["category_id"]
-                x_min, y_min, width, height = bbox
-                x_max = x_min + width
-                y_max = y_min + height
-                if width > 0 and height > 0 and x_max > x_min and y_max > y_min:
-                    boxes.append([x_min, y_min, x_max, y_max])
-                    labels.append(label)
-            valid_targets.append({
-                "boxes": torch.tensor(boxes, dtype=torch.float32),
-                "labels": torch.tensor(labels, dtype=torch.int64),
-            })
-    return images, valid_targets
+# --- AUGMENTACJE DODATKOWE ---
+class RandomColorJitter:
+    def __init__(self, brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05, p=0.5):
+        self.transform = transforms.ColorJitter(brightness, contrast, saturation, hue)
+        self.p = p
 
-def find_dataset_folder():
-    possible_paths = ["dataset", "../dataset", "../../dataset"]
-    for path in possible_paths:
-        if os.path.exists(path):
-            return path
-    raise FileNotFoundError("Nie znaleziono folderu dataset!")
+    def __call__(self, image, target):
+        if random.random() < self.p:
+            image = self.transform(image)
+        return image, target
 
-dataset_path = find_dataset_folder()
+class RandomGaussianBlur:
+    def __init__(self, p=0.3):
+        self.p = p
 
-train_images = os.path.join(dataset_path, "train/images")
-train_annotations = os.path.join(dataset_path, "train/annotations.json")
+    def __call__(self, image, target):
+        if random.random() < self.p:
+            image = image.filter(ImageFilter.GaussianBlur(radius=1))
+        return image, target
 
-val_images = os.path.join(dataset_path, "val/images")
-val_annotations = os.path.join(dataset_path, "val/annotations.json")
+class RandomHorizontalFlip:
+    def __init__(self, p=0.5):
+        self.p = p
 
-test_images = os.path.join(dataset_path, "test/images")
+    def __call__(self, image, target):
+        if random.random() < self.p:
+            image = F.hflip(image)
+            w, _ = image.size
+            boxes = target["boxes"]
+            boxes[:, [0, 2]] = w - boxes[:, [2, 0]]
+            target["boxes"] = boxes
+        return image, target
 
 class RandomPerspectiveWithBoxes:
     def __init__(self, distortion_scale=0.5, p=0.5):
@@ -94,10 +84,35 @@ class RandomPerspectiveWithBoxes:
                 target["boxes"] = torch.tensor(new_boxes, dtype=torch.float32)
         return image, target
 
+# --- KOMBINACJA AUGMENTACJI ---
 def custom_transform(image, target):
-    image, target = RandomPerspectiveWithBoxes(p=0.3)(image, target)
+    for aug in [
+        RandomPerspectiveWithBoxes(p=0.3),
+        RandomHorizontalFlip(p=0.5),
+        RandomColorJitter(p=0.5),
+        RandomGaussianBlur(p=0.3),
+    ]:
+        image, target = aug(image, target)
     image = F.to_tensor(image)
     return image, target
+
+# --- COCO DANE ---
+def collate_fn(batch):
+    return tuple(zip(*batch))
+
+def find_dataset_folder():
+    possible_paths = ["dataset", "../dataset", "../../dataset"]
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError("Nie znaleziono folderu dataset!")
+
+dataset_path = find_dataset_folder()
+train_images = os.path.join(dataset_path, "train/images")
+train_annotations = os.path.join(dataset_path, "train/annotations.json")
+val_images = os.path.join(dataset_path, "val/images")
+val_annotations = os.path.join(dataset_path, "val/annotations.json")
+test_images = os.path.join(dataset_path, "test/images")
 
 class CocoDetectionWithTransform(CocoDetection):
     def __init__(self, root, annFile, transform=None):
@@ -106,7 +121,6 @@ class CocoDetectionWithTransform(CocoDetection):
 
     def __getitem__(self, index):
         image, anns = super().__getitem__(index)
-
         boxes = []
         labels = []
         for obj in anns:
@@ -118,37 +132,20 @@ class CocoDetectionWithTransform(CocoDetection):
             if width > 0 and height > 0 and x_max > x_min and y_max > y_min:
                 boxes.append([x_min, y_min, x_max, y_max])
                 labels.append(label)
-
         target = {
             "boxes": torch.tensor(boxes, dtype=torch.float32),
             "labels": torch.tensor(labels, dtype=torch.int64),
         }
-
         if self.transform is not None:
             image, target = self.transform(image, target)
-
         return image, target
-
-try:
-    from pycocotools.coco import COCO
-except ImportError:
-    raise ImportError("Brakuje biblioteki pycocotools. Zainstaluj ja: pip install pycocotools")
-
-train_dataset = CocoDetectionWithTransform(root=train_images, annFile=train_annotations, transform=custom_transform)
-
-if os.path.exists(val_annotations):
-    val_dataset = CocoDetectionWithTransform(root=val_images, annFile=val_annotations, transform=custom_transform)
-    print(f"Załadowano zbór walidacyjny: {len(val_dataset)} obrazów.")
-else:
-    val_dataset = None
-    print("Brak pliku `val/annotations.json`, pomijam walidację.")
 
 class UnannotatedImageFolder(torch.utils.data.Dataset):
     def __init__(self, root, transform=None):
         self.root = root
         self.transform = transform
         self.image_paths = sorted([os.path.join(root, img) for img in os.listdir(root)
-                                    if img.endswith(".jpg") or img.endswith(".png")])
+                                   if img.endswith(".jpg") or img.endswith(".png")])
 
     def __getitem__(self, index):
         image = Image.open(self.image_paths[index]).convert("RGB")
@@ -163,13 +160,16 @@ class UnannotatedImageFolder(torch.utils.data.Dataset):
 test_dataset = UnannotatedImageFolder(root=test_images, transform=lambda x: F.to_tensor(x))
 
 def get_data_loaders(batch_size=2, num_workers=0):
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
-
-    if val_dataset:
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
+    train_dataset = CocoDetectionWithTransform(root=train_images, annFile=train_annotations, transform=custom_transform)
+    if os.path.exists(val_annotations):
+        val_dataset = CocoDetectionWithTransform(root=val_images, annFile=val_annotations, transform=custom_transform)
+        print(f"Załadowano zbiór walidacyjny: {len(val_dataset)} obrazów.")
     else:
-        val_loader = None
+        val_dataset = None
+        print("Brak pliku `val/annotations.json`, pomijam walidację.")
 
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn) if val_dataset else None
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
     print(f"DataLoader gotowy! Trening: {len(train_dataset)} | Walidacja: {len(val_dataset) if val_dataset else 0} | Test: {len(test_dataset)}")

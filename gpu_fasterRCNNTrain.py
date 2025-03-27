@@ -135,6 +135,7 @@ if __name__ == "__main__":
     pred_counts = []
     gt_counts = []
     best_val_loss = float("inf")
+    best_epoch = 0
 
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch)
@@ -154,9 +155,10 @@ if __name__ == "__main__":
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_path = f"saved_models/{model_name}/model_best.pth"
+            best_epoch = epoch
+            best_path = f"saved_models/{model_name}/model_best_epoch_{epoch}.pth"
             torch.save(model.state_dict(), best_path)
-            print(f"Zapisano najlepszy model (val_loss={val_loss:.4f}): {best_path}")
+            print(f"Zapisano najlepszy model z epoki {epoch} (val_loss={val_loss:.4f}): {best_path}")
 
         if gt_count > 0:
             pred_gt_ratio = pred_count / gt_count
@@ -168,6 +170,7 @@ if __name__ == "__main__":
     final_model_path = f"saved_models/{model_name}/model_final.pth"
     torch.save(model.state_dict(), final_model_path)
     print(f"Model końcowy zapisano jako: {final_model_path}")
+    print(f"Najlepszy model pochodzi z epoki {best_epoch} (val_loss = {best_val_loss:.4f})")
 
     plt.figure(figsize=(10, 5))
     plt.plot(train_losses, label="Strata treningowa")

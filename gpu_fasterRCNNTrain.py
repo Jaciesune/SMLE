@@ -10,7 +10,7 @@ from datetime import datetime
 from gpu_dataLoader import get_data_loaders
 
 # KONFIGURACJA
-CONFIDENCE_THRESHOLD = 0.27  # Próg pewności
+CONFIDENCE_THRESHOLD = 0.5  # Próg pewności
 NMS_THRESHOLD = 40000  # Ilość propozycji
 SAVE_PERFECT_MODEL_RATIO_RANGE = (0.9, 1.1)  # Zakres idealnego stosunku pred/gt
 
@@ -29,6 +29,7 @@ def get_model(num_classes, device):
         model.rpn.pre_nms_top_n = lambda: NMS_THRESHOLD
         model.rpn.post_nms_top_n = lambda: NMS_THRESHOLD
 
+    model.roi_heads.nms_thresh = 0.3 # im wskaźnik % pokryć boxów -> mniej = dokładniej
     model.roi_heads.detections_per_img = 5000
     model.roi_heads.score_thresh = CONFIDENCE_THRESHOLD
     model.to(device)

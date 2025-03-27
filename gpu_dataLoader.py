@@ -8,11 +8,10 @@ from torchvision.transforms import functional as F
 import random
 import torchvision.transforms.v2 as transforms_v2
 import numpy as np
-import cv2
 
 # --- AUGMENTACJE DODATKOWE ---
 class RandomColorJitter:
-    def __init__(self, brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05, p=0.5):
+    def __init__(self, brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1, p=0.5):
         self.transform = transforms.ColorJitter(brightness, contrast, saturation, hue)
         self.p = p
 
@@ -43,54 +42,36 @@ class RandomHorizontalFlip:
             target["boxes"] = boxes
         return image, target
 
-class RandomPerspectiveWithBoxes:
-    def __init__(self, distortion_scale=0.5, p=0.5):
-        self.distortion_scale = distortion_scale
+class RandomRotation:
+    def __init__(self, degrees=5, p=0.3):
+        self.degrees = degrees
         self.p = p
 
-    def _get_perspective_matrix(self, startpoints, endpoints):
-        startpoints = np.array(startpoints, dtype=np.float32)
-        endpoints = np.array(endpoints, dtype=np.float32)
-        matrix = cv2.getPerspectiveTransform(startpoints, endpoints)
-        return matrix
+    def __call__(self, image, target):
+        if random.random() < self.p:
+            angle = random.uniform(-self.degrees, self.degrees)
+            image = F.rotate(image, angle)
+        return image, target
 
-    def _transform_boxes(self, boxes, matrix):
-        transformed_boxes = []
-        for box in boxes:
-            x0, y0, x1, y1 = box.tolist()
-            corners = np.array([
-                [x0, y0], [x1, y0], [x1, y1], [x0, y1]
-            ], dtype=np.float32)
-            ones = np.ones((corners.shape[0], 1), dtype=np.float32)
-            corners_hom = np.concatenate([corners, ones], axis=1)
-            transformed = np.dot(matrix, corners_hom.T).T
-            transformed = transformed[:, :2] / transformed[:, 2:]
-
-            x_min, y_min = transformed.min(axis=0)
-            x_max, y_max = transformed.max(axis=0)
-
-            if x_max > x_min and y_max > y_min:
-                transformed_boxes.append([x_min, y_min, x_max, y_max])
-        return transformed_boxes
+class RandomBrightness:
+    def __init__(self, factor_range=(0.7, 1.3), p=0.4):
+        self.factor_range = factor_range
+        self.p = p
 
     def __call__(self, image, target):
-        if random.random() < self.p and len(target["boxes"]):
-            width, height = image.size
-            startpoints, endpoints = transforms_v2.RandomPerspective.get_params(width, height, self.distortion_scale)
-            image = F.perspective(image, startpoints, endpoints, interpolation=Image.BILINEAR)
-            matrix = self._get_perspective_matrix(startpoints, endpoints)
-            new_boxes = self._transform_boxes(target["boxes"], matrix)
-            if new_boxes:
-                target["boxes"] = torch.tensor(new_boxes, dtype=torch.float32)
+        if random.random() < self.p:
+            factor = random.uniform(*self.factor_range)
+            image = F.adjust_brightness(image, factor)
         return image, target
 
 # --- KOMBINACJA AUGMENTACJI ---
 def custom_transform(image, target):
     for aug in [
-        RandomPerspectiveWithBoxes(p=0.3),
         RandomHorizontalFlip(p=0.5),
+        RandomRotation(degrees=5, p=0.3),
         RandomColorJitter(p=0.5),
-        RandomGaussianBlur(p=0.3),
+        RandomBrightness(p=0.4),
+        RandomGaussianBlur(p=0.2),
     ]:
         image, target = aug(image, target)
     image = F.to_tensor(image)
@@ -163,7 +144,7 @@ def get_data_loaders(batch_size=2, num_workers=0):
     train_dataset = CocoDetectionWithTransform(root=train_images, annFile=train_annotations, transform=custom_transform)
     if os.path.exists(val_annotations):
         val_dataset = CocoDetectionWithTransform(root=val_images, annFile=val_annotations, transform=custom_transform)
-        print(f"Załadowano zbiór walidacyjny: {len(val_dataset)} obrazów.")
+        print(f"Załadowano zbór walidacyjny: {len(val_dataset)} obrazów.")
     else:
         val_dataset = None
         print("Brak pliku `val/annotations.json`, pomijam walidację.")

@@ -12,6 +12,7 @@ from gpu_dataLoader import get_data_loaders
 # KONFIGURACJA
 CONFIDENCE_THRESHOLD = 0.27  # Próg pewności
 NMS_THRESHOLD = 40000  # Ilość propozycji
+SAVE_PERFECT_MODEL_RATIO_RANGE = (0.9, 1.1)  # Zakres idealnego stosunku pred/gt
 
 # Pobranie modelu Faster R-CNN
 def get_model(num_classes, device):
@@ -133,6 +134,7 @@ if __name__ == "__main__":
     val_losses = []
     pred_counts = []
     gt_counts = []
+    best_val_loss = float("inf")
 
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch)
@@ -149,6 +151,19 @@ if __name__ == "__main__":
             checkpoint_path = f"saved_models/{model_name}/model_epoch_{epoch}.pth"
             torch.save(model.state_dict(), checkpoint_path)
             print(f"Zapisano model po epoce {epoch}: {checkpoint_path}")
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_path = f"saved_models/{model_name}/model_best.pth"
+            torch.save(model.state_dict(), best_path)
+            print(f"Zapisano najlepszy model (val_loss={val_loss:.4f}): {best_path}")
+
+        if gt_count > 0:
+            pred_gt_ratio = pred_count / gt_count
+            if SAVE_PERFECT_MODEL_RATIO_RANGE[0] <= pred_gt_ratio <= SAVE_PERFECT_MODEL_RATIO_RANGE[1]:
+                perfect_path = f"saved_models/{model_name}/model_almost_perfect_epoch_{epoch}.pth"
+                torch.save(model.state_dict(), perfect_path)
+                print(f"Zapisano model bliski perfekcji (Pred/GT = {pred_gt_ratio:.2f}): {perfect_path}")
 
     final_model_path = f"saved_models/{model_name}/model_final.pth"
     torch.save(model.state_dict(), final_model_path)

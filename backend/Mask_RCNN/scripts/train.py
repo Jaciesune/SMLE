@@ -1,6 +1,7 @@
 import torch
 import torchvision.models.detection
 import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler  # Dodano scheduler
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
@@ -15,8 +16,8 @@ from pycocotools import mask as coco_mask
 
 # KONFIGURACJA
 CONFIDENCE_THRESHOLD = 0.7  # Próg pewności dla detekcji
-NMS_THRESHOLD = 40000  # Ilość propozycji przed NMS
-DETECTION_PER_IMAGE = 2000  # Maksymalna liczba detekcji na obraz
+NMS_THRESHOLD = 5000  # Ilość propozycji przed NMS
+DETECTION_PER_IMAGE = 200  # Maksymalna liczba detekcji na obraz
 
 # Pobranie modelu Mask R-CNN (wersja v2)
 def get_model(num_classes, device):
@@ -79,7 +80,7 @@ def validate_model(model, dataloader, device, epoch, model_name, coco_gt_path):
             # Sprawdzenie, czy obraz ma adnotacje
             if gt_count == 0:
                 print(f"Batch {idx}, Image {i}: Brak adnotacji (GT boxes: 0), pomijam.")
-                continue  # Pomijamy obraz bez adnotacji
+                continue
 
             # Zakładamy, że image_id jest w targets
             if "image_id" not in target:
@@ -139,14 +140,14 @@ def validate_model(model, dataloader, device, epoch, model_name, coco_gt_path):
         coco_eval_bbox.evaluate()
         coco_eval_bbox.accumulate()
         coco_eval_bbox.summarize()
-        mAP_bbox = coco_eval_bbox.stats[0]  # mAP@IoU=0.5:0.95 dla bbox
+        mAP_bbox = coco_eval_bbox.stats[0]
 
         # mAP dla segmentacji
         coco_eval_seg = COCOeval(coco_gt, coco_dt, "segm")
         coco_eval_seg.evaluate()
         coco_eval_seg.accumulate()
         coco_eval_seg.summarize()
-        mAP_seg = coco_eval_seg.stats[0]  # mAP@IoU=0.5:0.95 dla masek
+        mAP_seg = coco_eval_seg.stats[0]
 
     avg_val_loss = total_val_loss / len(dataloader) if len(dataloader) > 0 else 0
     return avg_val_loss, total_pred_objects, total_gt_objects, mAP_bbox, mAP_seg
@@ -180,9 +181,9 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=4, help="Liczba wątków dla DataLoadera")
     parser.add_argument("--batch_size", type=int, default=2, help="Rozmiar batcha")
     parser.add_argument("--epochs", type=int, default=10, help="Liczba epok")
-    parser.add_argument("--lr", type=float, default=0.001, help="Początkowa wartość learning rate")
-    parser.add_argument("--patience", type=int, default=3, help="Liczba epok bez poprawy dla Early Stopping")
-    parser.add_argument("--coco_gt_path", type=str, default="../data/val/annotations/instances_val.json", help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
+    parser.add_argument("--lr", type=float, default=0.0005, help="Początkowa wartość learning rate")
+    parser.add_argument("--patience", type=int, default=7, help="Liczba epok bez poprawy dla Early Stopping")
+    parser.add_argument("--coco_gt_path", type=str, default="../data/val/annotations/coco.json", help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
     parser.add_argument("--num_augmentations", type=int, default=1, help="Liczba augmentacji na obraz")
     args = parser.parse_args()
 
@@ -202,7 +203,8 @@ if __name__ == "__main__":
         num_augmentations=args.num_augmentations
     )
     model = get_model(num_classes=2, device=device)  # Tło + rura
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0005)  # Dodano weight_decay
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)  # Dodano scheduler
 
     train_losses = []
     val_losses = []
@@ -233,7 +235,7 @@ if __name__ == "__main__":
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
-            torch.save(model.state_dict(), f"../models/{model_name}_best.pth")
+            torch.save(model, f"../models/{model_name}_best.pth")
             print(f"Zapisano najlepszy model: ../models/{model_name}_best.pth")
         else:
             patience_counter += 1
@@ -242,9 +244,11 @@ if __name__ == "__main__":
                 print("Early Stopping: Zakończono trening przedwcześnie.")
                 break
 
+        scheduler.step()  # Aktualizacja learning rate po każdej epoce
+
     # Zapis końcowego modelu
     model_filename = f"../models/{model_name}.pth"
-    torch.save(model.state_dict(), model_filename)
+    torch.save(model, model_filename)
     print(f"Model zapisano jako: {model_filename}")
 
     # Wykresy

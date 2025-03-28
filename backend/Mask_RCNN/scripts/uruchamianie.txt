@@ -5,7 +5,16 @@ pip install --pre torch torchvision torchaudio --index-url https://download.pyto
 
 python train.py --dataset_dir ../data --batch_size 2 --epochs 10 --num_workers 4
 
-python train.py --dataset_dir  --batch_size 2 --epochs 10 --num_workers 0
+python train.py  --batch_size 2 --epochs 10 --num_workers 0
 
-Z augmentacją:
-python train.py --dataset_dir --batch_size 2 --epochs 10 --num_workers 0 --num_augmentations 5
+Z augmentacją (polecam max =3):
+python train.py --batch_size 2 --epochs 50 --num_workers 10 --num_augmentations 2
+
+
+
+
+Uruchamianie labelme:
+conda create -n labelme_env python=3.10
+conda activate labelme_env
+pip install labelme
+labelme

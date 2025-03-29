@@ -60,8 +60,9 @@ def validate_model(model, dataloader, device, epoch, model_name, coco_gt_path):
 
         # Obliczanie straty w trybie treningowym
         model.train()
-        loss_dict = model(images, new_targets)
-        val_loss = sum(loss for loss in loss_dict.values())
+        with torch.no_grad():
+            loss_dict = model(images, new_targets)
+            val_loss = sum(loss for loss in loss_dict.values())
         total_val_loss += val_loss.item()
 
         # Predykcje w trybie ewaluacji
@@ -178,13 +179,13 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Trening Mask R-CNN (v2)")
     parser.add_argument("--dataset_dir", type=str, default="../data", help="Ścieżka do danych")
-    parser.add_argument("--num_workers", type=int, default=4, help="Liczba wątków dla DataLoadera")
-    parser.add_argument("--batch_size", type=int, default=2, help="Rozmiar batcha")
-    parser.add_argument("--epochs", type=int, default=10, help="Liczba epok")
+    parser.add_argument("--num_workers", type=int, default=10, help="Liczba wątków dla DataLoadera")
+    parser.add_argument("--batch_size", type=int, default=1, help="Rozmiar batcha")
+    parser.add_argument("--epochs", type=int, default=20, help="Liczba epok")
     parser.add_argument("--lr", type=float, default=0.0005, help="Początkowa wartość learning rate")
     parser.add_argument("--patience", type=int, default=7, help="Liczba epok bez poprawy dla Early Stopping")
     parser.add_argument("--coco_gt_path", type=str, default="../data/val/annotations/coco.json", help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
-    parser.add_argument("--num_augmentations", type=int, default=1, help="Liczba augmentacji na obraz")
+    parser.add_argument("--num_augmentations", type=int, default=8, help="Liczba augmentacji na obraz")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -193,7 +194,7 @@ if __name__ == "__main__":
 
     os.makedirs(f"../logs/train/{model_name}", exist_ok=True)
     os.makedirs(f"../logs/val/{model_name}", exist_ok=True)
-    os.makedirs("../logs/saved_models", exist_ok=True)
+    os.makedirs("../logs/models", exist_ok=True)
 
     print("\nWczytywanie danych...")
     train_loader, val_loader = get_data_loaders(

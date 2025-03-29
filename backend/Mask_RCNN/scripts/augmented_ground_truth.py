@@ -63,17 +63,25 @@ def get_augmentation_pipeline(image_height, image_width):
     crop_width = min(512, image_width)
     
     return A.Compose([
-        A.HorizontalFlip(p=0.5),
-        A.RandomBrightnessContrast(p=0.3),
-        A.Rotate(limit=30, p=0.5),
-        A.RandomCrop(height=crop_height, width=crop_width, p=0.3),
-        A.GaussNoise(p=0.2),
-    ], 
+        A.HorizontalFlip(p=0.5),  # Odbicie w pionie
+        A.RandomBrightnessContrast(p=0.3),  # Losowa zmiana jasności i kontrastu
+        A.Rotate(limit=30, p=0.5),  # Obrót o maksymalnie 30 stopni
+        A.RandomCrop(height=crop_height, width=crop_width, p=0.3),  # Losowy przycięcie
+        A.GaussNoise(p=0.2),  # Szum Gaussa
+        
+        # Dodatkowe transformacje
+        A.Blur(blur_limit=(3, 7), p=0.2),  # Rozmazanie
+        A.MedianBlur(blur_limit=5, p=0.1),  # Rozmazanie medianowe
+        A.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True, p=0.2),  # Szum mnożący
+        A.ChannelShuffle(p=0.1),  # Losowa permutacja kanałów
+        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.3),  # Zmiana kolorów
+        A.ISONoise(p=0.1),  # Szum ISO
+    ],
     bbox_params=A.BboxParams(
         format='coco', 
         label_fields=['category_ids'], 
-        min_area=5,           # Minimalna powierzchnia bboxa
-        min_visibility=0.2     # Minimalna widoczność bboxa
+        min_area=3,           # Minimalna powierzchnia bboxa
+        min_visibility=0.1     # Minimalna widoczność bboxa
     ),
     additional_targets={'mask': 'mask'})
 

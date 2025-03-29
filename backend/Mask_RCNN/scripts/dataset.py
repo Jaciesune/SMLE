@@ -29,18 +29,24 @@ class RuryDataset(Dataset):
         self.base_transform = T.Compose([T.ToTensor()])
 
         self.augment_transform = A.Compose([
-            A.HorizontalFlip(p=0.5),
-            A.VerticalFlip(p=0.5),
-            A.Rotate(limit=20, p=0.5),
-            A.RandomBrightnessContrast(p=0.5),
-            A.HueSaturationValue(p=0.5),
-            A.Resize(height=image_size[1], width=image_size[0]),
+            A.HorizontalFlip(p=0.5),  # Odbicie w poziomie
+            A.VerticalFlip(p=0.5),  # Odbicie w pionie
+            A.Rotate(limit=50, p=0.5),  # Obrót o maksymalnie 50 stopni
+            A.RandomBrightnessContrast(p=0.5),  # Losowa zmiana jasności i kontrastu
+            A.HueSaturationValue(p=0.5),  # Zmiana kolorów
+            A.GaussNoise(p=0.2),  # Szum Gaussa
+            A.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True, p=0.2),  # Szum mnożący
+            A.Blur(blur_limit=(3, 7), p=0.2),  # Rozmazanie
+            A.MedianBlur(blur_limit=5, p=0.1),  # Rozmazanie medianowe
+            A.ISONoise(p=0.1),  # Szum ISO
+            A.Resize(height=image_size[1], width=image_size[0]),  # Zmiana rozmiaru
         ], bbox_params=A.BboxParams(
             format='coco', 
             label_fields=['category_ids'],
-            min_area=8,
-            min_visibility=0.2
+            min_area=3,
+            min_visibility=0.1
         ), additional_targets={'masks': 'masks'})
+
 
     def __len__(self):
         return len(self.image_ids) * self.num_augmentations

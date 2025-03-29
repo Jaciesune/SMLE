@@ -17,7 +17,7 @@ from pycocotools import mask as coco_mask
 # KONFIGURACJA
 CONFIDENCE_THRESHOLD = 0.7  # Próg pewności dla detekcji
 NMS_THRESHOLD = 5000  # Ilość propozycji przed NMS
-DETECTION_PER_IMAGE = 200  # Maksymalna liczba detekcji na obraz
+DETECTION_PER_IMAGE = 500  # Maksymalna liczba detekcji na obraz
 
 # Pobranie modelu Mask R-CNN (wersja v2)
 def get_model(num_classes, device):

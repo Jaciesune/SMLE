@@ -64,6 +64,18 @@ class RandomBrightness:
             image = F.adjust_brightness(image, factor)
         return image, target
 
+class RandomNoise:
+    def __init__(self, p=0.3):
+        self.p = p
+
+    def __call__(self, image, target):
+        if random.random() < self.p:
+            np_img = np.array(image)
+            noise = np.random.normal(0, 5, np_img.shape).astype(np.uint8)
+            np_img = np.clip(np_img + noise, 0, 255).astype(np.uint8)
+            image = Image.fromarray(np_img)
+        return image, target
+
 # --- KOMBINACJA AUGMENTACJI ---
 def custom_transform(image, target):
     for aug in [
@@ -72,6 +84,7 @@ def custom_transform(image, target):
         RandomColorJitter(p=0.5),
         RandomBrightness(p=0.4),
         RandomGaussianBlur(p=0.2),
+        RandomNoise(p=0.2),
     ]:
         image, target = aug(image, target)
     image = F.to_tensor(image)

@@ -10,8 +10,8 @@ from datetime import datetime
 from gpu_dataLoader import get_data_loaders
 
 # KONFIGURACJA
-CONFIDENCE_THRESHOLD = 0.5  # Próg pewności
-NMS_THRESHOLD = 40000  # Ilość propozycji
+CONFIDENCE_THRESHOLD = 0.4 # Próg pewności
+NMS_THRESHOLD = 60000  # Ilość propozycji
 SAVE_PERFECT_MODEL_RATIO_RANGE = (0.9, 1.1)  # Zakres idealnego stosunku pred/gt
 
 # Pobranie modelu Faster R-CNN

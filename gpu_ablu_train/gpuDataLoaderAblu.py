@@ -30,11 +30,14 @@ def get_train_transform():
         A.HorizontalFlip(p=0.5),
         A.RandomBrightnessContrast(p=0.7),
         A.RandomGamma(p=0.5),
-        A.MotionBlur(blur_limit=5, p=0.4),
-        A.GaussNoise(var_limit=(10.0, 50.0), p=0.5),
+        A.Blur(blur_limit=5, p=0.3),
+        A.MotionBlur(blur_limit=5, p=0.3),
         A.ISONoise(p=0.4),
-        A.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1, p=0.5),
-        A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.1, rotate_limit=10, p=0.5),
+        A.RandomRotate90(p=0.5),
+        A.ColorJitter(p=0.5),
+        A.GaussNoise(p=0.5),
+        A.RGBShift(r_shift_limit=20, g_shift_limit=20, b_shift_limit=20, p=0.3),
+        A.HueSaturationValue(p=0.4),
         A.Resize(height=1024, width=1024),
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
@@ -59,22 +62,18 @@ class CocoDetectionWithAlbumentations(CocoDetection):
             x_min, y_min, width, height = obj["bbox"]
             x_max = x_min + width
             y_max = y_min + height
-
             if width > 0 and height > 0 and x_max > x_min and y_max > y_min:
                 boxes.append([x_min, y_min, x_max, y_max])
                 labels.append(obj["category_id"])
 
-        image_np = np.array(image)
+        image_np = np.array(image).astype(np.float32) / 255.0
         transformed = self.transform(image=image_np, bboxes=boxes, category_ids=labels)
         image_tensor = transformed["image"]
-        image_np = np.array(image)
-        transformed = self.transform(image=image_np, bboxes=boxes, category_ids=labels)
-        image_tensor = transformed["image"].float() / 255.0  # <- najważniejsze
-
         target = {
-            "boxes": torch.as_tensor(transformed["bboxes"], dtype=torch.float32),
-            "labels": torch.as_tensor(transformed["category_ids"], dtype=torch.int64)
+            "boxes": torch.tensor(transformed["bboxes"], dtype=torch.float32),
+            "labels": torch.tensor(transformed["category_ids"], dtype=torch.int64)
         }
+
         return image_tensor, target
 
 class UnannotatedImageFolder(torch.utils.data.Dataset):
@@ -116,7 +115,7 @@ def get_data_loaders(batch_size=2, num_workers=0):
         root=test_images,
         transform=A.Compose([
             A.Resize(height=1024, width=1024),
-            ToTensorV2(transpose_mask=True)
+            ToTensorV2()
         ])
     )
 

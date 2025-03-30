@@ -1,40 +1,48 @@
 
 import torch
-import torchvision.models.detection
+import torchvision.models.detection as detection
 import torch.optim as optim
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import os
 import argparse
+import torchvision
 from datetime import datetime
-from gpuDataLoaderAblu import get_data_loaders  # <- zakładamy, że zmieniony dataloader
+from gpuDataLoaderAblu import get_data_loaders
+from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.models.detection import fasterrcnn_resnet50_fpn
+from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.models import ResNet50_Weights
 
-# --- NOWE USTAWIENIA ---
-CONFIDENCE_THRESHOLD = 0.2  # Wyższy próg pewności
-NMS_THRESHOLD = 10000         # Mniej propozycji NMS
+CONFIDENCE_THRESHOLD = 0.3
+NMS_THRESHOLD = 10000
 SAVE_PERFECT_MODEL_RATIO_RANGE = (0.9, 1.1)
 
-# Pobranie modelu
 def get_model(num_classes, device):
-    model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(weights="DEFAULT")
+    anchor_generator = AnchorGenerator(
+    sizes=((16,), (32,), (64,), (128,), (256,)),  # 5 poziomów
+    aspect_ratios=((0.5, 1.0, 2.0),) * 5  # powielone 5 razy
+    )
+
+    model = fasterrcnn_resnet50_fpn(
+        weights=None,  # <-- disable full pretrained weights
+        weights_backbone=ResNet50_Weights.DEFAULT,  # <-- still use pretrained backbone
+        rpn_anchor_generator=anchor_generator
+    )
+
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, num_classes)
 
-    if isinstance(model.rpn.pre_nms_top_n, dict):
-        model.rpn.pre_nms_top_n["training"] = NMS_THRESHOLD
-        model.rpn.pre_nms_top_n["testing"] = NMS_THRESHOLD
-        model.rpn.post_nms_top_n["training"] = NMS_THRESHOLD
-        model.rpn.post_nms_top_n["testing"] = NMS_THRESHOLD
-
-    model.roi_heads.nms_thresh = 0.25
-    model.roi_heads.detections_per_img = 5000
-    model.roi_heads.score_thresh = CONFIDENCE_THRESHOLD
+    # Dostosuj inne parametry
+    model.roi_heads.score_thresh = 0.25
+    model.roi_heads.nms_thresh = 0.15
+    model.roi_heads.detections_per_img = 3000
     model.to(device)
+
     print(f"Model działa na: {device} ({torch.cuda.get_device_name(device) if device.type == 'cuda' else 'CPU'})")
     return model
 
-# Walidacja
 def validate_model(model, dataloader, device, epoch, model_name):
     model.train()
     total_val_loss = 0
@@ -66,8 +74,6 @@ def validate_model(model, dataloader, device, epoch, model_name):
             for box, score in zip(output["boxes"], output["scores"]):
                 if score >= CONFIDENCE_THRESHOLD:
                     x_min, y_min, x_max, y_max = map(int, box.detach().cpu().numpy())
-                    if (x_max - x_min < 5 or y_max - y_min < 5):
-                        continue
                     cv2.rectangle(image_np, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
                     pred_count += 1
 
@@ -80,7 +86,6 @@ def validate_model(model, dataloader, device, epoch, model_name):
     avg_val_loss = total_val_loss / len(dataloader) if len(dataloader) > 0 else 0
     return avg_val_loss, total_pred_objects, total_gt_objects
 
-# Trening
 def train_one_epoch(model, dataloader, optimizer, device, epoch):
     model.train()
     total_loss = 0
@@ -102,15 +107,18 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
 
     return total_loss / len(dataloader)
 
-# Main
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Trening Faster R-CNN z Albumentations")
+    parser = argparse.ArgumentParser(description="Trening Faster R-CNN ResNet50 z mocną augmentacją")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--epochs", type=int, default=40)
     args = parser.parse_args()
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        print(f"Używana karta graficzna: {torch.cuda.get_device_name(device)}")
+    else:
+        print("CUDA niedostępne - używana zostanie jednostka CPU")
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model_name = input(f"Podaj nazwę modelu (Enter dla domyślnej: faster_rcnn_{timestamp}): ").strip() or f"faster_rcnn_{timestamp}"
@@ -125,10 +133,6 @@ if __name__ == "__main__":
     model = get_model(num_classes=2, device=device)
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
-    train_losses = []
-    val_losses = []
-    pred_counts = []
-    gt_counts = []
     best_val_loss = float("inf")
     best_epoch = 0
 
@@ -136,46 +140,16 @@ if __name__ == "__main__":
         train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch)
         val_loss, pred_count, gt_count = validate_model(model, val_loader, device, epoch, model_name)
 
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        pred_counts.append(pred_count)
-        gt_counts.append(gt_count)
-
         print(f"Epoka {epoch}/{args.epochs} - Strata treningowa: {train_loss:.4f}, Strata walidacyjna: {val_loss:.4f}, Pred: {pred_count}, GT: {gt_count}")
 
         if epoch % 5 == 0:
-            checkpoint_path = f"saved_models/{model_name}/model_epoch_{epoch}.pth"
-            torch.save(model.state_dict(), checkpoint_path)
-            print(f"Zapisano model po epoce {epoch}: {checkpoint_path}")
+            torch.save(model.state_dict(), f"saved_models/{model_name}/model_epoch_{epoch}.pth")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
-            best_path = f"saved_models/{model_name}/model_best_epoch_{epoch}.pth"
-            torch.save(model.state_dict(), best_path)
-            print(f"Zapisano najlepszy model z epoki {epoch} (val_loss={val_loss:.4f}): {best_path}")
+            torch.save(model.state_dict(), f"saved_models/{model_name}/model_best_epoch_{epoch}.pth")
 
-    final_model_path = f"saved_models/{model_name}/model_final.pth"
-    torch.save(model.state_dict(), final_model_path)
-    print(f"Model końcowy zapisano jako: {final_model_path}")
+    torch.save(model.state_dict(), f"saved_models/{model_name}/model_final.pth")
+    print(f"Model końcowy zapisano jako: saved_models/{model_name}/model_final.pth")
     print(f"Najlepszy model pochodzi z epoki {best_epoch} (val_loss = {best_val_loss:.4f})")
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(train_losses, label="Strata treningowa")
-    plt.plot(val_losses, label="Strata walidacyjna")
-    plt.xlabel("Epoka")
-    plt.ylabel("Strata")
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(f"train/{model_name}/loss_plot.png")
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(pred_counts, label="Wykryte obiekty")
-    plt.plot(gt_counts, label="Obiekty GT")
-    plt.xlabel("Epoka")
-    plt.ylabel("Liczba obiektów")
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(f"train/{model_name}/detections_plot.png")
-
-    print("Trening zakończony!")

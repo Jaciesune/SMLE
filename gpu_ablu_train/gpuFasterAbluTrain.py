@@ -15,19 +15,19 @@ from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models import ResNet50_Weights
 
-CONFIDENCE_THRESHOLD = 0.3
-NMS_THRESHOLD = 10000
-SAVE_PERFECT_MODEL_RATIO_RANGE = (0.9, 1.1)
+CONFIDENCE_THRESHOLD = 0.32
+NMS_THRESHOLD = 15000
+SAVE_PERFECT_MODEL_RATIO_RANGE = (0.93, 1.07)
 
 def get_model(num_classes, device):
     anchor_generator = AnchorGenerator(
-    sizes=((16,), (32,), (64,), (128,), (256,)),  # 5 poziomów
-    aspect_ratios=((0.5, 1.0, 2.0),) * 5  # powielone 5 razy
+    sizes=((16,), (32,), (64,), (128,), (256,)),
+    aspect_ratios=((0.5, 1.0, 2.0),) * 5
     )
 
     model = fasterrcnn_resnet50_fpn(
-        weights=None,  # <-- disable full pretrained weights
-        weights_backbone=ResNet50_Weights.DEFAULT,  # <-- still use pretrained backbone
+        weights=None,
+        weights_backbone=ResNet50_Weights.DEFAULT,
         rpn_anchor_generator=anchor_generator
     )
 
@@ -36,8 +36,8 @@ def get_model(num_classes, device):
 
     # Dostosuj inne parametry
     model.roi_heads.score_thresh = 0.25
-    model.roi_heads.nms_thresh = 0.15
-    model.roi_heads.detections_per_img = 3000
+    model.roi_heads.nms_thresh = 0.14
+    model.roi_heads.detections_per_img = 4000
     model.to(device)
 
     print(f"Model działa na: {device} ({torch.cuda.get_device_name(device) if device.type == 'cuda' else 'CPU'})")

@@ -1,1 +1,3 @@
 ./runs
+SSD/outputs/pipes/*.pth
+weights/*.pth

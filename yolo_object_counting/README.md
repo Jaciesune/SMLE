@@ -1,0 +1,1 @@
+This project uses code and weights from https://github.com/lufficc/SSD, licensed under the MIT License.

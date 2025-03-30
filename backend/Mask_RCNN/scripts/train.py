@@ -64,10 +64,17 @@ if __name__ == "__main__":
         num_augmentations=args.num_augmentations
     )
     if args.resume is not None and os.path.exists(args.resume):
-        model = torch.load(args.resume, map_location=device)
-        print(f"Wczytano model z {args.resume}")
+        try:
+            model = torch.load(args.resume, map_location=device, weights_only=False)
+            model.to(device)  # Upewnij się, że model jest na odpowiednim urządzeniu
+            print(f"Wczytano model z {args.resume}")
+        except Exception as e:
+            print(f"Błąd podczas wczytywania modelu: {e}")
+            model = get_model(num_classes=2, device=device)
+            print("Utworzono nowy model z powodu błędu")
     else:
-        model = get_model(num_classes=2, device=device)  # Tło + rura
+        model = get_model(num_classes=2, device=device)
+        print(f"Wczytano nowy model")
 
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0005)
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, min_lr=1e-6)

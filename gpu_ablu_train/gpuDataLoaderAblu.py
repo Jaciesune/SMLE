@@ -27,17 +27,19 @@ def collate_fn(batch):
 
 def get_train_transform():
     return A.Compose([
+        A.RandomScale(scale_limit=(-0.3, 0.0), p=0.5),
+        A.SmallestMaxSize(max_size=1024, p=1.0),
+        A.PadIfNeeded(min_height=1024, min_width=1024, border_mode=0, value=0, p=1.0),
+        A.RandomCrop(height=1024, width=1024, p=0.4),
         A.HorizontalFlip(p=0.5),
-        A.RandomBrightnessContrast(p=0.7),
-        A.RandomGamma(p=0.5),
-        A.Blur(blur_limit=5, p=0.3),
-        A.MotionBlur(blur_limit=5, p=0.3),
-        A.ISONoise(p=0.4),
-        A.RandomRotate90(p=0.5),
-        A.ColorJitter(p=0.5),
-        A.GaussNoise(p=0.5),
-        A.RGBShift(r_shift_limit=20, g_shift_limit=20, b_shift_limit=20, p=0.3),
-        A.HueSaturationValue(p=0.4),
+        A.RandomBrightnessContrast(p=0.5),
+        A.RandomGamma(p=0.3),
+        A.Blur(blur_limit=3, p=0.2),
+        A.MotionBlur(blur_limit=3, p=0.2),
+        A.ISONoise(p=0.2),
+        A.RandomRotate90(p=0.3),
+        A.ColorJitter(p=0.4),
+        A.GaussNoise(p=0.3),
         A.Resize(height=1024, width=1024),
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))

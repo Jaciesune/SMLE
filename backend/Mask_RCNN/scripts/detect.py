@@ -6,12 +6,12 @@ from PIL import Image
 import numpy as np
 
 # Ścieżki
-MODEL_PATH = "../models/mask_rcnn_50epok_10eugment.pth"
+MODEL_PATH = "../models/test4.pth"
 TEST_IMAGES_PATH = "../data/test/images"
 RESULTS_PATH = "../data/test/results"
 
 # Parametry wykrywania
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = 0.2
 DETECTIONS_PER_IMG = 500  # Maksymalna liczba predykcji na obraz
 
 # Ładowanie modelu

@@ -22,7 +22,6 @@ def get_model(num_classes, device):
     model.roi_heads.mask_predictor = torchvision.models.detection.mask_rcnn.MaskRCNNPredictor(
         in_channels=256, dim_reduced=256, num_classes=num_classes
     )
-
     if isinstance(model.rpn.pre_nms_top_n, dict):
         model.rpn.pre_nms_top_n["training"] = NMS_THRESHOLD
         model.rpn.pre_nms_top_n["testing"] = NMS_THRESHOLD
@@ -41,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=1, help="Rozmiar batcha")
     parser.add_argument("--epochs", type=int, default=20, help="Liczba epok")
     parser.add_argument("--lr", type=float, default=0.0005, help="Początkowa wartość learning rate")
-    parser.add_argument("--patience", type=int, default=5, help="Liczba epok bez poprawy dla Early Stopping")
+    parser.add_argument("--patience", type=int, default=9, help="Liczba epok bez poprawy dla Early Stopping")
     parser.add_argument("--coco_gt_path", type=str, default="../data/val/annotations/coco.json", help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
     parser.add_argument("--num_augmentations", type=int, default=8, help="Liczba augmentacji na obraz")
     parser.add_argument("--resume", type=str, default=None, help="Ścieżka do zapisanego modelu do wczytania")
@@ -63,35 +62,58 @@ if __name__ == "__main__":
         num_workers=args.num_workers, 
         num_augmentations=args.num_augmentations
     )
-    if args.resume is not None and os.path.exists(args.resume):
-        try:
-            model = torch.load(args.resume, map_location=device, weights_only=False)
-            model.to(device)  # Upewnij się, że model jest na odpowiednim urządzeniu
-            print(f"Wczytano model z {args.resume}")
-        except Exception as e:
-            print(f"Błąd podczas wczytywania modelu: {e}")
-            model = get_model(num_classes=2, device=device)
-            print("Utworzono nowy model z powodu błędu")
-    else:
-        model = get_model(num_classes=2, device=device)
-        print(f"Wczytano nowy model")
 
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0005)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, min_lr=1e-6)
-
+    # Inicjalizacja list metryk
     straty_treningowe = []
     straty_walidacyjne = []
     liczby_predykcji = []
     liczby_gt = []
     mAPs_bbox = []
     mAPs_seg = []
+    start_epoch = 1
+
+    # Wczytywanie modelu
+    model = get_model(num_classes=2, device=device)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0005)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=2, min_lr=1e-6)
+
+    # Wczytywanie modelu
+    if args.resume is not None and os.path.exists(args.resume):
+        try:
+            loaded_data = torch.load(args.resume, map_location=device, weights_only=False)
+            if isinstance(loaded_data, dict) and 'model_state_dict' in loaded_data:
+                # Format checkpointu
+                model.load_state_dict(loaded_data['model_state_dict'])
+                optimizer.load_state_dict(loaded_data['optimizer_state_dict'])
+                scheduler.load_state_dict(loaded_data['scheduler_state_dict'])
+                start_epoch = loaded_data['epoch'] + 1
+                straty_treningowe = loaded_data.get('train_losses', [])
+                straty_walidacyjne = loaded_data.get('val_losses', [])
+                liczby_predykcji = loaded_data.get('num_predictions', [])
+                liczby_gt = loaded_data.get('num_gt', [])
+                mAPs_bbox = loaded_data.get('mAPs_bbox', [])
+                mAPs_seg = loaded_data.get('mAPs_seg', [])
+                print(f"Wczytano checkpoint z {args.resume}. Kontynuuję od epoki {start_epoch}")
+            else:
+                # Format całego modelu (stary sposób)
+                model = loaded_data
+                model.to(device)
+                # Reset optimizera i scheduler'a do domyślnych wartości
+                optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0005)
+                scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, min_lr=1e-6)
+                print(f"Wczytano cały model z {args.resume} bez checkpointu. Używam domyślnych wartości dla optimizera i scheduler'a")
+        except Exception as e:
+            print(f"Błąd podczas wczytywania modelu: {e}")
+            print("Rozpoczynam trening od nowa")
+    else:
+        print(f"Wczytano nowy model")
 
     # Early Stopping
     najlepsza_strata_walidacyjna = float("inf")
     licznik_cierpliwości = 0
     cierpliwość = args.patience
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
         strata_treningowa = train_one_epoch(model, train_loader, optimizer, device, epoch)
         strata_walidacyjna, liczba_predykcji, liczba_gt, mAP_bbox, mAP_seg = validate_model(
             model, val_loader, device, epoch, nazwa_modelu, args.coco_gt_path
@@ -104,13 +126,25 @@ if __name__ == "__main__":
         mAPs_bbox.append(mAP_bbox)
         mAPs_seg.append(mAP_seg)
 
-        print(f"Epoka {epoch}/{args.epochs} - Strata treningowa: {strata_treningowa:.4f}, Strata walidacyjna: {strata_walidacyjna:.4f}, Pred: {liczba_predykcji}, GT: {liczba_gt}, mAP_bbox: {mAP_bbox:.4f}, mAP_seg: {mAP_seg:.4f}")
+        print(f"Epoka {epoch}/{args.epochs} - Strata treningowa: {strata_treningowa:.4f}, Strata walidacyjna: {strata_walidacyjna:.4f}, Pred: {liczba_predykcji}, GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt} mAP_bbox: {mAP_bbox:.4f}, mAP_seg: {mAP_seg:.4f}")
 
-        # Early Stopping
+        # Early Stopping i zapis najlepszego modelu
         if strata_walidacyjna < najlepsza_strata_walidacyjna:
             najlepsza_strata_walidacyjna = strata_walidacyjna
             licznik_cierpliwości = 0
-            torch.save(model, f"../models/{nazwa_modelu}_best.pth")
+            checkpoint = {
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'epoch': epoch,
+                'train_losses': straty_treningowe,
+                'val_losses': straty_walidacyjne,
+                'num_predictions': liczby_predykcji,
+                'num_gt': liczby_gt,
+                'mAPs_bbox': mAPs_bbox,
+                'mAPs_seg': mAPs_seg
+            }
+            torch.save(checkpoint, f"../models/{nazwa_modelu}_best.pth")
             print(f"Zapisano najlepszy model: ../models/{nazwa_modelu}_best.pth")
         else:
             licznik_cierpliwości += 1
@@ -122,9 +156,21 @@ if __name__ == "__main__":
         scheduler.step(strata_walidacyjna)
         print(f"Learning rate: {scheduler.get_last_lr()[0]}")
 
-    # Zapis końcowego modelu
+    # Zapis końcowego modelu z metrykami
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+        'epoch': epoch,
+        'train_losses': straty_treningowe,
+        'val_losses': straty_walidacyjne,
+        'num_predictions': liczby_predykcji,
+        'num_gt': liczby_gt,
+        'mAPs_bbox': mAPs_bbox,
+        'mAPs_seg': mAPs_seg
+    }
     nazwa_pliku_modelu = f"../models/{nazwa_modelu}.pth"
-    torch.save(model, nazwa_pliku_modelu)
+    torch.save(checkpoint, nazwa_pliku_modelu)
     print(f"Model zapisano jako: {nazwa_pliku_modelu}")
 
     # Wykresy

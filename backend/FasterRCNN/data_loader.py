@@ -1,4 +1,3 @@
-
 import torch
 from torch.utils.data import DataLoader
 from torchvision.datasets import CocoDetection
@@ -8,18 +7,15 @@ import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-def find_dataset_folder():
-    for path in ["dataset", "../dataset", "../../dataset"]:
-        if os.path.exists(path):
-            return path
-    raise FileNotFoundError("Nie znaleziono folderu dataset!")
-
-dataset_path = find_dataset_folder()
-train_images = os.path.join(dataset_path, "train/images")
-train_annotations = os.path.join(dataset_path, "train/annotations.json")
-val_images = os.path.join(dataset_path, "val/images")
-val_annotations = os.path.join(dataset_path, "val/annotations.json")
-test_images = os.path.join(dataset_path, "test/images")
+def get_dataset_paths():
+    base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dataset"))
+    return {
+        "train_images": os.path.join(base, "train/images"),
+        "train_annotations": os.path.join(base, "train/annotations.json"),
+        "val_images": os.path.join(base, "val/images"),
+        "val_annotations": os.path.join(base, "val/annotations.json"),
+        "test_images": os.path.join(base, "test/images")
+    }
 
 def collate_fn(batch):
     return tuple(zip(*batch))
@@ -86,9 +82,10 @@ class UnannotatedImageFolder(torch.utils.data.Dataset):
         return len(self.image_paths)
 
 def get_data_loaders(batch_size=2, num_workers=0):
-    train_dataset = CocoDetectionWithAlbumentations(train_images, train_annotations, get_train_transform())
-    val_dataset = CocoDetectionWithAlbumentations(val_images, val_annotations, get_val_transform()) if os.path.exists(val_annotations) else None
-    test_dataset = UnannotatedImageFolder(test_images, A.Compose([A.Resize(1024, 1024), ToTensorV2()]))
+    paths = get_dataset_paths()
+    train_dataset = CocoDetectionWithAlbumentations(paths["train_images"], paths["train_annotations"], get_train_transform())
+    val_dataset = CocoDetectionWithAlbumentations(paths["val_images"], paths["val_annotations"], get_val_transform()) if os.path.exists(paths["val_annotations"]) else None
+    test_dataset = UnannotatedImageFolder(paths["test_images"], A.Compose([A.Resize(1024, 1024), ToTensorV2()]))
 
     print(f"DataLoader gotowy! Trening: {len(train_dataset)} | Walidacja: {len(val_dataset) if val_dataset else 0} | Test: {len(test_dataset)}")
 

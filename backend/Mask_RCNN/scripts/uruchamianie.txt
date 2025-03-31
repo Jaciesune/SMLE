@@ -11,7 +11,7 @@ Z augmentacją:
 python train.py --batch_size 2 --epochs 50 --num_workers 10 --num_augmentations 10
 
 Wczytanie poprzedniego modelu:
- python train.py --batch_size 1 --epochs 1 --num_workers 12 --num_augmentations 1 --resume "../models/test4.pth"
+python train.py --batch_size 1 --epochs 5 --num_workers 12 --num_augmentations 1 --resume "../models/test4.pth"
 
 
 Uruchamianie labelme:

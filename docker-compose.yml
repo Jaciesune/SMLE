@@ -2,7 +2,7 @@ services:
   backend:
     build:
       context: .  # Ścieżka do katalogu z Dockerfile
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.backend
     container_name: backend-app
     depends_on:
       - mysql
@@ -13,6 +13,23 @@ services:
     volumes:
       - ./backend:/app/backend
     command: ["python", "/app/backend/main.py"]
+
+  maskrcnn:
+    build:
+      context: .
+      dockerfile: Dockerfile.maskrcnn
+    container_name: maskrcnn
+    volumes:
+      - ./backend/Mask_RCNN:/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Kontener działa w trybie "na żądanie", nie uruchamiamy żadnego skryptu automatycznie
+    command: ["tail", "-f", "/dev/null"]  # Utrzymuje kontener w stanie uruchomionym
 
   mysql:
     image: mysql:latest

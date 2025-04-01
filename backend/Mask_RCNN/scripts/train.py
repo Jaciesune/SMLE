@@ -8,6 +8,7 @@ import argparse
 from datetime import datetime
 from dataset import get_data_loaders
 from utils import train_one_epoch, validate_model
+import numpy as np
 
 # KONFIGURACJA
 CONFIDENCE_THRESHOLD = 0.7  # Próg pewności dla detekcji
@@ -186,7 +187,7 @@ if __name__ == "__main__":
         'mAPs_bbox': mAPs_bbox,
         'mAPs_seg': mAPs_seg
     }
-    nazwa_pliku_checkpointu = f"../models/{nazwa_modelu}.pth"
+    nazwa_pliku_checkpointu = f"../models/{nazwa_modelu}_checkpoint.pth"
     torch.save(checkpoint, nazwa_pliku_checkpointu)
     print(f"Checkpoint zapisano jako: {nazwa_pliku_checkpointu}")
 

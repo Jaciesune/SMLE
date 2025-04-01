@@ -1,12 +1,11 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
 from backend.api.detection_api import DetectionAPI
-import os
 
 class CountTab(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.detection_api = DetectionAPI()  # Inicjalizacja API
         self.current_image_path = None  # Przechowujemy ścieżkę do wczytanego obrazu
+        self.detection_api = DetectionAPI()  # Inicjalizacja DetectionAPI
         self.init_ui()
 
     def init_ui(self):
@@ -70,10 +69,6 @@ class CountTab(QtWidgets.QWidget):
         self.analyze_btn.clicked.connect(self.analyze_image)
         right_layout.addWidget(self.analyze_btn)
 
-        # Etykieta na wynik analizy (domyślnie pusta)
-        self.result_label = QtWidgets.QLabel("")
-        right_layout.addWidget(self.result_label)
-
     def load_image(self):
         options = QtWidgets.QFileDialog.Options()
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Wybierz zdjęcie", "", "Obrazy (*.png *.jpg *.jpeg *.bmp)", options=options)
@@ -81,8 +76,6 @@ class CountTab(QtWidgets.QWidget):
             self.current_image_path = file_path
             pixmap = QtGui.QPixmap(file_path).scaled(self.image_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
             self.image_label.setPixmap(pixmap)
-            # Czyścimy etykietę wyniku po wczytaniu nowego zdjęcia
-            self.result_label.setText("")
 
     def update_model_versions(self):
         """Aktualizuje listę wersji modeli na podstawie wybranego algorytmu."""
@@ -105,16 +98,15 @@ class CountTab(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać model.")
             return
 
-        # Wywołanie analizy z DetectionAPI
-        result_path, detections_count = self.detection_api.analyze_with_model(self.current_image_path, algorithm, model_version)
-        if result_path and QtCore.QFile.exists(result_path) and detections_count is not None:
-            # Wyświetlenie wyniku detekcji w image_label
+        try:
+            result = self.detection_api.analyze_with_model(self.current_image_path, algorithm, model_version)
+            if isinstance(result, str) and "Błąd" in result:
+                QtWidgets.QMessageBox.warning(self, "Błąd", result)
+                return
+
+            result_path, detections_count = result  # Rozpakowanie dwóch wartości
             pixmap = QtGui.QPixmap(result_path).scaled(self.image_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
             self.image_label.setPixmap(pixmap)
-            # Wyświetlenie informacji o liczbie komponentów
-            image_name = os.path.basename(self.current_image_path)
-            self.result_label.setText(f"Zliczono obraz {image_name}, ilość komponentów: {detections_count}")
-            QtWidgets.QMessageBox.information(self, "Analiza", f"Detekcja zakończona. Wynik zapisano w: {result_path}")
-        else:
-            QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie udało się przeprowadzić detekcji: {result_path}")
-            self.result_label.setText("")
+            QtWidgets.QMessageBox.information(self, "Analiza", f"Detekcja zakończona. Liczba detekcji: {detections_count}. Wynik zapisano w: {result_path}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie udało się przeprowadzić detekcji: {str(e)}")

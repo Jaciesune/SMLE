@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import subprocess
 import shutil
+import re
 
 class DetectionAPI:
     def __init__(self):
@@ -22,7 +23,7 @@ class DetectionAPI:
         return list(self.algorithms.keys())
 
     def get_model_versions(self, algorithm):
-        """Zwraca listę plików modeli z końcówką *checkpoint.pth dla wybranego algorytmu."""
+        """Zwraca listę plików modeli z końcówką *_checkpoint.pth dla wybranego algorytmu."""
         if algorithm not in self.algorithms:
             return []
 
@@ -30,7 +31,7 @@ class DetectionAPI:
         if not model_path.exists():
             return []
 
-        # Pobierz tylko pliki z końcówką *checkpoint.pth w folderze models
+        # Pobierz tylko pliki z końcówką *_checkpoint.pth w folderze models
         model_versions = [file.name for file in model_path.iterdir() if file.is_file() and file.name.endswith('_checkpoint.pth')]
         return sorted(model_versions)
 
@@ -44,14 +45,32 @@ class DetectionAPI:
             return str(model_path)
         return None
 
+    def run_maskrcnn_script(self, script_name, *args):
+        """Uruchamia skrypt Mask R-CNN w kontenerze maskrcnn."""
+        try:
+            # Przygotowanie polecenia docker run
+            command = [
+                "docker", "run", "--rm", "--gpus", "all",
+                "-v", f"{self.base_path}/Mask_RCNN:/app",
+                "smle-maskrcnn",
+                "python", f"scripts/{script_name}", *args
+            ]
+            print(f"Uruchamiam polecenie: {' '.join(command)}")  # Logowanie dla debugowania
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode != 0:
+                return f"Błąd podczas uruchamiania skryptu {script_name}: {result.stderr}"
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            return f"Błąd podczas uruchamiania kontenera: {e}"
+
     def analyze_with_model(self, image_path, algorithm, version):
-        """Przeprowadza detekcję na obrazie przy użyciu wybranego modelu. Zwraca ścieżkę do wyniku i liczbę wykrytych obiektów."""
+        """Przeprowadza detekcję na obrazie przy użyciu wybranego modelu."""
         model_path = self.get_model_path(algorithm, version)
         if not model_path:
-            return f"Błąd: Model {version} dla algorytmu {algorithm} nie istnieje lub nie kończy się na _checkpoint.pth.", None
+            return f"Błąd: Model {version} dla algorytmu {algorithm} nie istnieje lub nie kończy się na _checkpoint.pth."
 
         if not os.path.exists(image_path):
-            return f"Błąd: Obraz {image_path} nie istnieje.", None
+            return f"Błąd: Obraz {image_path} nie istnieje."
 
         # Kopiujemy obraz do folderu data/test/images, aby detect.py mógł go przetworzyć
         test_images_path = self.base_path / "Mask_RCNN" / "data" / "test" / "images"
@@ -60,39 +79,32 @@ class DetectionAPI:
         temp_image_path = test_images_path / image_name
         shutil.copy(image_path, temp_image_path)
 
-        # Ścieżka do skryptu detect.py w kontenerze
-        detect_script_path = self.base_path / "Mask_RCNN" / "scripts" / "detect.py"
+        # Dostosowujemy ścieżki do kontekstu kontenera
+        container_image_path = f"/app/data/test/images/{image_name}"
+        container_model_path = f"/app/models/{version}"
 
-        # Uruchamiamy detect.py w tym samym środowisku
-        try:
-            result = subprocess.run([
-                "python",
-                str(detect_script_path),
-                str(temp_image_path),
-                str(model_path)
-            ], capture_output=True, text=True)
+        # Uruchamiamy detect.py w kontenerze maskrcnn
+        result = self.run_maskrcnn_script("detect.py", container_image_path, container_model_path)
+        if "Błąd" in result:
+            return result
 
-            if result.returncode != 0:
-                return f"Błąd podczas detekcji: {result.stderr}", None
+        # Ścieżka do wyniku detekcji
+        result_image_name = os.path.splitext(image_name)[0] + "_detected.jpg"
+        result_path = self.detectes_path / result_image_name
+        if not result_path.exists():
+            return f"Błąd: Wynik detekcji nie został zapisany w {result_path}."
 
-            # Ścieżka do wyniku detekcji
-            result_image_name = os.path.splitext(image_name)[0] + "_detected.jpg"
-            result_path = self.detectes_path / result_image_name
+        # Parsowanie liczby detekcji z wyjścia detect.py
+        detections_count = 0
+        match = re.search(r"Detections: (\d+)", result)
+        if match:
+            detections_count = int(match.group(1))
 
-            # Ścieżka do pliku z liczbą wykrytych obiektów
-            result_count_path = self.detectes_path / (os.path.splitext(image_name)[0] + "_detected.txt")
+        return str(result_path), detections_count
 
-            if result_path.exists() and result_count_path.exists():
-                # Odczyt liczby wykrytych obiektów
-                with open(result_count_path, 'r') as f:
-                    detections_count = int(f.read().strip())
-                return str(result_path), detections_count
-            else:
-                return f"Błąd: Wynik detekcji nie został zapisany w {result_path} lub brak pliku z liczbą wykrytych obiektów.", None
-
-        except subprocess.CalledProcessError as e:
-            return f"Błąd podczas uruchamiania skryptu detect.py: {e}", None
-        finally:
-            # Usuwamy tymczasowy obraz
-            if temp_image_path.exists():
-                temp_image_path.unlink()
+    def train_model(self, script_args):
+        """Uruchamia trening modelu w kontenerze maskrcnn."""
+        # Przygotowanie argumentów jako lista
+        args = [str(arg) for arg in script_args]
+        result = self.run_maskrcnn_script("train.py", *args)
+        return result

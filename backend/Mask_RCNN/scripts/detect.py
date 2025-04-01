@@ -13,8 +13,9 @@ RESULTS_PATH = "/app/data/detectes"
 os.makedirs(RESULTS_PATH, exist_ok=True)
 
 # Parametry wykrywania
-CONFIDENCE_THRESHOLD = 0.7
-DETECTIONS_PER_IMG = 500  # Maksymalna liczba predykcji na obraz
+CONFIDENCE_THRESHOLD = 0.7  # Próg pewności dla detekcji
+NMS_THRESHOLD = 1000  # Liczba propozycji przed i po NMS
+DETECTIONS_PER_IMAGE = 500  # Maksymalna liczba detekcji na obraz
 NUM_CLASSES = 2  # Liczba klas (tło + 1 klasa, dostosuj do swojego modelu)
 MODEL_INPUT_SIZE = (1024, 1024)  # Rozmiar, do którego przeskalowujemy obraz podczas preprocessingu
 
@@ -44,6 +45,16 @@ def load_model(model_path):
     start_time = time.time()  # Początek pomiaru
     checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
+
+    # Konfiguracja parametrów modelu
+    if isinstance(model.rpn.pre_nms_top_n, dict):
+        model.rpn.pre_nms_top_n["training"] = NMS_THRESHOLD
+        model.rpn.pre_nms_top_n["testing"] = NMS_THRESHOLD
+        model.rpn.post_nms_top_n["training"] = NMS_THRESHOLD
+        model.rpn.post_nms_top_n["testing"] = NMS_THRESHOLD
+    model.roi_heads.score_thresh = CONFIDENCE_THRESHOLD
+    model.roi_heads.detections_per_img = DETECTIONS_PER_IMAGE
+
     model.to(DEVICE)
     model.eval()
     end_time = time.time()  # Koniec pomiaru
@@ -109,11 +120,11 @@ def draw_results(image, predictions, original_size):
     # Rysujemy bounding boxy i maski
     detections_count = 0
     for i, (box, score, label) in enumerate(zip(scaled_boxes, scores, labels)):
-        if detections_count >= DETECTIONS_PER_IMG:
+        if detections_count >= DETECTIONS_PER_IMAGE:
             break
         x1, y1, x2, y2 = box.astype(int)
         cv2.rectangle(image_np, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(image_np, f"Score: {score:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        # Usunięto linię z napisem "Score: X.XX"
         
         if masks is not None:
             mask = masks[i, 0] > 0.5

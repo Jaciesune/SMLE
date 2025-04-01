@@ -1,9 +1,8 @@
-
 services:
   backend:
     build:
       context: .  # Ścieżka do katalogu z Dockerfile
-      dockerfile: Dockerfile  # Upewnij się, że Dockerfile jest w głównym katalogu
+      dockerfile: Dockerfile
     container_name: backend-app
     depends_on:
       - mysql

@@ -64,3 +64,7 @@ Thumbs.db
 *.swp
 *.swo
 *.orig
+frontend/__pycache__/
+backend/__pycache__/
+backend/.vscode/
+

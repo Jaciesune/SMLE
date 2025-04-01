@@ -43,17 +43,23 @@ if __name__ == "__main__":
     parser.add_argument("--patience", type=int, default=8, help="Liczba epok bez poprawy dla Early Stopping")
     parser.add_argument("--coco_gt_path", type=str, default="../data/val/annotations/coco.json", help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
     parser.add_argument("--num_augmentations", type=int, default=8, help="Liczba augmentacji na obraz")
-    parser.add_argument("--resume", type=str, default=None, help="Ścieżka do zapisanego modelu do wczytania")
+    parser.add_argument("--resume", type=str, default=None, help="Ścieżka do zapisanego checkpointu do wczytania")
 
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    nazwa_modelu = input(f"Podaj nazwę modelu (Enter dla domyślnej: mask_rcnn_v2_{timestamp}): ").strip() or f"mask_rcnn_v2_{timestamp}"
+    # Domyślna nazwa modelu z końcówką _checkpoint
+    default_model_name = f"train_3_{timestamp}_checkpoint"
+    nazwa_modelu = input(f"Podaj nazwę modelu (Enter dla domyślnej: {default_model_name}): ").strip() or default_model_name
+
+    # Upewniamy się, że nazwa modelu kończy się na _checkpoint
+    if not nazwa_modelu.endswith('_checkpoint'):
+        nazwa_modelu = f"{nazwa_modelu}_checkpoint"
 
     os.makedirs(f"../logs/train/{nazwa_modelu}", exist_ok=True)
     os.makedirs(f"../logs/val/{nazwa_modelu}", exist_ok=True)
-    os.makedirs("../logs/models", exist_ok=True)
+    os.makedirs("../models", exist_ok=True)
 
     print("\nWczytywanie danych...")
     train_loader, val_loader = get_data_loaders(
@@ -73,39 +79,39 @@ if __name__ == "__main__":
     start_epoch = 1
     last_epoch = start_epoch - 1  # Domyślna wartość przed rozpoczęciem pętli
 
+    # Ścieżka do pliku _best_checkpoint (do późniejszego usunięcia)
+    best_checkpoint_path = None
+
     # Inicjalizacja modelu, optimizera i scheduler'a
     model = get_model(num_classes=2, device=device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0005)
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, min_lr=1e-6)
 
-    # Wczytywanie modelu
+    # Wczytywanie checkpointu (jeśli podano --resume)
     if args.resume is not None and os.path.exists(args.resume):
         try:
-            loaded_data = torch.load(args.resume, map_location=device, weights_only=False)
-            if isinstance(loaded_data, dict) and 'model_state_dict' in loaded_data:
-                model.load_state_dict(loaded_data['model_state_dict'])
-                optimizer.load_state_dict(loaded_data['optimizer_state_dict'])
-                scheduler.load_state_dict(loaded_data['scheduler_state_dict'])
-                start_epoch = loaded_data['epoch'] + 1
-                straty_treningowe = loaded_data.get('train_losses', [])
-                straty_walidacyjne = loaded_data.get('val_losses', [])
-                liczby_predykcji = loaded_data.get('num_predictions', [])
-                liczby_gt = loaded_data.get('num_gt', [])
-                mAPs_bbox = loaded_data.get('mAPs_bbox', [])
-                mAPs_seg = loaded_data.get('mAPs_seg', [])
-                last_epoch = loaded_data['epoch']
+            checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
+            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                start_epoch = checkpoint['epoch'] + 1
+                straty_treningowe = checkpoint.get('train_losses', [])
+                straty_walidacyjne = checkpoint.get('val_losses', [])
+                liczby_predykcji = checkpoint.get('num_predictions', [])
+                liczby_gt = checkpoint.get('num_gt', [])
+                mAPs_bbox = checkpoint.get('mAPs_bbox', [])
+                mAPs_seg = checkpoint.get('mAPs_seg', [])
+                last_epoch = checkpoint['epoch']
                 # Reset learning rate do wartości z args.lr
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = args.lr
                 print(f"Wczytano checkpoint z {args.resume}. Kontynuuję od epoki {start_epoch} z zresetowanym lr={args.lr}")
             else:
-                model = loaded_data
-                model.to(device)
-                optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0005)
-                scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, min_lr=1e-6)
-                print(f"Wczytano cały model z {args.resume} bez checkpointu. Używam domyślnych wartości dla optimizera i scheduler'a")
+                print(f"Plik {args.resume} nie jest checkpointem. Nie można wczytać jako checkpoint.")
+                raise ValueError("Plik nie jest poprawnym checkpointem.")
         except Exception as e:
-            print(f"Błąd podczas wczytywania modelu: {e}")
+            print(f"Błąd podczas wczytywania: {e}")
             print("Rozpoczynam trening od nowa")
     else:
         print(f"Wczytano nowy model")
@@ -134,10 +140,11 @@ if __name__ == "__main__":
 
             print(f"Epoka {epoch}/{end_epoch} - Strata treningowa: {strata_treningowa:.4f}, Strata walidacyjna: {strata_walidacyjna:.4f}, Pred: {liczba_predykcji}, GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt} mAP_bbox: {mAP_bbox:.4f}, mAP_seg: {mAP_seg:.4f}")
 
-            # Early Stopping i zapis najlepszego modelu
+            # Early Stopping i zapis najlepszego checkpointu
             if strata_walidacyjna < najlepsza_strata_walidacyjna:
                 najlepsza_strata_walidacyjna = strata_walidacyjna
                 licznik_cierpliwości = 0
+                # Zapis checkpointu (dla kontynuacji treningu)
                 checkpoint = {
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
@@ -150,8 +157,9 @@ if __name__ == "__main__":
                     'mAPs_bbox': mAPs_bbox,
                     'mAPs_seg': mAPs_seg
                 }
-                torch.save(checkpoint, f"../models/{nazwa_modelu}_best.pth")
-                print(f"Zapisano najlepszy model: ../models/{nazwa_modelu}_best.pth")
+                best_checkpoint_path = f"../models/{nazwa_modelu}_best_checkpoint.pth"
+                torch.save(checkpoint, best_checkpoint_path)
+                print(f"Zapisano najlepszy checkpoint: {best_checkpoint_path}")
             else:
                 licznik_cierpliwości += 1
                 print(f"Brak poprawy przez {licznik_cierpliwości}/{cierpliwość} epok")
@@ -165,7 +173,7 @@ if __name__ == "__main__":
     else:
         print(f"start_epoch ({start_epoch}) jest większe lub równe końcowej epoce ({end_epoch + 1}). Trening nie zostanie wykonany.")
 
-    # Zapis końcowego modelu z metrykami
+    # Zapis końcowego checkpointu
     checkpoint = {
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
@@ -178,9 +186,14 @@ if __name__ == "__main__":
         'mAPs_bbox': mAPs_bbox,
         'mAPs_seg': mAPs_seg
     }
-    nazwa_pliku_modelu = f"../models/{nazwa_modelu}.pth"
-    torch.save(checkpoint, nazwa_pliku_modelu)
-    print(f"Model zapisano jako: {nazwa_pliku_modelu}")
+    nazwa_pliku_checkpointu = f"../models/{nazwa_modelu}.pth"
+    torch.save(checkpoint, nazwa_pliku_checkpointu)
+    print(f"Checkpoint zapisano jako: {nazwa_pliku_checkpointu}")
+
+    # Usuwanie pliku _best_checkpoint.pth, jeśli istnieje
+    if best_checkpoint_path and os.path.exists(best_checkpoint_path):
+        os.remove(best_checkpoint_path)
+        print(f"Usunięto tymczasowy plik: {best_checkpoint_path}")
 
     # Wykresy
     plt.figure(figsize=(10, 5))

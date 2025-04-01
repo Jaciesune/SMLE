@@ -1,4 +1,7 @@
 import sys
+import os
+# Dodajemy katalog nadrzędny (SMLE) do sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from PyQt5 import QtWidgets
 from login_dialog import LoginDialog
 from main_window import MainWindow

@@ -5,12 +5,12 @@ import os
 import cv2
 from PIL import Image
 import numpy as np
-import time  # Dodajemy moduł time
+import time
+import sys
 
 # Ścieżki
-MODEL_PATH = "../models/train_1.pth"
-TEST_IMAGES_PATH = "../data/test/images"
-RESULTS_PATH = "../data/test/results"
+RESULTS_PATH = "/app/backend/Mask_RCNN/data/detectes"
+os.makedirs(RESULTS_PATH, exist_ok=True)
 
 # Parametry wykrywania
 CONFIDENCE_THRESHOLD = 0.7
@@ -19,6 +19,7 @@ DETECTIONS_PER_IMG = 500  # Maksymalna liczba predykcji na obraz
 # Ładowanie modelu
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Funkcja do tworzenia modelu (taka sama jak w skrypcie treningowym)
 def get_model(num_classes, device):
     model = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(weights="DEFAULT")
     in_features = model.roi_heads.box_predictor.cls_score.in_features
@@ -26,22 +27,25 @@ def get_model(num_classes, device):
     model.roi_heads.mask_predictor = torchvision.models.detection.mask_rcnn.MaskRCNNPredictor(
         in_channels=256, dim_reduced=256, num_classes=num_classes
     )
+    model.rpn.pre_nms_top_n = 5000  # Wartość dla pre-nms
+    model.rpn.post_nms_top_n = 5000  # Wartość dla post-nms
+
+    model.roi_heads.score_thresh = CONFIDENCE_THRESHOLD
+    model.roi_heads.detections_per_img = DETECTIONS_PER_IMG
     model.to(device)
+    print(f"Model działa na: {device}")
     return model
 
 def load_model(model_path):
     start_time = time.time()  # Początek pomiaru
+    # Tworzymy nowy model
     model = get_model(num_classes=2, device=DEVICE)
+    # Wczytujemy checkpoint
     checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
-    
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"Wczytano state_dict z checkpointu: {model_path}")
     else:
-        model = checkpoint
-        print(f"Wczytano cały model: {model_path}")
-    
-    model.roi_heads.detections_per_img = DETECTIONS_PER_IMG
+        raise ValueError(f"Plik {model_path} nie jest poprawnym checkpointem.")
     model.eval()
     end_time = time.time()  # Koniec pomiaru
     print(f"Czas wczytywania modelu: {end_time - start_time:.2f} sekund")
@@ -104,19 +108,21 @@ def draw_predictions(image, predictions, confidence_threshold, original_size, mi
     end_time = time.time()  # Koniec pomiaru
     print(f"Liczba wykrytych obiektów: {detections_count}")
     print(f"Czas wizualizacji: {end_time - start_time:.2f} sekund")
-    return image
+    return image, detections_count
 
-# Tworzenie katalogu wyników
-os.makedirs(RESULTS_PATH, exist_ok=True)
+# Główna funkcja
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Użycie: python detect.py <ścieżka_do_obrazu> <ścieżka_do_modelu>")
+        sys.exit(1)
 
-# Wczytanie modelu
-start_total_time = time.time()  # Początek całkowitego pomiaru
-model = load_model(MODEL_PATH)
+    image_path = sys.argv[1]
+    model_path = sys.argv[2]
 
-# Przetwarzanie obrazów testowych
-for image_name in os.listdir(TEST_IMAGES_PATH):
-    image_path = os.path.join(TEST_IMAGES_PATH, image_name)
-    
+    # Wczytanie modelu
+    start_total_time = time.time()  # Początek całkowitego pomiaru
+    model = load_model(model_path)
+
     # Przetwarzanie obrazu
     image_tensor_list, original_image, original_size = preprocess_image(image_path)
     
@@ -125,13 +131,21 @@ for image_name in os.listdir(TEST_IMAGES_PATH):
     
     # Wizualizacja i zapis
     start_save_time = time.time()  # Początek zapisu
-    result_image = draw_predictions(original_image, predictions, CONFIDENCE_THRESHOLD, original_size, min_area=1, min_visibility=0.01)
-    result_path = os.path.join(RESULTS_PATH, image_name)
+    result_image, detections_count = draw_predictions(original_image, predictions, CONFIDENCE_THRESHOLD, original_size, min_area=1, min_visibility=0.01)
+    image_name = os.path.basename(image_path)
+    result_image_name = os.path.splitext(image_name)[0] + "_detected.jpg"
+    result_path = os.path.join(RESULTS_PATH, result_image_name)
     cv2.imwrite(result_path, result_image)
+
+    # Zapis liczby wykrytych obiektów do pliku tekstowego
+    result_count_path = os.path.join(RESULTS_PATH, os.path.splitext(image_name)[0] + "_detected.txt")
+    with open(result_count_path, 'w') as f:
+        f.write(str(detections_count))
+
     end_save_time = time.time()  # Koniec zapisu
     print(f"Czas zapisu wyniku {result_path}: {end_save_time - start_save_time:.2f} sekund")
     print(f"Zapisano wynik: {result_path}")
-
-end_total_time = time.time()  # Koniec całkowitego pomiaru
-print(f"Całkowity czas wykrywania: {end_total_time - start_total_time:.2f} sekund")
-print("Wykrywanie zakończone!")
+    print(f"Zapisano liczbę wykrytych obiektów: {result_count_path}")
+    end_total_time = time.time()  # Koniec całkowitego pomiaru
+    print(f"Całkowity czas wykrywania: {end_total_time - start_total_time:.2f} sekund")
+    print("Wykrywanie zakończone!")

@@ -1,0 +1,21 @@
+Instalacja pytorcha pod cuda 12.8
+Naj naj naj:
+pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+
+
+python train.py --dataset_dir ../data --batch_size 2 --epochs 10 --num_workers 4
+
+python train.py  --batch_size 2 --epochs 10 --num_workers 0
+
+Z augmentacją:
+python train.py --batch_size 2 --epochs 50 --num_workers 10 --num_augmentations 10
+
+Wczytanie poprzedniego modelu:
+python train.py --batch_size 1 --epochs 5 --num_workers 12 --num_augmentations 1 --resume "../models/test4.pth"
+
+
+Uruchamianie labelme:
+conda create -n labelme_env python=3.10
+conda activate labelme_env
+pip install labelme
+labelme

@@ -139,6 +139,7 @@ def draw_results(image, predictions, original_size):
 def save_result(image_np, image_path):
     result_image_name = os.path.splitext(os.path.basename(image_path))[0] + "_detected.jpg"
     result_path = os.path.join(RESULTS_PATH, result_image_name)
+    print(f"Zapisuję wynik detekcji do: {result_path}")
     cv2.imwrite(result_path, cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR))
     return result_path
 

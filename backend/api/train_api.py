@@ -11,14 +11,16 @@ class TrainAPI:
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
             "Faster R-CNN": self.base_path / "Faster_RCNN" / "models",
-            "YOLO": self.base_path / "YOLO" / "models"
+            "YOLO": self.base_path / "YOLO" / "models",
+            "MCNN": self.base_path / "MCNN" / "models"
         }
 
         # Mapowanie algorytmów na skrypty treningowe
         self.train_scripts = {
             "Mask R-CNN": "train_maskrcnn.py",
             "Faster R-CNN": "train_fasterrcnn.py",  # Do zaimplementowania
-            "YOLO": "train_yolo.py"  # Do zaimplementowania
+            "YOLO": "train_yolo.py",  # Do zaimplementowania
+            "MCNN": "train_model.py"  # Do zaimplementowania
         }
 
     def get_algorithms(self):

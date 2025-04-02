@@ -42,8 +42,9 @@ stringzilla==3.12.3
 sympy==1.13.1
 threadpoolctl==3.5.0
 tifffile==2025.2.18
-torch==2.6.0
-torchvision==0.21.0
+--extra-index-url https://download.pytorch.org/whl/nightly/cu128
+torch==2.6.0 --pre
+torchvision==0.21.0 --pre
 tqdm==4.67.1
 typing_extensions==4.12.2
 tzdata==2025.1

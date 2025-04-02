@@ -1,0 +1,34 @@
+# Używamy obrazu bazowego z obsługą CUDA
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
+
+# Ustawienie katalogu roboczego
+WORKDIR /app
+
+# Instalacja Pythona i pip
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.10 \
+    python3-pip \
+    && ln -s /usr/bin/python3.10 /usr/bin/python \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instalacja zależności systemowych dla OpenCV, PyQt5 i innych bibliotek
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libqt5core5a \
+    libqt5gui5 \
+    libqt5widgets5 \
+    libxcb1 \
+    libx11-xcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Kopiowanie pliku requirements.txt dla Mask R-CNN
+COPY backend/Mask_RCNN/requirements.txt ./requirements.txt
+
+# Instalowanie wszystkich zależności z requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Kopiowanie tylko potrzebnych plików Mask R-CNN
+COPY backend/Mask_RCNN/ /app/
+
+# Brak domyślnego CMD, kontener będzie uruchamiany w trybie "na żądanie"

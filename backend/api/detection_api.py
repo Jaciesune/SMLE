@@ -101,10 +101,3 @@ class DetectionAPI:
             detections_count = int(match.group(1))
 
         return str(result_path), detections_count
-
-    def train_model(self, script_args):
-        """Uruchamia trening modelu w kontenerze maskrcnn."""
-        # Przygotowanie argumentów jako lista
-        args = [str(arg) for arg in script_args]
-        result = self.run_maskrcnn_script("train.py", *args)
-        return result

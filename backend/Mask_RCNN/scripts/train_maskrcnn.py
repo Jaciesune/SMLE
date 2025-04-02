@@ -9,6 +9,7 @@ from datetime import datetime
 from dataset import get_data_loaders
 from utils import train_one_epoch, validate_model
 import numpy as np
+import shutil
 
 # KONFIGURACJA
 CONFIDENCE_THRESHOLD = 0.7  # Próg pewności dla detekcji
@@ -17,7 +18,13 @@ DETECTION_PER_IMAGE = 500  # Maksymalna liczba detekcji na obraz
 
 # Pobranie modelu Mask R-CNN (wersja v2)
 def get_model(num_classes, device):
-    model = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(weights="DEFAULT")
+    model = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(weights=None)  # Nie pobieraj wag automatycznie
+    # Załaduj wagi ręcznie
+    weights_path = "/app/pretrained_weights/maskrcnn_resnet50_fpn_v2.pth"
+    if not os.path.exists(weights_path):
+        raise FileNotFoundError(f"Plik wag nie istnieje: {weights_path}")
+    state_dict = torch.load(weights_path, map_location=device)
+    model.load_state_dict(state_dict)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, num_classes)
     model.roi_heads.mask_predictor = torchvision.models.detection.mask_rcnn.MaskRCNNPredictor(
@@ -34,40 +41,71 @@ def get_model(num_classes, device):
     print(f"Model działa na: {device}")
     return model
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Trening Mask R-CNN (v2)")
-    parser.add_argument("--dataset_dir", type=str, default="../data", help="Ścieżka do danych")
-    parser.add_argument("--num_workers", type=int, default=10, help="Liczba wątków dla DataLoadera")
-    parser.add_argument("--batch_size", type=int, default=1, help="Rozmiar batcha")
-    parser.add_argument("--epochs", type=int, default=20, help="Liczba epok do wykonania")
-    parser.add_argument("--lr", type=float, default=0.0005, help="Początkowa wartość learning rate")
-    parser.add_argument("--patience", type=int, default=8, help="Liczba epok bez poprawy dla Early Stopping")
-    parser.add_argument("--coco_gt_path", type=str, default="../data/val/annotations/coco.json", help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
-    parser.add_argument("--num_augmentations", type=int, default=8, help="Liczba augmentacji na obraz")
-    parser.add_argument("--resume", type=str, default=None, help="Ścieżka do zapisanego checkpointu do wczytania")
-
-    args = parser.parse_args()
-
+def train_model(args, is_api_call=False):
+    """Funkcja treningowa, która może być wywołana z API lub z linii poleceń."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    # Domyślna nazwa modelu z końcówką _checkpoint
-    default_model_name = f"train_3_{timestamp}_checkpoint"
-    nazwa_modelu = input(f"Podaj nazwę modelu (Enter dla domyślnej: {default_model_name}): ").strip() or default_model_name
+    print(f"Czy CUDA jest dostępna: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"Nazwa GPU: {torch.cuda.get_device_name(0)}")
+        print(f"Liczba dostępnych GPU: {torch.cuda.device_count()}")
+        shm_path = "/dev/shm"
+    shm_usage = shutil.disk_usage(shm_path)
+    print(f"Pamięć współdzielona (/dev/shm):")
+    print(f"Całkowita: {shm_usage.total / (1024**3):.2f} GB")
+    print(f"Użyta: {shm_usage.used / (1024**3):.2f} GB")
+    print(f"Wolna: {shm_usage.free / (1024**3):.2f} GB")
 
-    # Upewniamy się, że nazwa modelu kończy się na _checkpoint
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    # Ustalanie nazwy modelu
+    if is_api_call:
+        if not args.model_name:
+            raise ValueError("Nazwa modelu (--model_name) jest wymagana przy wywołaniu przez API.")
+        nazwa_modelu = f"{args.model_name}_{timestamp}_checkpoint"
+    else:
+        if args.model_name:
+            nazwa_modelu = f"{args.model_name}_{timestamp}_checkpoint"
+        else:
+            default_model_name = f"train_3_{timestamp}_checkpoint"
+            try:
+                nazwa_modelu_input = input(f"Podaj nazwę modelu (Enter dla domyślnej: {default_model_name}): ").strip()
+                nazwa_modelu = nazwa_modelu_input if nazwa_modelu_input else default_model_name
+            except EOFError:
+                print("Brak interaktywnego wejścia, używam domyślnej nazwy modelu.")
+                nazwa_modelu = default_model_name
+
     if not nazwa_modelu.endswith('_checkpoint'):
         nazwa_modelu = f"{nazwa_modelu}_checkpoint"
 
-    os.makedirs(f"../logs/train/{nazwa_modelu}", exist_ok=True)
-    os.makedirs(f"../logs/val/{nazwa_modelu}", exist_ok=True)
-    os.makedirs("../models", exist_ok=True)
+    # Ścieżki w kontenerze
+    os.makedirs(f"/app/logs/train/{nazwa_modelu}", exist_ok=True)
+    os.makedirs(f"/app/logs/val/{nazwa_modelu}", exist_ok=True)
+    os.makedirs("/app/models", exist_ok=True)
+
+    # Ustalanie ścieżek do folderów danych
+    train_dir = args.train_dir  # Używamy train_dir zamiast dataset_dir
+    val_dir = "/app/data/val"  # Domyślna ścieżka do danych walidacyjnych
+
+    # Ustalanie ścieżek do plików adnotacji
+    coco_train_path = args.coco_train_path if args.coco_train_path else os.path.join(train_dir, "annotations", "coco.json")
+    coco_val_path = args.coco_gt_path if args.coco_gt_path else os.path.join(val_dir, "annotations", "coco.json")
+
+    # Sprawdzenie, czy pliki adnotacji istnieją
+    if not os.path.exists(coco_train_path):
+        raise FileNotFoundError(f"Plik adnotacji treningowych nie istnieje: {coco_train_path}")
+    if not os.path.exists(coco_val_path):
+        raise FileNotFoundError(f"Plik adnotacji walidacyjnych nie istnieje: {coco_val_path}")
 
     print("\nWczytywanie danych...")
     train_loader, val_loader = get_data_loaders(
-        args.dataset_dir, 
+        train_dir=train_dir, 
+        val_dir=val_dir,      
         batch_size=args.batch_size, 
         num_workers=args.num_workers, 
-        num_augmentations=args.num_augmentations
+        num_augmentations=args.num_augmentations,
+        coco_train_path=coco_train_path,  
+        coco_val_path=coco_val_path      
     )
 
     # Inicjalizacja list metryk
@@ -129,7 +167,7 @@ if __name__ == "__main__":
         for epoch in range(start_epoch, end_epoch + 1):
             strata_treningowa = train_one_epoch(model, train_loader, optimizer, device, epoch)
             strata_walidacyjna, liczba_predykcji, liczba_gt, mAP_bbox, mAP_seg = validate_model(
-                model, val_loader, device, epoch, nazwa_modelu, args.coco_gt_path
+                model, val_loader, device, epoch, nazwa_modelu, coco_val_path
             )
 
             straty_treningowe.append(strata_treningowa)
@@ -158,7 +196,7 @@ if __name__ == "__main__":
                     'mAPs_bbox': mAPs_bbox,
                     'mAPs_seg': mAPs_seg
                 }
-                best_checkpoint_path = f"../models/{nazwa_modelu}_best_checkpoint.pth"
+                best_checkpoint_path = f"/app/models/{nazwa_modelu}_best_checkpoint.pth"
                 torch.save(checkpoint, best_checkpoint_path)
                 print(f"Zapisano najlepszy checkpoint: {best_checkpoint_path}")
             else:
@@ -187,7 +225,7 @@ if __name__ == "__main__":
         'mAPs_bbox': mAPs_bbox,
         'mAPs_seg': mAPs_seg
     }
-    nazwa_pliku_checkpointu = f"../models/{nazwa_modelu}_checkpoint.pth"
+    nazwa_pliku_checkpointu = f"/app/models/{nazwa_modelu}_checkpoint.pth"
     torch.save(checkpoint, nazwa_pliku_checkpointu)
     print(f"Checkpoint zapisano jako: {nazwa_pliku_checkpointu}")
 
@@ -204,7 +242,7 @@ if __name__ == "__main__":
     plt.ylabel("Strata")
     plt.legend()
     plt.grid(True)
-    plt.savefig(f"../logs/train/{nazwa_modelu}/loss_plot.png")
+    plt.savefig(f"/app/logs/train/{nazwa_modelu}/loss_plot.png")
 
     plt.figure(figsize=(10, 5))
     plt.plot(liczby_predykcji, label="Wykryte obiekty")
@@ -213,7 +251,7 @@ if __name__ == "__main__":
     plt.ylabel("Liczba obiektów")
     plt.legend()
     plt.grid(True)
-    plt.savefig(f"../logs/train/{nazwa_modelu}/detections_plot.png")
+    plt.savefig(f"/app/logs/train/{nazwa_modelu}/detections_plot.png")
 
     plt.figure(figsize=(10, 5))
     plt.plot(mAPs_bbox, label="mAP (bbox)")
@@ -222,6 +260,24 @@ if __name__ == "__main__":
     plt.ylabel("mAP")
     plt.legend()
     plt.grid(True)
-    plt.savefig(f"../logs/train/{nazwa_modelu}/mAP_plot.png")
+    plt.savefig(f"/app/logs/train/{nazwa_modelu}/mAP_plot.png")
 
     print("Trening zakończony!")
+    return f"Trening zakończony! Checkpoint zapisany jako: {nazwa_pliku_checkpointu}"
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Trening Mask R-CNN (v2)")
+    parser.add_argument("--train_dir", type=str, default="/app/train_data", help="Ścieżka do danych treningowych")
+    parser.add_argument("--num_workers", type=int, default=1, help="Liczba wątków dla DataLoadera")
+    parser.add_argument("--batch_size", type=int, default=1, help="Rozmiar batcha")
+    parser.add_argument("--epochs", type=int, default=20, help="Liczba epok do wykonania")
+    parser.add_argument("--lr", type=float, default=0.0005, help="Początkowa wartość learning rate")
+    parser.add_argument("--patience", type=int, default=8, help="Liczba epok bez poprawy dla Early Stopping")
+    parser.add_argument("--coco_train_path", type=str, default=None, help="Ścieżka do pliku COCO z adnotacjami treningowymi")
+    parser.add_argument("--coco_gt_path", type=str, default=None, help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
+    parser.add_argument("--num_augmentations", type=int, default=8, help="Liczba augmentacji na obraz")
+    parser.add_argument("--resume", type=str, default=None, help="Ścieżka do zapisanego checkpointu do wczytania")
+    parser.add_argument("--model_name", type=str, default=None, help="Nazwa modelu (wymagane przy wywołaniu przez API)")
+
+    args = parser.parse_args()
+    train_model(args, is_api_call=False)

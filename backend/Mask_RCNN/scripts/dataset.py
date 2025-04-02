@@ -9,15 +9,30 @@ import albumentations as A
 from pycocotools import mask as mask_utils
 
 class RuryDataset(Dataset):
-    def __init__(self, dataset_dir, subset, image_size=(1024, 1024), augment=False, num_augmentations=1):
-        self.dataset_dir = dataset_dir
-        self.subset = subset
+    def __init__(self, root, split, image_size=(1024, 1024), augment=False, num_augmentations=1, annotation_path=None):
+        """
+        Args:
+            root (str): Ścieżka do katalogu z danymi (np. /app/train_data lub /app/data/val).
+            split (str): "train" lub "val".
+            image_size (tuple): Rozmiar obrazów (wysokość, szerokość).
+            augment (bool): Czy stosować augmentacje.
+            num_augmentations (int): Liczba augmentacji na obraz.
+            annotation_path (str, optional): Ścieżka do pliku COCO z adnotacjami. Jeśli None, używa domyślnej lokalizacji.
+        """
+        self.root = root
+        self.split = split
         self.image_size = image_size
         self.augment = augment
         self.num_augmentations = num_augmentations if augment else 1
-        self.image_dir = os.path.join(dataset_dir, subset, "images")
-        self.annotation_path = os.path.join(dataset_dir, subset, "annotations", "coco.json")
+        self.image_dir = os.path.join(root, "images")  # Zakładamy, że obrazy są w podkatalogu "images"
 
+        # Ustalanie ścieżki do pliku adnotacji
+        if annotation_path is None:
+            self.annotation_path = os.path.join(root, "annotations", "coco.json")
+        else:
+            self.annotation_path = annotation_path
+
+        # Sprawdzenie, czy plik adnotacji istnieje
         if not os.path.exists(self.annotation_path):
             raise FileNotFoundError(f"Nie znaleziono pliku adnotacji: {self.annotation_path}")
         with open(self.annotation_path, 'r') as f:
@@ -182,14 +197,42 @@ class RuryDataset(Dataset):
 def custom_collate_fn(batch):
     return tuple(zip(*batch))
 
-def get_data_loaders(dataset_dir, batch_size=2, num_workers=4, num_augmentations=1):
+def get_data_loaders(train_dir, val_dir, batch_size=2, num_workers=4, num_augmentations=1, coco_train_path=None, coco_val_path=None):
+    """
+    Tworzy DataLoader'y dla danych treningowych i walidacyjnych.
+
+    Args:
+        train_dir (str): Ścieżka do katalogu z danymi treningowymi (np. /app/train_data).
+        val_dir (str): Ścieżka do katalogu z danymi walidacyjnymi (np. /app/data/val).
+        batch_size (int): Rozmiar partii (batch size). Domyślnie 2.
+        num_workers (int): Liczba wątków dla DataLoadera. Domyślnie 4.
+        num_augmentations (int): Liczba augmentacji na obraz. Domyślnie 1.
+        coco_train_path (str): Ścieżka do pliku COCO z adnotacjami treningowymi.
+        coco_val_path (str): Ścieżka do pliku COCO z adnotacjami walidacyjnymi.
+
+    Returns:
+        tuple: (train_loader, val_loader) - DataLoader'y dla danych treningowych i walidacyjnych.
+    """
+    # Tworzenie datasetu treningowego
     train_dataset = RuryDataset(
-        dataset_dir, "train", image_size=(1024, 1024), augment=True, num_augmentations=num_augmentations
-    )
-    val_dataset = RuryDataset(
-        dataset_dir, "val", image_size=(1024, 1024), augment=False
+        root=train_dir,
+        split="train",
+        image_size=(1024, 1024),
+        augment=True,
+        num_augmentations=num_augmentations,
+        annotation_path=coco_train_path  # Przekazujemy ścieżkę do adnotacji
     )
 
+    # Tworzenie datasetu walidacyjnego
+    val_dataset = RuryDataset(
+        root=val_dir,
+        split="val",
+        image_size=(1024, 1024),
+        augment=False,
+        annotation_path=coco_val_path  # Przekazujemy ścieżkę do adnotacji
+    )
+
+    # Tworzenie DataLoadera dla danych treningowych
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -197,6 +240,8 @@ def get_data_loaders(dataset_dir, batch_size=2, num_workers=4, num_augmentations
         num_workers=num_workers,
         collate_fn=custom_collate_fn
     )
+
+    # Tworzenie DataLoadera dla danych walidacyjnych
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
@@ -206,14 +251,3 @@ def get_data_loaders(dataset_dir, batch_size=2, num_workers=4, num_augmentations
     )
 
     return train_loader, val_loader
-
-if __name__ == "__main__":
-    dataset_dir = "../data"
-    train_loader, val_loader = get_data_loaders(dataset_dir, batch_size=2, num_workers=4, num_augmentations=3)
-
-    for images, targets in train_loader:
-        print(f"Batch size: {len(images)}")
-        print(f"Image shape: {images[0].shape}")
-        print(f"Target keys: {targets[0].keys()}")
-        print(f"Mask shape: {targets[0]['masks'].shape}")
-        break

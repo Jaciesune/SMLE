@@ -20,7 +20,8 @@ services:
       dockerfile: Dockerfile.maskrcnn
     container_name: maskrcnn
     volumes:
-      - ./backend/Mask_RCNN:/app
+      - ./backend/Mask_RCNN:/app/
+      - ./backend/MCNN:/app/MCNN
     deploy:
       resources:
         reservations:

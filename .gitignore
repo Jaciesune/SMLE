@@ -17,7 +17,6 @@ env/
 SMLE_ENV_3_12/
 dml_venv/
 dml_venv_39/
-env_frcnn
 *.venv
 
 # 🏗 Pliki zależności i buildów
@@ -44,18 +43,19 @@ checkpoints/
 *.onnx
 
 # 📷 Tymczasowe pliki obrazów i logów
-*.log
-logs/
+# *.log
+# logs/
 *.png
 *.jpg
-*.jpeg
-*.gif
-*.bmp
+# *.jpeg
+# *.gif
+# *.bmp
 
 # 🔬 Debug i testy
 debug.log
 tests/__pycache__/
 tests/output/
+logs/
 
 # ⚠️ Pliki specyficzne dla systemów operacyjnych
 .DS_Store
@@ -64,7 +64,6 @@ Thumbs.db
 *.swp
 *.swo
 *.orig
-frontend/__pycache__/
-backend/__pycache__/
-backend/.vscode/
 
+*__pycache__*
+test

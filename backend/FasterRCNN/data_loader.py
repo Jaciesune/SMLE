@@ -8,7 +8,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 def get_dataset_paths():
-    base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dataset"))
+    base = os.path.abspath(os.path.join(os.path.dirname(__file__), "dataset"))
     return {
         "train_images": os.path.join(base, "train/images"),
         "train_annotations": os.path.join(base, "train/annotations.json"),

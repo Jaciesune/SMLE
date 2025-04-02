@@ -55,44 +55,40 @@ class TrainAPI:
 
         script_name = self.train_scripts[algorithm]
 
-        # Parsowanie argumentów, aby znaleźć --train_dir
+        # Parsowanie argumentów, aby znaleźć --train_dir i --host_train_path
         train_dir = None
+        host_train_path = None
         for i in range(0, len(args), 2):
             if args[i] == "--train_dir":
                 train_dir = args[i + 1]
-                break
+            elif args[i] == "--host_train_path":
+                host_train_path = args[i + 1]
 
         if not train_dir:
             return f"Błąd: Ścieżka do danych treningowych (--train_dir) nie została podana."
 
-        # Sprawdzenie, czy katalog train_dir istnieje na hoście
-        if not os.path.exists(train_dir):
-            return f"Błąd: Katalog danych treningowych nie istnieje: {train_dir}"
+        if not host_train_path:
+            return f"Błąd: Ścieżka na hoście (--host_train_path) nie została podana."
+
+        # Sprawdzenie, czy katalog host_train_path istnieje na hoście
+        if not os.path.exists(host_train_path):
+            return f"Błąd: Katalog danych treningowych nie istnieje: {host_train_path}"
 
         try:
             # Przygotowanie polecenia docker run z dynamicznym montowaniem
             command = [
                 "docker", "run", "--rm", "--gpus", "all",
                 "-v", f"{self.base_path}/Mask_RCNN:/app",
-                "-v", f"{train_dir}:/app/train_data",
+                "-v", f"{host_train_path}:/data/train",
                 "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
                 "smle-maskrcnn",
                 "python", f"scripts/{script_name}"
             ]
 
-            # Aktualizacja argumentu --train_dir na ścieżkę w kontenerze
-            updated_args = []
-            i = 0
-            while i < len(args):
-                if args[i] == "--train_dir":
-                    updated_args.append("--train_dir")
-                    updated_args.append("/app/train_data")
-                    i += 2
-                else:
-                    updated_args.append(args[i])
-                    i += 1
+            # Usuwamy --host_train_path z argumentów przekazywanych do skryptu
+            filtered_args = [arg for arg in args if arg != "--host_train_path" and arg != host_train_path]
+            command.extend(filtered_args)
 
-            command.extend(updated_args)
             print(f"Uruchamiam polecenie: {' '.join(command)}")
             result = subprocess.run(command, capture_output=True, text=True)
             if result.returncode != 0:
@@ -100,3 +96,84 @@ class TrainAPI:
             return result.stdout
         except subprocess.CalledProcessError as e:
             return f"Błąd podczas uruchamiania kontenera: {e}"
+
+    def train_model_stream(self, algorithm, *args):
+        """Uruchamia skrypt treningowy i zwraca logi w czasie rzeczywistym."""
+        if algorithm not in self.train_scripts:
+            yield f"Błąd: Algorytm {algorithm} nie jest wspierany."
+            return
+
+        script_name = self.train_scripts[algorithm]
+
+        # Parsowanie argumentów, aby znaleźć --train_dir i --host_train_path
+        train_dir = None
+        host_train_path = None
+        for i in range(0, len(args), 2):
+            if args[i] == "--train_dir":
+                train_dir = args[i + 1]
+            elif args[i] == "--host_train_path":
+                host_train_path = args[i + 1]
+
+        if not train_dir:
+            yield f"Błąd: Ścieżka do danych treningowych (--train_dir) nie została podana."
+            return
+
+        if not host_train_path:
+            yield f"Błąd: Ścieżka na hoście (--host_train_path) nie została podana."
+            return
+
+        # Sprawdzenie, czy katalog host_train_path istnieje na hoście
+        if not os.path.exists(host_train_path):
+            yield f"Błąd: Katalog danych treningowych nie istnieje: {host_train_path}"
+            return
+
+        try:
+            # Przygotowanie środowiska z PYTHONUNBUFFERED, aby wymusić brak buforowania
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
+
+            # Przygotowanie polecenia docker run z dynamicznym montowaniem
+            command = [
+                "docker", "run", "--rm", "--gpus", "all",
+                "-v", f"{self.base_path}/Mask_RCNN:/app",
+                "-v", f"{host_train_path}:/data/train",
+                "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
+                "smle-maskrcnn",
+                "python", f"scripts/{script_name}"
+            ]
+
+            # Usuwamy --host_train_path z argumentów przekazywanych do skryptu
+            filtered_args = [arg for arg in args if arg != "--host_train_path" and arg != host_train_path]
+            command.extend(filtered_args)
+
+            print(f"Uruchamiam polecenie: {' '.join(command)}")
+            # Uruchamiamy proces z możliwością strumieniowego odczytu
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,  # Wymuszenie buforowania liniowego
+                universal_newlines=True,
+                env=env  # Przekazujemy środowisko z PYTHONUNBUFFERED
+            )
+
+            # Odczytujemy stdout i stderr w czasie rzeczywistym
+            while True:
+                stdout_line = process.stdout.readline()
+                if stdout_line:
+                    yield stdout_line.strip()  # Zwracamy linię stdout
+
+                stderr_line = process.stderr.readline()
+                if stderr_line:
+                    yield stderr_line.strip()  # Zwracamy linię stderr
+
+                # Sprawdzamy, czy proces się zakończył
+                if process.poll() is not None:
+                    break
+
+            # Sprawdzamy kod wyjścia procesu
+            if process.returncode != 0:
+                yield f"Błąd podczas uruchamiania skryptu {script_name}: proces zakończony z kodem {process.returncode}"
+        except subprocess.CalledProcessError as e:
+            yield f"Błąd podczas uruchamiania kontenera: {e}"

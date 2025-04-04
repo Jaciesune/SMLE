@@ -54,7 +54,7 @@ class TrainAPI:
         """Uruchamia skrypt treningowy w kontenerze smle-maskrcnn."""
         if algorithm not in self.train_scripts:
             return f"Błąd: Algorytm {algorithm} nie jest wspierany."
-
+        
         script_name = self.train_scripts[algorithm]
 
         # Parsowanie argumentów, aby znaleźć --train_dir i --host_train_path
@@ -77,18 +77,37 @@ class TrainAPI:
             return f"Błąd: Katalog danych treningowych nie istnieje: {host_train_path}"
 
         try:
-            # Przygotowanie polecenia docker run z dynamicznym montowaniem
-            command = [
-                "docker", "run", "--rm", "--gpus", "all",
-                "-v", f"{self.base_path}/Mask_RCNN:/app",
-                "-v", f"{host_train_path}:/data/train",
-                "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
-                "smle-maskrcnn",
-                "python", f"scripts/{script_name}"
-            ]
+            if algorithm == "Mask R-CNN":
+                # Przygotowanie polecenia docker run z dynamicznym montowaniem
+                command = [
+                    "docker", "run", "--rm", "--gpus", "all",
+                    "-v", f"{self.base_path}/Mask_RCNN:/app",
+                    "-v", f"{host_train_path}:/data/train",  # Zmiana ścieżki na /dataset/train
+                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
+                    "smle-maskrcnn",
+                    "python", f"scripts/{script_name}"
+                ]
+            else:  # algorithm == "MCNN":
+                # Przygotowanie polecenia docker run z dynamicznym montowaniem
+                command = [
+                    "docker", "run", "--rm", "--gpus", "all",
+                    "-v", f"{self.base_path}/MCNN:/app/MCNN",
+                    "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
+                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
+                    "smle-maskrcnn",
+                    "python", f"MCNN/{script_name}"
+                ]
 
             # Usuwamy --host_train_path z argumentów przekazywanych do skryptu
             filtered_args = [arg for arg in args if arg != "--host_train_path" and arg != host_train_path]
+
+            # Zastąpienie ścieżek hosta kontenerowymi ścieżkami wewnątrz dockera
+            if algorithm == "MCNN":
+                filtered_args = [
+                    arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
+                    for arg in filtered_args
+                ]
+
             command.extend(filtered_args)
 
             print(f"Uruchamiam polecenie: {' '.join(command)}")
@@ -134,18 +153,37 @@ class TrainAPI:
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
 
-            # Przygotowanie polecenia docker run z dynamicznym montowaniem
-            command = [
-                "docker", "run", "--rm", "--gpus", "all",
-                "-v", f"{self.base_path}/Mask_RCNN:/app",
-                "-v", f"{host_train_path}:/data/train",
-                "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
-                "smle-maskrcnn",
-                "python", f"scripts/{script_name}"
-            ]
+            if algorithm == "Mask R-CNN":
+                # Przygotowanie polecenia docker run z dynamicznym montowaniem
+                command = [
+                    "docker", "run", "--rm", "--gpus", "all",
+                    "-v", f"{self.base_path}/Mask_RCNN:/app",
+                    "-v", f"{host_train_path}:/data/train",  # Zmiana ścieżki na /dataset/train
+                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
+                    "smle-maskrcnn",
+                    "python", f"scripts/{script_name}"
+                ]
+            else:  # algorithm == "MCNN":
+                # Przygotowanie polecenia docker run z dynamicznym montowaniem
+                command = [
+                    "docker", "run", "--rm", "--gpus", "all",
+                    "-v", f"{self.base_path}/MCNN:/app/MCNN",
+                    "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
+                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
+                    "smle-maskrcnn",
+                    "python", f"MCNN/{script_name}"
+                ]
 
             # Usuwamy --host_train_path z argumentów przekazywanych do skryptu
             filtered_args = [arg for arg in args if arg != "--host_train_path" and arg != host_train_path]
+
+            # Zastąpienie ścieżek hosta kontenerowymi ścieżkami wewnątrz dockera
+            if algorithm == "MCNN":
+                filtered_args = [
+                    arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
+                    for arg in filtered_args
+                ]
+
             command.extend(filtered_args)
 
             print(f"Uruchamiam polecenie: {' '.join(command)}")

@@ -1,0 +1,20 @@
+MODEL:
+  NUM_CLASSES: 2  # 2 klasy: tlo + rury
+
+DATASETS:
+  TRAIN: ("train",)  
+  TEST: ("val",)    
+
+INPUT:
+  IMAGE_SIZE: 300
+
+SOLVER:
+  BATCH_SIZE: 16 
+  
+  MAX_ITER: 2000  # Zwiększ, np. do 2000
+  LR_STEPS: [1000, 1500]  # Dostosuj kroki
+  
+  LR: 0.005
+  WARMUP_ITERS: 100
+
+OUTPUT_DIR: "outputs/pipes" 

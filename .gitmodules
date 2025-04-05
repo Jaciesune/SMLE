@@ -1,6 +1,0 @@
-[submodule "yolo_object_counting/yolo_object_counting/SSD"]
-	path = yolo_object_counting/yolo_object_counting/SSD
-	url = https://github.com/AlynXX/SSD
-[submodule "yolo_object_counting/SSD"]
-	path = yolo_object_counting/SSD
-	url = https://github.com/AlynXX/SSD

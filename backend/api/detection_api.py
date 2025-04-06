@@ -10,7 +10,7 @@ class DetectionAPI:
         # Definicja algorytmów i ich folderów z modelami
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
-            "Faster R-CNN": self.base_path / "FasterRCNN" / "saved_models",
+            "FasterRCNN": self.base_path / "FasterRCNN" / "saved_models",
             "YOLO": self.base_path / "YOLO" / "models",
             "MCNN": self.base_path / "MCNN" / "models"
         }
@@ -66,7 +66,13 @@ class DetectionAPI:
                 ]
 
             print(f"Uruchamiam polecenie: {' '.join(command)}")  # Logowanie dla debugowania
-            result = subprocess.run(command, capture_output=True, text=True)
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace"
+            )
             if result.returncode != 0:
                 return f"Błąd podczas uruchamiania skryptu {script_name}: {result.stderr}"
             return result.stdout
@@ -121,7 +127,15 @@ class DetectionAPI:
             shutil.copy(image_path, temp_image_path)
             container_image_path = f"/app/FasterRCNN/data/test/images/{image_name}"
             container_model_path = f"/app/FasterRCNN/saved_models/{version}"
-            result = self.run_script("test.py", algorithm, container_image_path, container_model_path)
+            result = self.run_script(
+                "test.py",
+                algorithm,
+                "--image_path", container_image_path,
+                "--model_path", container_model_path,
+                "--output_dir", "/app/FasterRCNN/data/detectes",
+                "--threshold", "0.25",
+                "--num_classes", "2"
+            )
         else:
             return f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
 

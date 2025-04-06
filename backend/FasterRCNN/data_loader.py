@@ -28,7 +28,7 @@ def get_train_transform():
     return A.Compose([
         A.RandomScale(scale_limit=(-0.3, 0.0), p=0.5),
         A.SmallestMaxSize(max_size=1024, p=1.0),
-        A.PadIfNeeded(min_height=1024, min_width=1024, border_mode=0, value=0, p=1.0),
+        A.PadIfNeeded(min_height=1024, min_width=1024, border_mode=0, constant_values=0, p=1.0),
         A.RandomCrop(height=1024, width=1024, p=0.4),
         A.HorizontalFlip(p=0.5),
         A.RandomBrightnessContrast(p=0.5),

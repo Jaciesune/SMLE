@@ -35,10 +35,10 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"\nUżywane urządzenie: {torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'}")
 
-    os.makedirs(f"train/{model_name}", exist_ok=True)
-    os.makedirs(f"val/{model_name}", exist_ok=True)
-    os.makedirs(f"saved_models/{model_name}", exist_ok=True)
-    os.makedirs(f"test/{model_name}", exist_ok=True)
+    os.makedirs(f"/app/FasterRCNN/train/{model_name}", exist_ok=True)
+    os.makedirs(f"/app/FasterRCNN/val/{model_name}", exist_ok=True)
+    os.makedirs(f"/app/FasterRCNN/saved_models/{model_name}", exist_ok=True)
+    os.makedirs(f"/app/FasterRCNN/test/{model_name}", exist_ok=True)
 
     print("\nDebug - Ścieżki danych:")
     train_path = os.path.join(args.train_dir, "images")
@@ -101,15 +101,15 @@ def main():
         print(f"Learning rate: {current_lr:.6f}")
 
         if epoch % 5 == 0:
-            torch.save(model.state_dict(), f"saved_models/{model_name}/model_epoch_{epoch}.pth")
+            torch.save(model.state_dict(), f"/app/FasterRCNN/saved_models/{model_name}/model_epoch_{epoch}.pth")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
-            torch.save(model.state_dict(), f"saved_models/{model_name}/model_best_epoch_{epoch}.pth")
+            torch.save(model.state_dict(), f"/app/FasterRCNN/saved_models/{model_name}/model_best_epoch_{epoch}.pth")
 
-    torch.save(model.state_dict(), f"saved_models/{model_name}/model_final.pth")
-    print(f"\nModel końcowy zapisano jako: saved_models/{model_name}/model_final.pth")
+    torch.save(model.state_dict(), f"/app/FasterRCNN/saved_models/{model_name}_final_checkpoint.pth")
+    print(f"\nModel końcowy zapisano jako: saved_models/{model_name}/model_final_checkpoint.pth")
     print(f"Najlepszy model pochodzi z epoki {best_epoch} (val_loss = {best_val_loss:.4f})")
 
     # Wykres strat
@@ -121,7 +121,7 @@ def main():
     plt.legend()
     plt.grid(True)
     plt.title("Strata w czasie treningu")
-    plt.savefig(f"test/{model_name}/loss_plot.png")
+    plt.savefig(f"/app/FasterRCNN/test/{model_name}/loss_plot.png")
     plt.close()
 
     # Wykres liczby detekcji
@@ -133,7 +133,7 @@ def main():
     plt.legend()
     plt.grid(True)
     plt.title("Porównanie predykcji i GT")
-    plt.savefig(f"test/{model_name}/detections_plot.png")
+    plt.savefig(f"/app/FasterRCNN/test/{model_name}/detections_plot.png")
     plt.close()
 
     # Wykres mAP
@@ -145,7 +145,7 @@ def main():
     plt.title("Mean Average Precision")
     plt.legend()
     plt.grid(True)
-    plt.savefig(f"test/{model_name}/map_plot.png")
+    plt.savefig(f"/app/FasterRCNN/test/{model_name}/map_plot.png")
     plt.close()
 
     print("Wykresy zapisane w folderze test.")

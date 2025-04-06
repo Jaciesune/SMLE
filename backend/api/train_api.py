@@ -95,7 +95,7 @@ class TrainAPI:
                     "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
                     "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
                     "smle-maskrcnn",
-                    "python", f"/MCNN/{script_name}"
+                    "python", f"MCNN/{script_name}"
                 ]
             
             elif algorithm == "FasterRCNN":
@@ -190,7 +190,7 @@ class TrainAPI:
                     "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
                     "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
                     "smle-maskrcnn",
-                    "python", f"/MCNN/{script_name}"
+                    "python", f"MCNN/{script_name}"
                 ]
             
             elif algorithm == "FasterRCNN":

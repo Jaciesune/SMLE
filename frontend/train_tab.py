@@ -153,8 +153,10 @@ class TrainTab(QtWidgets.QWidget):
         # Ścieżki do plików coco
         coco_train_path = os.path.join(container_train_path, "annotations", "coco.json").replace("\\", "/")
 
-        # Specjalna ścieżka walidacyjna dla MCNN
+        # Specjalna ścieżka walidacyjna dla MCNN i FasterRCNN
         if algorithm == "MCNN":
+            coco_val_path = "/app/MCNN/dataset/val/annotations/instances_val.json"
+        elif algorithm =="FasterRCNN":
             coco_val_path = "/app/MCNN/dataset/val/annotations/instances_val.json"
         else:
             coco_val_path = os.path.join(container_val_path, "annotations", "coco.json").replace("\\", "/")

@@ -10,7 +10,7 @@ class DetectionAPI:
         # Definicja algorytmów i ich folderów z modelami
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
-            "Faster R-CNN": self.base_path / "Faster_RCNN" / "models",
+            "Faster R-CNN": self.base_path / "FasterRCNN" / "saved_models",
             "YOLO": self.base_path / "YOLO" / "models",
             "MCNN": self.base_path / "MCNN" / "models"
         }
@@ -57,6 +57,13 @@ class DetectionAPI:
                     "smle-maskrcnn",
                     "python", f"MCNN/{script_name}", *args
                 ]
+            elif algorithm == "Faster RCNN":
+                command = [
+                    "docker", "run", "--rm", "--gpus", "all",
+                    "-v", f"{self.base_path}/FasterRCNN:/app/FasterRCNN",
+                    "smle-maskrcnn",
+                    "python", f"FasterRCNN/{script_name}", *args
+                ]
 
             print(f"Uruchamiam polecenie: {' '.join(command)}")  # Logowanie dla debugowania
             result = subprocess.run(command, capture_output=True, text=True)
@@ -102,6 +109,19 @@ class DetectionAPI:
             container_image_path = f"/app/MCNN/data/test/images/{image_name}"
             container_model_path = f"/app/MCNN/models/{version}"
             result = self.run_script("test_model.py", algorithm, container_image_path, container_model_path)
+        
+        elif algorithm == "Faster RCNN":
+            self.detectes_path = self.base_path / "FasterRCNN" / "data" / "detectes"
+            test_images_path = self.base_path / "FasterRCNN" / "data" / "test" / "images"
+            print(test_images_path)
+            test_images_path.mkdir(parents=True, exist_ok=True)
+            image_name = os.path.basename(image_path)
+            temp_image_path = test_images_path / image_name
+            print(temp_image_path)
+            shutil.copy(image_path, temp_image_path)
+            container_image_path = f"/app/FasterRCNN/data/test/images/{image_name}"
+            container_model_path = f"/app/FasterRCNN/saved_models/{version}"
+            result = self.run_script("test.py", algorithm, container_image_path, container_model_path)
         else:
             return f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
 

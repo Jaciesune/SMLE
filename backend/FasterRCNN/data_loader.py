@@ -11,9 +11,9 @@ def get_dataset_paths():
     base = os.path.abspath(os.path.join(os.path.dirname(__file__), "dataset"))
     return {
         "train_images": os.path.join(base, "train/images"),
-        "train_annotations": os.path.join(base, "train/annotations.json"),
+        "train_annotations": os.path.join(base, "train/annotations/instances_train.json"),
         "val_images": os.path.join(base, "val/images"),
-        "val_annotations": os.path.join(base, "val/annotations.json"),
+        "val_annotations": os.path.join(base, "val/annotations/instances_val.json"),
         "test_images": os.path.join(base, "test/images")
     }
 
@@ -51,17 +51,27 @@ class CocoDetectionWithAlbumentations(CocoDetection):
 
     def __getitem__(self, index):
         image, target = super().__getitem__(index)
+        image_id = self.ids[index]  # <- pobierz ID z COCO
+
         boxes, labels = [], []
         for obj in target:
             x, y, w, h = obj["bbox"]
             if w > 0 and h > 0:
                 boxes.append([x, y, x + w, y + h])
                 labels.append(obj["category_id"])
+
         image_np = np.array(image).astype(np.float32) / 255.0
-        transformed = self.transform(image=image_np, bboxes=boxes, category_ids=labels)
+
+        transformed = self.transform(
+            image=image_np,
+            bboxes=boxes,
+            category_ids=labels
+        )
+
         return transformed["image"], {
             "boxes": torch.tensor(transformed["bboxes"], dtype=torch.float32),
-            "labels": torch.tensor(transformed["category_ids"], dtype=torch.int64)
+            "labels": torch.tensor(transformed["category_ids"], dtype=torch.int64),
+            "image_id": torch.tensor(image_id)
         }
 
 class UnannotatedImageFolder(torch.utils.data.Dataset):

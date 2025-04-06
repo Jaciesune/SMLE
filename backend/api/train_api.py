@@ -10,7 +10,7 @@ class TrainAPI:
         # Definicja algorytmów i ich folderów z modelami
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
-            "Faster R-CNN": self.base_path / "Faster_RCNN" / "models",
+            "Faster R-CNN": self.base_path / "FasterRCNN" / "saved_models",
             "YOLO": self.base_path / "YOLO" / "models",
             "MCNN": self.base_path / "MCNN" / "models"
         }
@@ -18,9 +18,9 @@ class TrainAPI:
         # Mapowanie algorytmów na skrypty treningowe
         self.train_scripts = {
             "Mask R-CNN": "train_maskrcnn.py",
-            "Faster R-CNN": "train_fasterrcnn.py",  # Do zaimplementowania
+            "Faster R-CNN": "run_training.py",
             "YOLO": "train_yolo.py",  # Do zaimplementowania
-            "MCNN": "train_model.py"  # Do zaimplementowania
+            "MCNN": "train_model.py"
         }
 
     def get_algorithms(self):
@@ -87,7 +87,7 @@ class TrainAPI:
                     "smle-maskrcnn",
                     "python", f"scripts/{script_name}"
                 ]
-            else:  # algorithm == "MCNN":
+            elif algorithm == "MCNN":
                 # Przygotowanie polecenia docker run z dynamicznym montowaniem
                 command = [
                     "docker", "run", "--rm", "--gpus", "all",
@@ -95,7 +95,18 @@ class TrainAPI:
                     "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
                     "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
                     "smle-maskrcnn",
-                    "python", f"MCNN/{script_name}"
+                    "python", f"/MCNN/{script_name}"
+                ]
+            
+            elif algorithm == "Faster RCNN":
+                # Przygotowanie polecenia docker run z dynamicznym montowaniem
+                command = [
+                    "docker", "run", "--rm", "--gpus", "all",
+                    "-v", f"{self.base_path}/FasterRCNN:/app/FasterRCNN",
+                    "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
+                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
+                    "smle-maskrcnn",
+                    "python", f"/FasterRCNN/{script_name}"
                 ]
 
             # Usuwamy --host_train_path z argumentów przekazywanych do skryptu
@@ -103,6 +114,12 @@ class TrainAPI:
 
             # Zastąpienie ścieżek hosta kontenerowymi ścieżkami wewnątrz dockera
             if algorithm == "MCNN":
+                filtered_args = [
+                    arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
+                    for arg in filtered_args
+                ]
+
+            if algorithm == "Faster RCNN":
                 filtered_args = [
                     arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
                     for arg in filtered_args
@@ -163,7 +180,8 @@ class TrainAPI:
                     "smle-maskrcnn",
                     "python", f"scripts/{script_name}"
                 ]
-            else:  # algorithm == "MCNN":
+            
+            elif algorithm == "MCNN":
                 # Przygotowanie polecenia docker run z dynamicznym montowaniem
                 command = [
                     "docker", "run", "--rm", "--gpus", "all",
@@ -171,7 +189,18 @@ class TrainAPI:
                     "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
                     "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
                     "smle-maskrcnn",
-                    "python", f"MCNN/{script_name}"
+                    "python", f"/MCNN/{script_name}"
+                ]
+            
+            elif algorithm == "Faster RCNN":
+                # Przygotowanie polecenia docker run z dynamicznym montowaniem
+                command = [
+                    "docker", "run", "--rm", "--gpus", "all",
+                    "-v", f"{self.base_path}/FasterRCNN:/app/FasterRCNN",
+                    "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
+                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
+                    "smle-maskrcnn",
+                    "python", f"/FasterRCNN/{script_name}"
                 ]
 
             # Usuwamy --host_train_path z argumentów przekazywanych do skryptu
@@ -179,6 +208,12 @@ class TrainAPI:
 
             # Zastąpienie ścieżek hosta kontenerowymi ścieżkami wewnątrz dockera
             if algorithm == "MCNN":
+                filtered_args = [
+                    arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
+                    for arg in filtered_args
+                ]
+            
+            if algorithm == "Faster RCNN":
                 filtered_args = [
                     arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
                     for arg in filtered_args

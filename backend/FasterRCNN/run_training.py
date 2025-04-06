@@ -46,17 +46,24 @@ def main():
     best_val_loss = float("inf")
     best_epoch = 0
     train_losses, val_losses, pred_counts, gt_counts = [], [], [], []
+    map_5095_list, map_50_list, precision_list, recall_list = [], [], [], []
 
     for epoch in range(1, epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch)
-        val_loss, pred_count, gt_count = validate_model(model, val_loader, device, epoch, model_name)
+        val_loss, pred_count, gt_count, map_5095, map_50, precision, recall = validate_model(model, val_loader, device, epoch, model_name)
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
         pred_counts.append(pred_count)
         gt_counts.append(gt_count)
+        map_5095_list.append(map_5095)
+        map_50_list.append(map_50)
+        precision_list.append(precision)
+        recall_list.append(recall)
 
-        print(f"Epoka {epoch}/{epochs} - Strata treningowa: {train_loss:.4f}, Strata walidacyjna: {val_loss:.4f}, Pred: {pred_count}, GT: {gt_count}")
+        print(f"Epoka {epoch}/{epochs} - Strata treningowa: {train_loss:.4f}, Strata walidacyjna: {val_loss:.4f}")
+        print(f"                - Detekcje: {pred_count} | GT: {gt_count}")
+        print(f"                - mAP@0.5: {map_50:.4f} | mAP@0.5:0.95: {map_5095:.4f} | Prec: {precision:.4f} | Rec: {recall:.4f}")
 
         if epoch % 5 == 0:
             torch.save(model.state_dict(), f"saved_models/{model_name}/model_epoch_{epoch}.pth")
@@ -93,6 +100,18 @@ def main():
     plt.grid(True)
     plt.title("Porównanie predykcji i GT")
     plt.savefig(f"test/{model_name}/detections_plot.png")
+    plt.close()
+
+    # Wykres mAP
+    plt.figure(figsize=(10, 5))
+    plt.plot(map_50_list, label="mAP@0.5")
+    plt.plot(map_5095_list, label="mAP@0.5:0.95")
+    plt.xlabel("Epoka")
+    plt.ylabel("mAP")
+    plt.title("Mean Average Precision")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f"test/{model_name}/map_plot.png")
     plt.close()
 
     print("Wykresy zapisane w folderze test.")

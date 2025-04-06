@@ -22,6 +22,7 @@ services:
     volumes:
       - ./backend/Mask_RCNN:/app/
       - ./backend/MCNN:/app/MCNN
+      - ./backend/FasterRCNN:/app/FasterRCNN
     deploy:
       resources:
         reservations:

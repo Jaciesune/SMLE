@@ -57,12 +57,12 @@ class DetectionAPI:
                     "smle-maskrcnn",
                     "python", f"MCNN/{script_name}", *args
                 ]
-            elif algorithm == "Faster RCNN":
+            elif algorithm == "FasterRCNN":
                 command = [
                     "docker", "run", "--rm", "--gpus", "all",
                     "-v", f"{self.base_path}/FasterRCNN:/app/FasterRCNN",
                     "smle-maskrcnn",
-                    "python", f"FasterRCNN/{script_name}", *args
+                    "python", f"/app/FasterRCNN/{script_name}", *args
                 ]
 
             print(f"Uruchamiam polecenie: {' '.join(command)}")  # Logowanie dla debugowania
@@ -110,7 +110,7 @@ class DetectionAPI:
             container_model_path = f"/app/MCNN/models/{version}"
             result = self.run_script("test_model.py", algorithm, container_image_path, container_model_path)
         
-        elif algorithm == "Faster RCNN":
+        elif algorithm == "FasterRCNN":
             self.detectes_path = self.base_path / "FasterRCNN" / "data" / "detectes"
             test_images_path = self.base_path / "FasterRCNN" / "data" / "test" / "images"
             print(test_images_path)

@@ -7,14 +7,18 @@ import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-def get_dataset_paths():
+def get_dataset_paths(train_path=None, val_path=None, test_path=None):
     base = os.path.abspath(os.path.join(os.path.dirname(__file__), "dataset"))
+    train_path = train_path or os.path.join(base, "train")
+    val_path = val_path or os.path.join(base, "val")
+    test_path = test_path or os.path.join(base, "test")
+
     return {
-        "train_images": os.path.join(base, "train/images"),
-        "train_annotations": os.path.join(base, "train/annotations/instances_train.json"),
-        "val_images": os.path.join(base, "val/images"),
-        "val_annotations": os.path.join(base, "val/annotations/instances_val.json"),
-        "test_images": os.path.join(base, "test/images")
+        "train_images": os.path.join(train_path, "images"),
+        "train_annotations": os.path.join(train_path, "annotations", "instances_train.json"),
+        "val_images": os.path.join(val_path, "images"),
+        "val_annotations": os.path.join(val_path, "annotations", "instances_val.json"),
+        "test_images": os.path.join(test_path, "images")
     }
 
 def collate_fn(batch):
@@ -51,7 +55,7 @@ class CocoDetectionWithAlbumentations(CocoDetection):
 
     def __getitem__(self, index):
         image, target = super().__getitem__(index)
-        image_id = self.ids[index]  # <- pobierz ID z COCO
+        image_id = self.ids[index]
 
         boxes, labels = [], []
         for obj in target:
@@ -91,13 +95,13 @@ class UnannotatedImageFolder(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.image_paths)
 
-def get_data_loaders(batch_size=2, num_workers=0):
-    paths = get_dataset_paths()
-    train_dataset = CocoDetectionWithAlbumentations(paths["train_images"], paths["train_annotations"], get_train_transform())
-    val_dataset = CocoDetectionWithAlbumentations(paths["val_images"], paths["val_annotations"], get_val_transform()) if os.path.exists(paths["val_annotations"]) else None
-    test_dataset = UnannotatedImageFolder(paths["test_images"], A.Compose([A.Resize(1024, 1024), ToTensorV2()]))
+def get_data_loaders(batch_size=2, num_workers=0, train_path=None, train_annotations=None, val_path=None, val_annotations=None, test_path=None):
+    train_dataset = CocoDetectionWithAlbumentations(train_path, train_annotations, get_train_transform())
 
-    print(f"DataLoader gotowy! Trening: {len(train_dataset)} | Walidacja: {len(val_dataset) if val_dataset else 0} | Test: {len(test_dataset)}")
+    val_dataset = CocoDetectionWithAlbumentations(val_path, val_annotations, get_val_transform()) \
+        if val_path and val_annotations and os.path.exists(val_annotations) else None
+
+    test_dataset = UnannotatedImageFolder(test_path, A.Compose([A.Resize(1024, 1024), ToTensorV2()]))
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn) if val_dataset else None

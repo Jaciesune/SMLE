@@ -1,5 +1,6 @@
 import torch
 import torch.optim as optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
 import argparse
 import matplotlib.pyplot as plt
@@ -19,13 +20,13 @@ def main():
     parser.add_argument("--batch_size", type=int, help="Wielkość batcha")
     parser.add_argument("--epochs", type=int, help="Liczba epok")
     parser.add_argument("--model_name", type=str, help="Nazwa modelu")
+    parser.add_argument("--lr", type=float, default=0.005, help="Learning rate")
 
     args = parser.parse_args()
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    # Interaktywny input jeśli brak argumentów
-    model_name = args.model_name or input(f"Podaj nazwę modelu (Enter dla domyślnej): ").strip() or f"faster_rcnn_{timestamp}"
+    model_name = args.model_name or input("Podaj nazwę modelu (Enter dla domyślnej): ").strip() or f"faster_rcnn_{timestamp}"
     batch_size = args.batch_size or int(input("Podaj batch size (domyślnie 2): ") or 2)
     epochs = args.epochs or int(input("Podaj liczbę epok (domyślnie 40): ") or 40)
 
@@ -41,7 +42,16 @@ def main():
     train_loader, val_loader, _ = get_data_loaders(batch_size=batch_size, num_workers=args.num_workers)
 
     model = get_model(num_classes=2, device=device)
-    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+
+    # Scheduler
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode='min',
+        factor=0.5,
+        patience=3,
+        verbose=True
+    )
 
     best_val_loss = float("inf")
     best_epoch = 0
@@ -50,7 +60,9 @@ def main():
 
     for epoch in range(1, epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch)
-        val_loss, pred_count, gt_count, map_5095, map_50, precision, recall = validate_model(model, val_loader, device, epoch, model_name)
+        val_loss, pred_count, gt_count, map_5095, map_50, precision, recall = validate_model(
+            model, val_loader, device, epoch, model_name
+        )
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -64,6 +76,11 @@ def main():
         print(f"Epoka {epoch}/{epochs} - Strata treningowa: {train_loss:.4f}, Strata walidacyjna: {val_loss:.4f}")
         print(f"                - Detekcje: {pred_count} | GT: {gt_count}")
         print(f"                - mAP@0.5: {map_50:.4f} | mAP@0.5:0.95: {map_5095:.4f} | Prec: {precision:.4f} | Rec: {recall:.4f}")
+
+        # Scheduler aktualizuje się na podstawie val_loss
+        scheduler.step(val_loss)
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"Learning rate: {current_lr:.6f}")
 
         if epoch % 5 == 0:
             torch.save(model.state_dict(), f"saved_models/{model_name}/model_epoch_{epoch}.pth")

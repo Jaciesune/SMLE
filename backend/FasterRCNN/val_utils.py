@@ -55,9 +55,28 @@ def validate_model(model, dataloader, device, epoch, model_name):
 
     # Sprawdzenie czy są jakiekolwiek predykcje
     if len(predictions) == 0:
-        print("Brak predykcji – pomijam COCOeval.")
+        print("Brak predykcji - pomijam COCOeval.")
         return 1.0, 0, gt_count, 0.0, 0.0, 0.0, 0.0
 
+    # Rysowanie wyników 
+    debug_dir = f"val/{model_name}/debug_preds"
+    os.makedirs(debug_dir, exist_ok=True)
+
+    for i, image in enumerate(images):
+        image_np = image.permute(1, 2, 0).cpu().numpy() * 255  # z tensor -> numpy + skalowanie
+        image_np = image_np.astype(np.uint8).copy()
+        image_id = targets[i]["image_id"].cpu().item()
+        image_name = f"img_{image_id}_ep{epoch}.jpg"
+
+        for box, score in zip(outputs[i]["boxes"], outputs[i]["scores"]):
+            if score < 0.05:  # filtruj niskie
+                continue
+            x1, y1, x2, y2 = map(int, box)
+            cv2.rectangle(image_np, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.putText(image_np, f"{score:.2f}", (x1, y1 - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
+        cv2.imwrite(os.path.join(debug_dir, image_name), image_np)
 
     # Ocena mAP itd.
     coco_dt = coco_gt.loadRes(result_file)

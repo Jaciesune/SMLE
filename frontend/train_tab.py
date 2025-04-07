@@ -141,31 +141,42 @@ class TrainTab(QtWidgets.QWidget):
             return
 
         # Sprawdzenie, czy plik adnotacji treningowych istnieje (na hoście)
-        host_coco_train_path = os.path.join(train_path, "annotations", "coco.json")
+        if algorithm == "FasterRCNN":
+            coco_filename = "instances_train.json"
+        else:
+            coco_filename = "coco.json"
+
+        host_coco_train_path = os.path.join(train_path, "annotations", coco_filename)
         if not os.path.exists(host_coco_train_path):
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Plik adnotacji treningowych nie istnieje: {host_coco_train_path}")
             return
 
-        # Ścieżka do danych treningowych w kontenerze
-        container_train_path = "/data/train"  # Mapujemy folder train do /data/train w kontenerze
-
-        # Domyślna ścieżka do danych walidacyjnych w kontenerze
+        # Ścieżki w kontenerze
+        container_train_path = "/data/train"
         container_val_path = "/app/data/val"
-        coco_val_path = os.path.join(container_val_path, "annotations", "coco.json").replace("\\", "/")
 
-        # Ścieżka do pliku adnotacji treningowych w kontenerze
-        coco_train_path = os.path.join(container_train_path, "annotations", "coco.json").replace("\\", "/")
+        # Ścieżki do plików coco
+        coco_train_path = os.path.join(container_train_path, "annotations", coco_filename).replace("\\", "/")
+
+        # Specjalna ścieżka walidacyjna dla MCNN i FasterRCNN
+        if algorithm == "MCNN":
+            coco_val_path = "/app/MCNN/dataset/val/annotations/instances_val.json"
+        elif algorithm =="FasterRCNN":
+            coco_val_path = "/app/FasterRCNN/dataset/val/annotations/instances_val.json"
+        else:
+            coco_val_path = os.path.join(container_val_path, "annotations", "coco.json").replace("\\", "/")
 
         # Przygotowanie argumentów dla train.py
         args = [
-            "--train_dir", container_train_path,  # Przekazujemy ścieżkę do folderu train w kontenerze
+            "--train_dir", container_train_path,
             "--epochs", str(epochs),
             "--lr", str(learning_rate),
             "--model_name", model_name,
             "--coco_train_path", coco_train_path,
             "--coco_gt_path", coco_val_path,
-            "--host_train_path", train_path  # Przekazujemy ścieżkę na hoście, aby train_api.py mógł ją zamapować
+            "--host_train_path", train_path
         ]
+
         if model_version != "Nowy model":
             model_path = self.train_api.get_model_path(algorithm, model_version)
             if model_path:
@@ -174,14 +185,12 @@ class TrainTab(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie można znaleźć modelu: {model_version}")
                 return
 
-        # Czyszczenie pola logów przed rozpoczęciem treningu
         self.log_text.clear()
-        self.train_btn.setEnabled(False)  # Wyłączamy przycisk podczas treningu
+        self.train_btn.setEnabled(False)
 
-        # Uruchomienie treningu w wątku
         self.training_thread = TrainingThread(self.train_api, algorithm, args)
-        self.training_thread.log_signal.connect(self.update_log, QtCore.Qt.QueuedConnection)  # Używamy QueuedConnection
-        self.training_thread.finished_signal.connect(self.training_finished, QtCore.Qt.QueuedConnection)  # Używamy QueuedConnection
+        self.training_thread.log_signal.connect(self.update_log, QtCore.Qt.QueuedConnection)
+        self.training_thread.finished_signal.connect(self.training_finished, QtCore.Qt.QueuedConnection)
         self.training_thread.start()
 
     def update_log(self, log_line):

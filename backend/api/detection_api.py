@@ -11,8 +11,8 @@ class DetectionAPI:
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
             "FasterRCNN": self.base_path / "FasterRCNN" / "saved_models",
-            "YOLO": self.base_path / "YOLO" / "models",
-            "MCNN": self.base_path / "MCNN" / "models"
+            "MCNN": self.base_path / "MCNN" / "models",
+            "SSD - do zaimplementowania": self.base_path / "SSD" / "models"  # Do zaimplementowania
         }
 
     def get_algorithms(self):
@@ -20,7 +20,10 @@ class DetectionAPI:
         return list(self.algorithms.keys())
 
     def get_model_versions(self, algorithm):
-        """Zwraca listę plików modeli z końcówką *_checkpoint.pth dla wybranego algorytmu."""
+        """Zwraca listę plików modeli dla wybranego algorytmu. 
+        Dla Mask R-CNN tylko pliki z końcówką *_checkpoint.pth, 
+        dla reszty wszystkie pliki."""
+
         if algorithm not in self.algorithms:
             return []
 
@@ -28,18 +31,31 @@ class DetectionAPI:
         if not model_path.exists():
             return []
 
-        return sorted([file.name for file in model_path.iterdir() if file.is_file() and file.name.endswith('_checkpoint.pth')])
+        if algorithm == "Mask R-CNN":
+            # Dla Mask R-CNN zwracamy tylko pliki z końcówką *_checkpoint.pth
+            return sorted([file.name for file in model_path.iterdir() if file.is_file() and file.name.endswith('_checkpoint.pth')])
+        else:
+            # Dla pozostałych algorytmów zwracamy wszystkie pliki w katalogu
+            return sorted([file.name for file in model_path.iterdir() if file.is_file()])
 
     def get_model_path(self, algorithm, version):
-        """Zwraca pełną ścieżkę do wybranego modelu."""
+        """Zwraca pełną ścieżkę do wybranego modelu. 
+        Dla Mask R-CNN tylko pliki z końcówką *_checkpoint.pth, 
+        dla reszty dowolne pliki."""
+        
         if algorithm not in self.algorithms:
             return None
 
         model_path = self.algorithms[algorithm] / version
-        if model_path.exists() and model_path.is_file() and model_path.name.endswith('_checkpoint.pth'):
-            return str(model_path)
-        return None
+        if not model_path.exists() or not model_path.is_file():
+            return None
 
+        if algorithm == "Mask R-CNN":
+            if model_path.name.endswith('_checkpoint.pth'):
+                return str(model_path)
+            return None
+        else:
+            return str(model_path)
     def run_script(self, script_name, algorithm, *args):
         """Uruchamia skrypt Mask R-CNN w kontenerze maskrcnn."""
         try:
@@ -47,21 +63,21 @@ class DetectionAPI:
                 command = [
                     "docker", "run", "--rm", "--gpus", "all",
                     "-v", f"{self.base_path}/Mask_RCNN:/app",
-                    "smle-maskrcnn",
+                    "backend-app",
                     "python", f"scripts/{script_name}", *args
                 ]
             elif algorithm == "MCNN":
                 command = [
                     "docker", "run", "--rm", "--gpus", "all",
                     "-v", f"{self.base_path}/MCNN:/app/MCNN",
-                    "smle-maskrcnn",
+                    "backend-app",
                     "python", f"MCNN/{script_name}", *args
                 ]
             elif algorithm == "FasterRCNN":
                 command = [
                     "docker", "run", "--rm", "--gpus", "all",
                     "-v", f"{self.base_path}/FasterRCNN:/app/FasterRCNN",
-                    "smle-maskrcnn",
+                    "backend-app",
                     "python", f"/app/FasterRCNN/{script_name}", *args
                 ]
 
@@ -93,14 +109,17 @@ class DetectionAPI:
         if algorithm == "Mask R-CNN":
             self.detectes_path = self.base_path / "Mask_RCNN" / "data" / "detectes"
             test_images_path = self.base_path / "Mask_RCNN" / "data" / "test" / "images"
-            print(test_images_path)
+            if os.path.exists(temp_image_path):
+                print(f"Obraz został pomyślnie skopiowany do: {temp_image_path}")
+            else:
+                return f"Błąd: Nie udało się skopiować obrazu do {temp_image_path}"
             test_images_path.mkdir(parents=True, exist_ok=True)
             image_name = os.path.basename(image_path)
             temp_image_path = test_images_path / image_name
-            print(temp_image_path)
+            print(f"Kopiuję obraz do: {temp_image_path}")
             shutil.copy(image_path, temp_image_path)
-            container_image_path = f"/app/data/test/images/{image_name}"
-            container_model_path = f"/app/models/{version}"
+            container_image_path = f"/app/backend/Mask_RCNN/data/test/images/{image_name}"
+            container_model_path = f"/app/backend/Mask_RCNN/models/{version}"
             result = self.run_script("detect.py", algorithm, container_image_path, container_model_path)
 
         elif algorithm == "MCNN":

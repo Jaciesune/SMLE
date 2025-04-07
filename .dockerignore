@@ -28,9 +28,6 @@ venv/
 temp/
 tmp/
 
-# Ignorowanie katalogu frontend, jeśli nie jest potrzebny w obrazie
-frontend/
-
 # Ignorowanie notebooków Jupyter i innych plików deweloperskich
 *.ipynb
 tests/

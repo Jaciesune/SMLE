@@ -78,26 +78,9 @@ class DetectionAPI:
             return result.stdout
         except subprocess.CalledProcessError as e:
             return f"Błąd podczas uruchamiania kontenera: {e}"
-        
-    def run_fasterrcnn_script(self, script_name, *args):
-        try:
-            command = [
-                "docker", "run", "--rm", "--gpus", "all",
-                "-v", f"{self.base_path}/FasterRCNN:/app",
-                "smle-fasterrcnn",
-                "python", script_name, *args
-            ]
-            print(f"Uruchamiam Faster R-CNN: {' '.join(command)}")
-            result = subprocess.run(command, capture_output=True, text=True)
-            if result.returncode != 0:
-                return f"Błąd: {result.stderr}"
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            return f"Błąd kontenera: {e}"
 
     def analyze_with_model(self, image_path, algorithm, version):
         """Przeprowadza detekcję na obrazie przy użyciu wybranego modelu."""
-
         model_path = self.get_model_path(algorithm, version)
         if not model_path:
             return f"Błąd: Model {version} dla {algorithm} nie istnieje."
@@ -105,7 +88,6 @@ class DetectionAPI:
         if not os.path.exists(image_path):
             return f"Błąd: Obraz {image_path} nie istnieje."
 
-<<<<<<< Updated upstream
         # Kopiujemy obraz do folderu data/test/images, aby detect.py mógł go przetworzyć
 
         if algorithm == "Mask R-CNN":
@@ -172,60 +154,5 @@ class DetectionAPI:
         match = re.search(r"Detections: (\d+)", result)
         if match:
             detections_count = int(match.group(1))
-=======
-        image_name = os.path.basename(image_path)
 
-        if algorithm == "Mask R-CNN":
-            test_images_path = self.base_path / "Mask_RCNN" / "data" / "test" / "images"
-            test_images_path.mkdir(parents=True, exist_ok=True)
-            temp_image_path = test_images_path / image_name
-            shutil.copy(image_path, temp_image_path)
-
-            container_image_path = f"/app/data/test/images/{image_name}"
-            container_model_path = f"/app/models/{version}"
-
-            result = self.run_maskrcnn_script("detect.py", container_image_path, container_model_path)
-            if "Błąd" in result:
-                return result
-
-            result_image_name = os.path.splitext(image_name)[0] + "_detected.jpg"
-            result_path = self.detectes_path / result_image_name
-            if not result_path.exists():
-                return f"Błąd: Wynik detekcji nie został zapisany w {result_path}."
-
-            detections_count = 0
-            match = re.search(r"Detections: (\d+)", result)
-            if match:
-                detections_count = int(match.group(1))
-
-            return str(result_path), detections_count
-
-        elif algorithm == "Faster R-CNN":
-            test_images_path = self.base_path / "FasterRCNN" / "dataset" / "test"
-            test_images_path.mkdir(parents=True, exist_ok=True)
-            temp_image_path = test_images_path / image_name
-            shutil.copy(image_path, temp_image_path)
-
-            container_image_path = f"/app/dataset/test/{image_name}"
-            container_model_path = f"/app/models/{version}"
-
-            result = self.run_fasterrcnn_script("test.py", container_image_path, container_model_path)
-            if "Błąd" in result:
-                return result
-
-            result_dir = self.base_path / "FasterRCNN" / "test" / "faster_predict"
-            result_txt = result_dir / f"{Path(image_name).stem}.txt"
-            result_img = result_dir / f"{Path(image_name).stem}.jpg"
-
-            if not result_txt.exists() or not result_img.exists():
-                return f"Błąd: Brak plików wynikowych {result_txt} lub {result_img}"
-
-            with open(result_txt, "r") as f:
-                count = int(f.readline().strip())
-
-            return str(result_img), count
-
-        else:
-            return f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
->>>>>>> Stashed changes
-
+        return str(result_path), detections_count

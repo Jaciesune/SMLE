@@ -1,0 +1,18 @@
+2025-04-08 12:00:16,421 - WARNING - Œcie¿ka modeli C:\app\backend\Mask_RCNN\models nie istnieje.
+2025-04-08 12:00:22,905 - WARNING - Œcie¿ka modeli C:\app\backend\FasterRCNN\saved_models nie istnieje.
+2025-04-08 12:00:24,935 - WARNING - Œcie¿ka modeli C:\app\backend\Mask_RCNN\models nie istnieje.
+2025-04-08 12:04:24,861 - WARNING - Nie uda³o siê pobraæ listy modeli dla Mask R-CNN: Unable to find image 'backend-app:latest' locally
+docker: Error response from daemon: pull access denied for backend-app, repository does not exist or may require 'docker login'
+
+Run 'docker run --help' for more information
+
+2025-04-08 12:04:36,330 - WARNING - Nie uda³o siê pobraæ listy modeli dla FasterRCNN: Unable to find image 'backend-app:latest' locally
+docker: Error response from daemon: pull access denied for backend-app, repository does not exist or may require 'docker login'
+
+Run 'docker run --help' for more information
+
+2025-04-08 12:04:39,281 - WARNING - Nie uda³o siê pobraæ listy modeli dla MCNN: Unable to find image 'backend-app:latest' locally
+docker: Error response from daemon: pull access denied for backend-app, repository does not exist or may require 'docker login'
+
+Run 'docker run --help' for more information
+

@@ -140,11 +140,7 @@ class TrainTab(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Błąd", "Brak dostępnych modeli do doszkolenia. Wybierz 'Nowy model'.")
             return
 
-        # Sprawdzenie, czy plik adnotacji treningowych istnieje (na hoście)
-        if algorithm == "FasterRCNN":
-            coco_filename = "instances_train.json"
-        else:
-            coco_filename = "coco.json"
+        coco_filename = "instances_train.json"
 
         host_coco_train_path = os.path.join(train_path, "annotations", coco_filename)
         if not os.path.exists(host_coco_train_path):
@@ -152,7 +148,7 @@ class TrainTab(QtWidgets.QWidget):
             return
 
         # Ścieżki w kontenerze
-        container_train_path = "/data/train"
+        container_train_path = "/app/data/train"
         container_val_path = "/app/data/val"
 
         # Ścieżki do plików coco
@@ -160,9 +156,7 @@ class TrainTab(QtWidgets.QWidget):
 
         # Specjalna ścieżka walidacyjna dla MCNN i FasterRCNN
         if algorithm == "MCNN":
-            coco_val_path = "/app/MCNN/dataset/val/annotations/instances_val.json"
-        elif algorithm =="FasterRCNN":
-            coco_val_path = "/app/FasterRCNN/dataset/val/annotations/instances_val.json"
+            coco_val_path = "/app/data/val/annotations/instances_val.json"
         else:
             coco_val_path = os.path.join(container_val_path, "annotations", "coco.json").replace("\\", "/")
 

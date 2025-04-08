@@ -56,30 +56,26 @@ class DetectionAPI:
             return None
         else:
             return str(model_path)
+        
     def run_script(self, script_name, algorithm, *args):
-        """Uruchamia skrypt Mask R-CNN w kontenerze maskrcnn."""
+        """Uruchamia skrypt w już działającym kontenerze backend-app."""
         try:
+            # Mapowanie ścieżek dla każdego algorytmu
             if algorithm == "Mask R-CNN":
-                command = [
-                    "docker", "run", "--rm", "--gpus", "all",
-                    "-v", f"{self.base_path}/Mask_RCNN:/app",
-                    "backend-app",
-                    "python", f"scripts/{script_name}", *args
-                ]
+                script_path = f"/app/backend/Mask_RCNN/scripts/{script_name}"
             elif algorithm == "MCNN":
-                command = [
-                    "docker", "run", "--rm", "--gpus", "all",
-                    "-v", f"{self.base_path}/MCNN:/app/MCNN",
-                    "backend-app",
-                    "python", f"MCNN/{script_name}", *args
-                ]
+                script_path = f"/app/backend/MCNN/{script_name}"
             elif algorithm == "FasterRCNN":
-                command = [
-                    "docker", "run", "--rm", "--gpus", "all",
-                    "-v", f"{self.base_path}/FasterRCNN:/app/FasterRCNN",
-                    "backend-app",
-                    "python", f"/app/FasterRCNN/{script_name}", *args
-                ]
+                script_path = f"/app/backend/FasterRCNN/{script_name}"
+            else:
+                return f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
+
+            # Budowanie polecenia Docker exec
+            command = [
+                "docker", "exec",
+                "backend-app",  # Nazwa już działającego kontenera
+                "python", script_path, *args
+            ]
 
             print(f"Uruchamiam polecenie: {' '.join(command)}")  # Logowanie dla debugowania
             result = subprocess.run(
@@ -93,81 +89,81 @@ class DetectionAPI:
                 return f"Błąd podczas uruchamiania skryptu {script_name}: {result.stderr}"
             return result.stdout
         except subprocess.CalledProcessError as e:
-            return f"Błąd podczas uruchamiania kontenera: {e}"
-
+            return f"Błąd podczas uruchamiania komendy w kontenerze: {e}"
+        except Exception as e:
+            return f"Nieoczekiwany błąd: {e}"
+        
+        
     def analyze_with_model(self, image_path, algorithm, version):
         """Przeprowadza detekcję na obrazie przy użyciu wybranego modelu."""
         model_path = self.get_model_path(algorithm, version)
         if not model_path:
-            return f"Błąd: Model {version} dla {algorithm} nie istnieje."
+            return f"Błąd: Model {version} dla {algorithm} nie istnieje.", 0
 
         if not os.path.exists(image_path):
-            return f"Błąd: Obraz {image_path} nie istnieje."
+            return f"Błąd: Obraz {image_path} nie istnieje.", 0
 
-        # Kopiujemy obraz do folderu data/test/images, aby detect.py mógł go przetworzyć
-
+        # Mapowanie ścieżek dla każdego algorytmu
         if algorithm == "Mask R-CNN":
-            self.detectes_path = self.base_path / "Mask_RCNN" / "data" / "detectes"
-            test_images_path = self.base_path / "Mask_RCNN" / "data" / "test" / "images"
-            if os.path.exists(temp_image_path):
-                print(f"Obraz został pomyślnie skopiowany do: {temp_image_path}")
-            else:
-                return f"Błąd: Nie udało się skopiować obrazu do {temp_image_path}"
-            test_images_path.mkdir(parents=True, exist_ok=True)
-            image_name = os.path.basename(image_path)
-            temp_image_path = test_images_path / image_name
-            print(f"Kopiuję obraz do: {temp_image_path}")
-            shutil.copy(image_path, temp_image_path)
-            container_image_path = f"/app/backend/Mask_RCNN/data/test/images/{image_name}"
-            container_model_path = f"/app/backend/Mask_RCNN/models/{version}"
-            result = self.run_script("detect.py", algorithm, container_image_path, container_model_path)
-
+            host_detectes_path = self.base_path / "Mask_RCNN" / "data" / "detectes"
+            host_test_images_path = self.base_path / "Mask_RCNN" / "data" / "test" / "images"
+            container_base_path = "/app/backend/Mask_RCNN"
+            script_name = "detect.py"
         elif algorithm == "MCNN":
-            self.detectes_path = self.base_path / "MCNN" / "data" / "detectes"
-            test_images_path = self.base_path / "MCNN" / "data" / "test" / "images"
-            print(test_images_path)
-            test_images_path.mkdir(parents=True, exist_ok=True)
-            image_name = os.path.basename(image_path)
-            temp_image_path = test_images_path / image_name
-            print(temp_image_path)
-            shutil.copy(image_path, temp_image_path)
-            container_image_path = f"/app/MCNN/data/test/images/{image_name}"
-            container_model_path = f"/app/MCNN/models/{version}"
-            result = self.run_script("test_model.py", algorithm, container_image_path, container_model_path)
-        
+            host_detectes_path = self.base_path / "MCNN" / "data" / "detectes"
+            host_test_images_path = self.base_path / "MCNN" / "data" / "test" / "images"
+            container_base_path = "/app/backend/MCNN"
+            script_name = "test_model.py"
         elif algorithm == "FasterRCNN":
-            self.detectes_path = self.base_path / "FasterRCNN" / "data" / "detectes"
-            test_images_path = self.base_path / "FasterRCNN" / "data" / "test" / "images"
-            print(test_images_path)
-            test_images_path.mkdir(parents=True, exist_ok=True)
-            image_name = os.path.basename(image_path)
-            temp_image_path = test_images_path / image_name
-            print(temp_image_path)
+            host_detectes_path = self.base_path / "FasterRCNN" / "data" / "detectes"
+            host_test_images_path = self.base_path / "FasterRCNN" / "data" / "test" / "images"
+            container_base_path = "/app/backend/FasterRCNN"
+            script_name = "test.py"
+        else:
+            return f"Błąd: Algorytm {algorithm} nie jest obsługiwany.", 0
+
+        # Tworzenie folderów na hoście
+        host_test_images_path.mkdir(parents=True, exist_ok=True)
+        host_detectes_path.mkdir(parents=True, exist_ok=True)
+
+        # Kopiowanie obrazu na hosta
+        image_name = os.path.basename(image_path)
+        temp_image_path = host_test_images_path / image_name
+        print(f"Kopiuję obraz do: {temp_image_path}")
+        try:
             shutil.copy(image_path, temp_image_path)
-            container_image_path = f"/app/FasterRCNN/data/test/images/{image_name}"
-            container_model_path = f"/app/FasterRCNN/saved_models/{version}"
+            if not os.path.exists(temp_image_path):
+                return f"Błąd: Nie udało się skopiować obrazu do {temp_image_path}.", 0
+            print(f"Obraz został pomyślnie skopiowany do: {temp_image_path}")
+        except Exception as e:
+            return f"Błąd: Nie udało się skopiować obrazu do {temp_image_path}: {e}", 0
+
+        # Ścieżki w kontenerze
+        container_image_path = f"{container_base_path}/data/test/images/{image_name}"
+        container_model_path = f"{container_base_path}/{'models' if algorithm != 'FasterRCNN' else 'saved_models'}/{version}"
+
+        # Uruchomienie detekcji
+        if algorithm == "FasterRCNN":
             result = self.run_script(
-                "test.py",
+                script_name,
                 algorithm,
                 "--image_path", container_image_path,
                 "--model_path", container_model_path,
-                "--output_dir", "/app/FasterRCNN/data/detectes",
+                "--output_dir", f"{container_base_path}/data/detectes",
                 "--threshold", "0.25",
                 "--num_classes", "2"
             )
         else:
-            return f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
+            result = self.run_script(script_name, algorithm, container_image_path, container_model_path)
 
         if "Błąd" in result:
-            return result
+            return result, 0
 
-                # Ścieżka bazowa do folderu backend
-        self.detectes_path.mkdir(parents=True, exist_ok=True)
-
+        # Przetwarzanie wyniku
         result_image_name = os.path.splitext(image_name)[0] + "_detected.jpg"
-        result_path = self.detectes_path / result_image_name
+        result_path = host_detectes_path / result_image_name
         if not result_path.exists():
-            return f"Błąd: Wynik detekcji nie został zapisany w {result_path}."
+            return f"Błąd: Wynik detekcji nie został zapisany w {result_path}.", 0
 
         detections_count = 0
         match = re.search(r"Detections: (\d+)", result)

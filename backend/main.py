@@ -52,7 +52,7 @@ class TrainingRequest(BaseModel):
     lr: float
     num_workers: int = 10
     patience: int = 8
-    coco_gt_path: str = "/app/data/val/annotations/coco.json"
+    coco_gt_path: str = "/app/backend/data/val/annotations/instances_val.json"
     num_augmentations: int = 8
     resume: str = None
 

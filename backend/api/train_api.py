@@ -1,257 +1,164 @@
 import os
 from pathlib import Path
 import subprocess
+import shutil
 
 class TrainAPI:
     def __init__(self):
-        # Ścieżka bazowa do folderu backend
         self.base_path = Path(__file__).resolve().parent.parent  # backend/
 
-        # Definicja algorytmów i ich folderów z modelami
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
             "FasterRCNN": self.base_path / "FasterRCNN" / "saved_models",
             "MCNN": self.base_path / "MCNN" / "models",
-            "SSD - do zaimplementowania": self.base_path / "SSD" / "models"  # Do zaimplementowania TODO
+            "SSD - do zaimplementowania": self.base_path / "SSD" / "models"
         }
 
-        # Mapowanie algorytmów na skrypty treningowe
         self.train_scripts = {
             "Mask R-CNN": "train_maskrcnn.py",
             "FasterRCNN": "run_training.py",
-            "SSD": "train_ssd.py",  # Do zaimplementowania TODO
+            "SSD": "train_ssd.py",
             "MCNN": "train_model.py"
         }
 
     def get_algorithms(self):
-        """Zwraca listę dostępnych algorytmów."""
         return list(self.algorithms.keys())
 
     def get_model_versions(self, algorithm):
-        """Zwraca listę plików modeli z końcówką *checkpoint.pth dla wybranego algorytmu."""
         if algorithm not in self.algorithms:
             return []
-
         model_path = self.algorithms[algorithm]
         if not model_path.exists():
             return []
-
-        # Pobierz tylko pliki z końcówką *checkpoint.pth w folderze models
         model_versions = [file.name for file in model_path.iterdir() if file.is_file() and file.name.endswith('_checkpoint.pth')]
         return sorted(model_versions)
 
     def get_model_path(self, algorithm, version):
-        """Zwraca pełną ścieżkę do wybranego modelu."""
         if algorithm not in self.algorithms:
             return None
-
         model_path = self.algorithms[algorithm] / version
         if model_path.exists() and model_path.is_file() and model_path.name.endswith('_checkpoint.pth'):
             return str(model_path)
         return None
 
-    def train_model(self, algorithm, *args):
-        """Uruchamia skrypt treningowy w kontenerze smle-maskrcnn."""
-        if algorithm not in self.train_scripts:
-            return f"Błąd: Algorytm {algorithm} nie jest wspierany."
-        
-        script_name = self.train_scripts[algorithm]
-
-        # Parsowanie argumentów, aby znaleźć --train_dir i --host_train_path
-        train_dir = None
-        host_train_path = None
-        for i in range(0, len(args), 2):
-            if args[i] == "--train_dir":
-                train_dir = args[i + 1]
-            elif args[i] == "--host_train_path":
-                host_train_path = args[i + 1]
-
-        if not train_dir:
-            return f"Błąd: Ścieżka do danych treningowych (--train_dir) nie została podana."
-
-        if not host_train_path:
-            return f"Błąd: Ścieżka na hoście (--host_train_path) nie została podana."
-
-        # Sprawdzenie, czy katalog host_train_path istnieje na hoście
-        if not os.path.exists(host_train_path):
-            return f"Błąd: Katalog danych treningowych nie istnieje: {host_train_path}"
-
-        try:
-            if algorithm == "Mask R-CNN":
-                # Przygotowanie polecenia docker run z dynamicznym montowaniem
-                command = [
-                    "docker", "run", "--rm", "--gpus", "all",
-                    "-v", f"{self.base_path}/Mask_RCNN:/app",
-                    "-v", f"{host_train_path}:/data/train",  # Zmiana ścieżki na /dataset/train
-                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
-                    "smle-maskrcnn",
-                    "python", f"scripts/{script_name}"
-                ]
-            elif algorithm == "MCNN":
-                # Przygotowanie polecenia docker run z dynamicznym montowaniem
-                command = [
-                    "docker", "run", "--rm", "--gpus", "all",
-                    "-v", f"{self.base_path}/MCNN:/app/MCNN",
-                    "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
-                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
-                    "smle-maskrcnn",
-                    "python", f"MCNN/{script_name}"
-                ]
-            
-            elif algorithm == "FasterRCNN":
-                # Przygotowanie polecenia docker run z dynamicznym montowaniem
-                command = [
-                    "docker", "run", "--rm", "--gpus", "all",
-                    "-v", f"{self.base_path}/FasterRCNN:/app/FasterRCNN",
-                    "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
-                    "-v", f"{self.base_path}/FasterRCNN/dataset/test:/dataset/test",
-                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
-                    "smle-maskrcnn",
-                    "python", f"/app/FasterRCNN/{script_name}"
-                ]
-
-            # Usuwamy --host_train_path z argumentów przekazywanych do skryptu
-            filtered_args = [arg for arg in args if arg != "--host_train_path" and arg != host_train_path]
-
-            # Zastąpienie ścieżek hosta kontenerowymi ścieżkami wewnątrz dockera
-            if algorithm == "MCNN":
-                filtered_args = [
-                    arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
-                    for arg in filtered_args
-                ]
-
-            if algorithm == "FasterRCNN":
-                filtered_args = [
-                    arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
-                    for arg in filtered_args
-                ]
-
-            command.extend(filtered_args)
-
-            print(f"Uruchamiam polecenie: {' '.join(command)}")
-            result = subprocess.run(command, capture_output=True, text=True)
-            if result.returncode != 0:
-                return f"Błąd podczas uruchamiania skryptu {script_name}: {result.stderr}"
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            return f"Błąd podczas uruchamiania kontenera: {e}"
-
     def train_model_stream(self, algorithm, *args):
-        """Uruchamia skrypt treningowy i zwraca logi w czasie rzeczywistym."""
         if algorithm not in self.train_scripts:
             yield f"Błąd: Algorytm {algorithm} nie jest wspierany."
             return
 
         script_name = self.train_scripts[algorithm]
 
-        # Parsowanie argumentów, aby znaleźć --train_dir i --host_train_path
+        # Parsowanie argumentów
         train_dir = None
         host_train_path = None
+        host_val_path = None
         for i in range(0, len(args), 2):
             if args[i] == "--train_dir":
                 train_dir = args[i + 1]
             elif args[i] == "--host_train_path":
                 host_train_path = args[i + 1]
+            elif args[i] == "--host_val_path":
+                host_val_path = args[i + 1]
 
         if not train_dir:
             yield f"Błąd: Ścieżka do danych treningowych (--train_dir) nie została podana."
             return
-
         if not host_train_path:
             yield f"Błąd: Ścieżka na hoście (--host_train_path) nie została podana."
             return
-
-        # Sprawdzenie, czy katalog host_train_path istnieje na hoście
         if not os.path.exists(host_train_path):
             yield f"Błąd: Katalog danych treningowych nie istnieje: {host_train_path}"
             return
+        if host_val_path and not os.path.exists(host_val_path):
+            yield f"Błąd: Katalog danych walidacyjnych nie istnieje: {host_val_path}"
+            return
 
         try:
-            # Przygotowanie środowiska z PYTHONUNBUFFERED, aby wymusić brak buforowania
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
 
             if algorithm == "Mask R-CNN":
-                # Przygotowanie polecenia docker run z dynamicznym montowaniem
-                command = [
-                    "docker", "run", "--rm", "--gpus", "all",
-                    "-v", f"{self.base_path}/Mask_RCNN:/app",
-                    "-v", f"{host_train_path}:/data/train",  # Zmiana ścieżki na /dataset/train
-                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
-                    "smle-maskrcnn",
-                    "python", f"scripts/{script_name}"
-                ]
-            
+                script_path = f"/app/backend/Mask_RCNN/scripts/{script_name}"
             elif algorithm == "MCNN":
-                # Przygotowanie polecenia docker run z dynamicznym montowaniem
-                command = [
-                    "docker", "run", "--rm", "--gpus", "all",
-                    "-v", f"{self.base_path}/MCNN:/app/MCNN",
-                    "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
-                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
-                    "smle-maskrcnn",
-                    "python", f"MCNN/{script_name}"
-                ]
-            
+                script_path = f"/app/backend/MCNN/{script_name}"
             elif algorithm == "FasterRCNN":
-                # Przygotowanie polecenia docker run z dynamicznym montowaniem
-                command = [
-                    "docker", "run", "--rm", "--gpus", "all",
-                    "-v", f"{self.base_path}/FasterRCNN:/app/FasterRCNN",
-                    "-v", f"{host_train_path}:/dataset/train",  # Zmiana ścieżki na /dataset/train
-                    "-v", f"{self.base_path}/FasterRCNN/dataset/test:/dataset/test",
-                    "--shm-size", "5g",  # Zwiększenie pamięci współdzielonej do 5 GB
-                    "smle-maskrcnn",
-                    "python", f"/app/FasterRCNN/{script_name}"
-                ]
+                script_path = f"/app/backend/FasterRCNN/{script_name}"
+            else:
+                yield f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
+                return
 
-            # Usuwamy --host_train_path z argumentów przekazywanych do skryptu
-            filtered_args = [arg for arg in args if arg != "--host_train_path" and arg != host_train_path]
+            # Katalog treningowy na hoście
+            host_train_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1]
+            host_train_dir.mkdir(parents=True, exist_ok=True)
 
-            # Zastąpienie ścieżek hosta kontenerowymi ścieżkami wewnątrz dockera
-            if algorithm == "MCNN":
-                filtered_args = [
-                    arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
-                    for arg in filtered_args
-                ]
-            
-            if algorithm == "FasterRCNN":
-                filtered_args = [
-                    arg.replace("/data/train", "/dataset/train") if isinstance(arg, str) else arg
-                    for arg in filtered_args
-                ]
+            # Kopiowanie danych treningowych
+            try:
+                for item in os.listdir(host_train_path):
+                    src_path = os.path.join(host_train_path, item)
+                    dst_path = os.path.join(host_train_dir, item)
+                    if os.path.isfile(src_path):
+                        shutil.copy(src_path, dst_path)
+                    elif os.path.isdir(src_path):
+                        shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+                print(f"Skopiowano dane treningowe z {host_train_path} do {host_train_dir}")
+            except Exception as e:
+                yield f"Błąd: Nie udało się skopiować danych treningowych do {host_train_dir}: {e}"
+                return
 
+            # Katalog walidacyjny na hoście (jeśli podano host_val_path)
+            if host_val_path:
+                host_val_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1].replace("train", "val")
+                host_val_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    for item in os.listdir(host_val_path):
+                        src_path = os.path.join(host_val_path, item)
+                        dst_path = os.path.join(host_val_dir, item)
+                        if os.path.isfile(src_path):
+                            shutil.copy(src_path, dst_path)
+                        elif os.path.isdir(src_path):
+                            shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+                    print(f"Skopiowano dane walidacyjne z {host_val_path} do {host_val_dir}")
+                except Exception as e:
+                    yield f"Błąd: Nie udało się skopiować danych walidacyjnych do {host_val_dir}: {e}"
+                    return
+
+            # Usuwamy --host_train_path i --host_val_path z argumentów
+            filtered_args = [arg for arg in args if arg not in ["--host_train_path", host_train_path, "--host_val_path", host_val_path]]
+
+            command = [
+                "docker", "exec",
+                "backend-app",
+                "python", script_path
+            ]
             command.extend(filtered_args)
 
             print(f"Uruchamiam polecenie: {' '.join(command)}")
-            # Uruchamiamy proces z możliwością strumieniowego odczytu
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1,  # Wymuszenie buforowania liniowego
+                bufsize=1,
                 universal_newlines=True,
-                env=env  # Przekazujemy środowisko z PYTHONUNBUFFERED
+                env=env
             )
 
-            # Odczytujemy stdout i stderr w czasie rzeczywistym
             while True:
                 stdout_line = process.stdout.readline()
                 if stdout_line:
-                    yield stdout_line.strip()  # Zwracamy linię stdout
+                    yield stdout_line.strip()
 
                 stderr_line = process.stderr.readline()
                 if stderr_line:
                     print(f"STDERR: {stderr_line.strip()}")
                     yield f"[STDERR] {stderr_line.strip()}"
 
-                # Sprawdzamy, czy proces się zakończył
                 if process.poll() is not None:
                     break
 
-            # Sprawdzamy kod wyjścia procesu
             if process.returncode != 0:
                 yield f"Błąd podczas uruchamiania skryptu {script_name}: proces zakończony z kodem {process.returncode}"
         except subprocess.CalledProcessError as e:
-            yield f"Błąd podczas uruchamiania kontenera: {e}"
+            yield f"Błąd podczas uruchamiania komendy w kontenerze: {e}"
+        except Exception as e:
+            yield f"Nieoczekiwany błąd: {e}"

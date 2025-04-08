@@ -21,7 +21,7 @@ DETECTION_PER_IMAGE = 500  # Maksymalna liczba detekcji na obraz
 def get_model(num_classes, device):
     model = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(weights=None)  # Nie pobieraj wag automatycznie
     # Załaduj wagi ręcznie
-    weights_path = "/app/pretrained_weights/maskrcnn_resnet50_fpn_v2.pth"
+    weights_path = "/app/backend/Mask_RCNN/pretrained_weights/maskrcnn_resnet50_fpn_v2.pth"
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"Plik wag nie istnieje: {weights_path}")
     state_dict = torch.load(weights_path, map_location=device)
@@ -79,17 +79,17 @@ def train_model(args, is_api_call=False):
         nazwa_modelu = f"{nazwa_modelu}_checkpoint"
 
     # Ścieżki w kontenerze
-    os.makedirs(f"/app/logs/train/{nazwa_modelu}", exist_ok=True)
-    os.makedirs(f"/app/logs/val/{nazwa_modelu}", exist_ok=True)
-    os.makedirs("/app/models", exist_ok=True)
+    os.makedirs(f"/app/backend/Mask_RCNN/logs/train/{nazwa_modelu}", exist_ok=True)
+    os.makedirs(f"/app/backend/Mask_RCNN/logs/val/{nazwa_modelu}", exist_ok=True)
+    os.makedirs("/app/backend/Mask_RCNN/models", exist_ok=True)
 
     # Ustalanie ścieżek do folderów danych
     train_dir = args.train_dir  # Używamy train_dir zamiast dataset_dir
-    val_dir = "/app/data/val"  # Domyślna ścieżka do danych walidacyjnych
+    val_dir = "/app/backend/data/val"  # Domyślna ścieżka do danych walidacyjnych
 
     # Ustalanie ścieżek do plików adnotacji
-    coco_train_path = args.coco_train_path if args.coco_train_path else os.path.join(train_dir, "annotations", "coco.json")
-    coco_val_path = args.coco_gt_path if args.coco_gt_path else os.path.join(val_dir, "annotations", "coco.json")
+    coco_train_path = args.coco_train_path if args.coco_train_path else os.path.join(train_dir, "annotations", "instances_train.json")
+    coco_val_path = args.coco_gt_path if args.coco_gt_path else os.path.join(val_dir, "annotations", "instances_val.json")
 
     # Sprawdzenie, czy pliki adnotacji istnieją
     if not os.path.exists(coco_train_path):

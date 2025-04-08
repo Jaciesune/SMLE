@@ -1,72 +1,51 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 import HomeScreen from './screens/HomeScreen';
 import ModelsScreen from './screens/ModelsScreen';
 import SettingsScreen from './screens/SettingsScreen';
-import Icon from 'react-native-vector-icons/Ionicons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import HistoryScreen from './screens/HistoryScreen'; // Nowy ekran
 
 const Tab = createBottomTabNavigator();
 
-const App: React.FC = () => {
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
-
-  // Ładowanie domyślnego modelu przy starcie aplikacji
-  useEffect(() => {
-    const loadDefaultModel = async () => {
-      try {
-        const storedModel = await AsyncStorage.getItem('defaultModel');
-        setSelectedModel(storedModel || null);
-      } catch (error) {
-        console.log('Błąd podczas ładowania domyślnego modelu:', error);
-      }
-    };
-    loadDefaultModel();
-  }, []);
-
+const App = () => {
   return (
     <NavigationContainer>
       <Tab.Navigator
         screenOptions={({ route }) => ({
-          tabBarIcon: ({ focused, color, size }) => {
-            let iconName: string;
-
+          tabBarIcon: ({ color, size }) => {
+            let iconName;
             if (route.name === 'Home') {
-              iconName = focused ? 'home' : 'home-outline';
+              iconName = 'home';
             } else if (route.name === 'Models') {
-              iconName = focused ? 'cube' : 'cube-outline';
+              iconName = 'list';
             } else if (route.name === 'Settings') {
-              iconName = focused ? 'settings' : 'settings-outline';
-            } else {
-              iconName = 'help-circle-outline';
+              iconName = 'settings';
+            } else if (route.name === 'Historia') {
+              iconName = 'history';
             }
-
             return <Icon name={iconName} size={size} color={color} />;
           },
+          tabBarActiveTintColor: '#00A1D6',
+          tabBarInactiveTintColor: '#888',
           tabBarStyle: {
             backgroundColor: '#1E1E1E',
             borderTopColor: '#333',
-            paddingBottom: 5,
-            paddingTop: 5,
           },
-          tabBarActiveTintColor: '#FFD700',
-          tabBarInactiveTintColor: '#888',
           headerStyle: {
             backgroundColor: '#1E1E1E',
           },
           headerTintColor: '#FFF',
+          headerTitleStyle: {
+            fontWeight: 'bold',
+          },
         })}
       >
-        <Tab.Screen name="Home">
-          {(props) => <HomeScreen {...props} selectedModel={selectedModel} />}
-        </Tab.Screen>
-        <Tab.Screen name="Models">
-          {(props) => <ModelsScreen {...props} setSelectedModel={setSelectedModel} />}
-        </Tab.Screen>
-        <Tab.Screen name="Settings">
-          {(props) => <SettingsScreen {...props} setDefaultModel={setSelectedModel} />}
-        </Tab.Screen>
+        <Tab.Screen name="Home" component={HomeScreen} />
+        <Tab.Screen name="Models" component={ModelsScreen} />
+        <Tab.Screen name="Settings" component={SettingsScreen} />
+        <Tab.Screen name="Historia" component={HistoryScreen} />
       </Tab.Navigator>
     </NavigationContainer>
   );

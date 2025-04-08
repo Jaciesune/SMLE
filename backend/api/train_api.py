@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 import subprocess
 import shutil
+import threading
+import queue
 
 class TrainAPI:
     def __init__(self):
@@ -40,6 +42,14 @@ class TrainAPI:
         if model_path.exists() and model_path.is_file() and model_path.name.endswith('_checkpoint.pth'):
             return str(model_path)
         return None
+
+    def _read_stream(self, stream, q):
+        """Odczytuje linie ze strumienia i umieszcza je w kolejce."""
+        while True:
+            line = stream.readline()
+            if not line:
+                break
+            q.put((stream, line.strip()))
 
     def train_model_stream(self, algorithm, *args):
         if algorithm not in self.train_scripts:
@@ -127,6 +137,7 @@ class TrainAPI:
 
             command = [
                 "docker", "exec",
+                "-e", "PYTHONUNBUFFERED=1",
                 "backend-app",
                 "python", script_path
             ]
@@ -143,21 +154,36 @@ class TrainAPI:
                 env=env
             )
 
-            while True:
-                stdout_line = process.stdout.readline()
-                if stdout_line:
-                    yield stdout_line.strip()
+            # Kolejka do przechowywania linii z wątków
+            output_queue = queue.Queue()
 
-                stderr_line = process.stderr.readline()
-                if stderr_line:
-                    print(f"STDERR: {stderr_line.strip()}")
-                    yield f"[STDERR] {stderr_line.strip()}"
+            # Uruchomienie wątków do odczytu stdout i stderr
+            stdout_thread = threading.Thread(target=self._read_stream, args=(process.stdout, output_queue))
+            stderr_thread = threading.Thread(target=self._read_stream, args=(process.stderr, output_queue))
+            stdout_thread.start()
+            stderr_thread.start()
 
-                if process.poll() is not None:
-                    break
+            # Odczyt z kolejki, dopóki proces się nie zakończy i wątki są aktywne
+            while process.poll() is None or stdout_thread.is_alive() or stderr_thread.is_alive():
+                try:
+                    # Odczyt z kolejki z timeoutem, aby nie blokować
+                    stream, line = output_queue.get(timeout=1.0)
+                    if stream == process.stdout and line:
+                        yield line
+                    elif stream == process.stderr and line:
+                        print(f"STDERR: {line}")
+                        yield f"[STDERR] {line}"
+                except queue.Empty:
+                    continue  # Jeśli kolejka jest pusta, kontynuuj pętlę
 
+            # Czekaj na zakończenie wątków
+            stdout_thread.join()
+            stderr_thread.join()
+
+            # Sprawdzenie kodu zakończenia
             if process.returncode != 0:
                 yield f"Błąd podczas uruchamiania skryptu {script_name}: proces zakończony z kodem {process.returncode}"
+
         except subprocess.CalledProcessError as e:
             yield f"Błąd podczas uruchamiania komendy w kontenerze: {e}"
         except Exception as e:

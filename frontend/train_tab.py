@@ -1,27 +1,31 @@
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 from backend.api.train_api import TrainAPI
 import os
 import time
 
 class TrainingThread(QtCore.QThread):
-    """Wątek do uruchamiania treningu w tle i przesyłania logów."""
-    log_signal = QtCore.pyqtSignal(str)  # Sygnał do przesyłania logów
-    finished_signal = QtCore.pyqtSignal(str)  # Sygnał po zakończeniu treningu
+    log_signal = QtCore.pyqtSignal(str)
+    finished_signal = QtCore.pyqtSignal(str)
 
     def __init__(self, train_api, algorithm, args):
         super().__init__()
         self.train_api = train_api
         self.algorithm = algorithm
         self.args = args
+        self._running = True
 
     def run(self):
-        """Uruchamia trening i przesyła logi w czasie rzeczywistym."""
         try:
             for log_line in self.train_api.train_model_stream(self.algorithm, *self.args):
-                self.log_signal.emit(log_line)  # Wysyłamy każdą linię logu
+                if not self._running:
+                    break
+                self.log_signal.emit(log_line)
             self.finished_signal.emit("Trening zakończony sukcesem!")
         except Exception as e:
             self.finished_signal.emit(f"Błąd podczas treningu: {str(e)}")
+
+    def stop(self):
+        self._running = False
 
 class TrainTab(QtWidgets.QWidget):
     def __init__(self):
@@ -205,16 +209,20 @@ class TrainTab(QtWidgets.QWidget):
         self.training_thread.start()
 
     def update_log(self, log_line):
-        print(f"Debug: Received log: {log_line}")
-        current_text = self.log_text.toPlainText()
-        if current_text:
-            new_text = current_text + "\n" + log_line
-        else:
-            new_text = log_line
-        self.log_text.setPlainText(new_text)
+        print(f"Debug: Received log: {log_line}")  # Debug
+        self.log_text.append(log_line)
         self.log_text.ensureCursorVisible()
+        
+        # Ograniczenie do np. 1000 linii
+        if self.log_text.document().lineCount() > 1000:
+            cursor = self.log_text.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.Start)
+            cursor.movePosition(QtGui.QTextCursor.Down, QtGui.QTextCursor.KeepAnchor, n=1)
+            cursor.removeSelectedText()
+        
         QtWidgets.QApplication.processEvents()
 
     def training_finished(self, result):
+        print(f"Debug: Training finished with result: {result}")  # Debug
         self.train_btn.setEnabled(True)
         QtWidgets.QMessageBox.information(self, "Trening", result)

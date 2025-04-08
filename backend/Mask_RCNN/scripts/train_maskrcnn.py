@@ -11,6 +11,7 @@ from utils import train_one_epoch, validate_model
 import numpy as np
 import shutil
 import sys
+from tqdm import tqdm  # Dodajemy tqdm do obsługi pasków postępu
 
 # KONFIGURACJA
 CONFIDENCE_THRESHOLD = 0.7  # Próg pewności dla detekcji
@@ -19,8 +20,7 @@ DETECTION_PER_IMAGE = 500  # Maksymalna liczba detekcji na obraz
 
 # Pobranie modelu Mask R-CNN (wersja v2)
 def get_model(num_classes, device):
-    model = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(weights=None)  # Nie pobieraj wag automatycznie
-    # Załaduj wagi ręcznie
+    model = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(weights=None)
     weights_path = "/app/backend/Mask_RCNN/pretrained_weights/maskrcnn_resnet50_fpn_v2.pth"
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"Plik wag nie istnieje: {weights_path}")
@@ -43,18 +43,21 @@ def get_model(num_classes, device):
     return model
 
 def train_model(args, is_api_call=False):
-    """Funkcja treningowa, która może być wywołana z API lub z linii poleceń."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Czy CUDA jest dostępna: {torch.cuda.is_available()}", flush=True)
-    if torch.cuda.is_available():
-        print(f"Nazwa GPU: {torch.cuda.get_device_name(0)}", flush=True)
-        print(f"Liczba dostępnych GPU: {torch.cuda.device_count()}", flush=True)
-    shm_path = "/dev/shm"
-    shm_usage = shutil.disk_usage(shm_path)
-    print(f"Pamięć współdzielona (/dev/shm):", flush=True)
-    print(f"Całkowita: {shm_usage.total / (1024**3):.2f} GB", flush=True)
-    print(f"Użyta: {shm_usage.used / (1024**3):.2f} GB", flush=True)
-    print(f"Wolna: {shm_usage.free / (1024**3):.2f} GB", flush=True)
+    try:
+        if torch.cuda.is_available():
+            print(f"Nazwa GPU: {torch.cuda.get_device_name(0)}", flush=True)
+            print(f"Liczba dostępnych GPU: {torch.cuda.device_count()}", flush=True)
+        shm_path = "/dev/shm"
+        shm_usage = shutil.disk_usage(shm_path)
+        print(f"Pamięć współdzielona (/dev/shm):", flush=True)
+        print(f"Całkowita: {shm_usage.total / (1024**3):.2f} GB", flush=True)
+        print(f"Użyta: {shm_usage.used / (1024**3):.2f} GB", flush=True)
+        print(f"Wolna: {shm_usage.free / (1024**3):.2f} GB", flush=True)
+    except Exception as e:
+        print(f"Błąd po sprawdzeniu CUDA: {e}", flush=True)
+        raise
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -84,8 +87,8 @@ def train_model(args, is_api_call=False):
     os.makedirs("/app/backend/Mask_RCNN/models", exist_ok=True)
 
     # Ustalanie ścieżek do folderów danych
-    train_dir = args.train_dir  # Używamy train_dir zamiast dataset_dir
-    val_dir = "/app/backend/data/val"  # Domyślna ścieżka do danych walidacyjnych
+    train_dir = args.train_dir
+    val_dir = "/app/backend/data/val"
 
     # Ustalanie ścieżek do plików adnotacji
     coco_train_path = args.coco_train_path if args.coco_train_path else os.path.join(train_dir, "annotations", "instances_train.json")
@@ -116,7 +119,7 @@ def train_model(args, is_api_call=False):
     mAPs_bbox = []
     mAPs_seg = []
     start_epoch = 1
-    last_epoch = start_epoch - 1  # Domyślna wartość przed rozpoczęciem pętli
+    last_epoch = start_epoch - 1
 
     # Ścieżka do pliku _best_checkpoint (do późniejszego usunięcia)
     best_checkpoint_path = None
@@ -142,7 +145,6 @@ def train_model(args, is_api_call=False):
                 mAPs_bbox = checkpoint.get('mAPs_bbox', [])
                 mAPs_seg = checkpoint.get('mAPs_seg', [])
                 last_epoch = checkpoint['epoch']
-                # Reset learning rate do wartości z args.lr
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = args.lr
                 print(f"Wczytano checkpoint z {args.resume}. Kontynuuję od epoki {start_epoch} z zresetowanym lr={args.lr}", flush=True)
@@ -155,8 +157,8 @@ def train_model(args, is_api_call=False):
     else:
         print(f"Wczytano nowy model", flush=True)
 
-    # Oblicz końcową epokę: start_epoch + liczba dodatkowych epok
-    end_epoch = start_epoch + args.epochs - 1  # args.epochs to liczba epok do wykonania
+    # Oblicz końcową epokę
+    end_epoch = start_epoch + args.epochs - 1
 
     # Early Stopping
     najlepsza_strata_walidacyjna = float("inf")
@@ -164,51 +166,60 @@ def train_model(args, is_api_call=False):
     cierpliwość = args.patience
 
     if start_epoch <= end_epoch:
-        for epoch in range(start_epoch, end_epoch + 1):
-            strata_treningowa = train_one_epoch(model, train_loader, optimizer, device, epoch)
-            strata_walidacyjna, liczba_predykcji, liczba_gt, mAP_bbox, mAP_seg = validate_model(
-                model, val_loader, device, epoch, nazwa_modelu, coco_val_path
-            )
+        # Używamy tqdm do wyświetlania paska postępu dla epok
+        with tqdm(total=end_epoch - start_epoch + 1, desc="Trening", unit="epoka", file=sys.stdout) as pbar:
+            for epoch in range(start_epoch, end_epoch + 1):
+                strata_treningowa = train_one_epoch(model, train_loader, optimizer, device, epoch)
+                strata_walidacyjna, liczba_predykcji, liczba_gt, mAP_bbox, mAP_seg = validate_model(
+                    model, val_loader, device, epoch, nazwa_modelu, coco_val_path
+                )
 
-            straty_treningowe.append(strata_treningowa)
-            straty_walidacyjne.append(strata_walidacyjna)
-            liczby_predykcji.append(liczba_predykcji)
-            liczby_gt.append(liczba_gt)
-            mAPs_bbox.append(mAP_bbox)
-            mAPs_seg.append(mAP_seg)
+                straty_treningowe.append(strata_treningowa)
+                straty_walidacyjne.append(strata_walidacyjna)
+                liczby_predykcji.append(liczba_predykcji)
+                liczby_gt.append(liczba_gt)
+                mAPs_bbox.append(mAP_bbox)
+                mAPs_seg.append(mAP_seg)
 
-            print(f"Epoka {epoch}/{end_epoch} - Strata treningowa: {strata_treningowa:.4f}, Strata walidacyjna: {strata_walidacyjna:.4f}, Pred: {liczba_predykcji}, GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt} mAP_bbox: {mAP_bbox:.4f}, mAP_seg: {mAP_seg:.4f}", flush=True)
+                # Formatowanie komunikatu o postępie
+                log_message = (
+                    f"Epoka {epoch}/{end_epoch} - Strata treningowa: {strata_treningowa:.4f}, "
+                    f"Strata walidacyjna: {strata_walidacyjna:.4f}, Pred: {liczba_predykcji}, "
+                    f"GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt:.2f}, "
+                    f"mAP_bbox: {mAP_bbox:.4f}, mAP_seg: {mAP_seg:.4f}"
+                )
+                pbar.set_description(log_message)
+                pbar.update(1)
 
-            # Early Stopping i zapis najlepszego checkpointu
-            if strata_walidacyjna < najlepsza_strata_walidacyjna:
-                najlepsza_strata_walidacyjna = strata_walidacyjna
-                licznik_cierpliwości = 0
-                # Zapis checkpointu (dla kontynuacji treningu)
-                checkpoint = {
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'scheduler_state_dict': scheduler.state_dict(),
-                    'epoch': epoch,
-                    'train_losses': straty_treningowe,
-                    'val_losses': straty_walidacyjne,
-                    'num_predictions': liczby_predykcji,
-                    'num_gt': liczby_gt,
-                    'mAPs_bbox': mAPs_bbox,
-                    'mAPs_seg': mAPs_seg
-                }
-                best_checkpoint_path = f"/app/models/{nazwa_modelu}_best_checkpoint.pth"
-                torch.save(checkpoint, best_checkpoint_path)
-                print(f"Zapisano najlepszy checkpoint: {best_checkpoint_path}", flush=True)
-            else:
-                licznik_cierpliwości += 1
-                print(f"Brak poprawy przez {licznik_cierpliwości}/{cierpliwość} epok", flush=True)
-                if licznik_cierpliwości >= cierpliwość:
-                    print("Early Stopping: Zakończono trening przedwcześnie.", flush=True)
-                    break
+                # Early Stopping i zapis najlepszego checkpointu
+                if strata_walidacyjna < najlepsza_strata_walidacyjna:
+                    najlepsza_strata_walidacyjna = strata_walidacyjna
+                    licznik_cierpliwości = 0
+                    checkpoint = {
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'scheduler_state_dict': scheduler.state_dict(),
+                        'epoch': epoch,
+                        'train_losses': straty_treningowe,
+                        'val_losses': straty_walidacyjne,
+                        'num_predictions': liczby_predykcji,
+                        'num_gt': liczby_gt,
+                        'mAPs_bbox': mAPs_bbox,
+                        'mAPs_seg': mAPs_seg
+                    }
+                    best_checkpoint_path = f"/app/backend/Mask_RCNN/models/{nazwa_modelu}_best_checkpoint.pth"
+                    torch.save(checkpoint, best_checkpoint_path)
+                    print(f"Zapisano najlepszy checkpoint: {best_checkpoint_path}", flush=True)
+                else:
+                    licznik_cierpliwości += 1
+                    print(f"Brak poprawy przez {licznik_cierpliwości}/{cierpliwość} epok", flush=True)
+                    if licznik_cierpliwości >= cierpliwość:
+                        print("Early Stopping: Zakończono trening przedwcześnie.", flush=True)
+                        break
 
-            scheduler.step(strata_walidacyjna)
-            print(f"Learning rate: {scheduler.get_last_lr()[0]}", flush=True)
-            last_epoch = epoch
+                scheduler.step(strata_walidacyjna)
+                print(f"Learning rate: {scheduler.get_last_lr()[0]}", flush=True)
+                last_epoch = epoch
     else:
         print(f"start_epoch ({start_epoch}) jest większe lub równe końcowej epoce ({end_epoch + 1}). Trening nie zostanie wykonany.", flush=True)
 
@@ -225,7 +236,7 @@ def train_model(args, is_api_call=False):
         'mAPs_bbox': mAPs_bbox,
         'mAPs_seg': mAPs_seg
     }
-    nazwa_pliku_checkpointu = f"/app/models/{nazwa_modelu}_checkpoint.pth"
+    nazwa_pliku_checkpointu = f"/app/backend/Mask_RCNN/models/{nazwa_modelu}_checkpoint.pth"
     torch.save(checkpoint, nazwa_pliku_checkpointu)
     print(f"Checkpoint zapisano jako: {nazwa_pliku_checkpointu}", flush=True)
 
@@ -242,7 +253,7 @@ def train_model(args, is_api_call=False):
     plt.ylabel("Strata")
     plt.legend()
     plt.grid(True)
-    plt.savefig(f"/app/logs/train/{nazwa_modelu}/loss_plot.png")
+    plt.savefig(f"/app/backend/Mask_RCNN/logs/train/{nazwa_modelu}/loss_plot.png")
 
     plt.figure(figsize=(10, 5))
     plt.plot(liczby_predykcji, label="Wykryte obiekty")
@@ -251,7 +262,7 @@ def train_model(args, is_api_call=False):
     plt.ylabel("Liczba obiektów")
     plt.legend()
     plt.grid(True)
-    plt.savefig(f"/app/logs/train/{nazwa_modelu}/detections_plot.png")
+    plt.savefig(f"/app/backend/Mask_RCNN/logs/train/{nazwa_modelu}/detections_plot.png")
 
     plt.figure(figsize=(10, 5))
     plt.plot(mAPs_bbox, label="mAP (bbox)")
@@ -260,7 +271,7 @@ def train_model(args, is_api_call=False):
     plt.ylabel("mAP")
     plt.legend()
     plt.grid(True)
-    plt.savefig(f"/app/logs/train/{nazwa_modelu}/mAP_plot.png")
+    plt.savefig(f"/app/backend/Mask_RCNN/logs/train/{nazwa_modelu}/mAP_plot.png")
 
     print("Trening zakończony!", flush=True)
     return f"Trening zakończony! Checkpoint zapisany jako: {nazwa_pliku_checkpointu}"

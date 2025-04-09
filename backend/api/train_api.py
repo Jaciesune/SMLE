@@ -4,24 +4,27 @@ import subprocess
 import shutil
 import threading
 import queue
+import signal
+import time
 
 class TrainAPI:
     def __init__(self):
         self.base_path = Path(__file__).resolve().parent.parent  # backend/
-
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
             "FasterRCNN": self.base_path / "FasterRCNN" / "saved_models",
             "MCNN": self.base_path / "MCNN" / "models",
             "SSD - do zaimplementowania": self.base_path / "SSD" / "models"
         }
-
         self.train_scripts = {
             "Mask R-CNN": "train_maskrcnn.py",
             "FasterRCNN": "run_training.py",
             "SSD": "train_ssd.py",
             "MCNN": "train_model.py"
         }
+        self._running = True
+        self._process = None
+        self.container_name = "backend-app"  # Nazwa kontenera Docker
 
     def get_algorithms(self):
         return list(self.algorithms.keys())
@@ -46,22 +49,82 @@ class TrainAPI:
     def _read_stream(self, stream, q):
         """Odczytuje linie ze strumienia i umieszcza je w kolejce."""
         while True:
-            line = stream.readline()
-            if not line:
+            try:
+                line = stream.readline()
+                if not line:
+                    break
+                q.put((stream, line.strip()))
+            except UnicodeDecodeError as e:
+                print(f"Błąd dekodowania: {e}")
+                q.put((stream, f"[BŁĄD DEKODOWANIA] {str(e)}"))
+            except Exception as e:
+                print(f"Błąd w _read_stream: {e}")
                 break
-            q.put((stream, line.strip()))
+
+    def stop(self):
+        """Ustawia flagę zatrzymania i przerywa proces treningowy w kontenerze."""
+        self._running = False
+        if hasattr(self, '_process') and self._process:
+            try:
+                # 1. Znajdź PID procesu Pythona w kontenerze
+                find_pid_cmd = [
+                    "docker", "exec", self.container_name,
+                    "ps", "-eo", "pid,cmd", "--no-headers"
+                ]
+                pid_output = subprocess.check_output(find_pid_cmd, text=True)
+                print(f"Procesy w kontenerze:\n{pid_output}")
+
+                # Szukamy procesu Pythona z naszym skryptem treningowym
+                pid = None
+                script_name = self.train_scripts.get(self.current_algorithm, "")
+                for line in pid_output.splitlines():
+                    if script_name in line and "python" in line.lower():
+                        pid = line.split()[0]
+                        break
+
+                if pid:
+                    print(f"Znaleziono PID procesu treningowego: {pid}")
+                    # Wysyłamy SIGKILL do procesu w kontenerze
+                    kill_cmd = [
+                        "docker", "exec", self.container_name,
+                        "kill", "-9", pid
+                    ]
+                    subprocess.run(kill_cmd, check=True)
+                    print(f"Wysłano SIGKILL do PID {pid} w kontenerze.")
+                else:
+                    print("Nie znaleziono PID procesu treningowego w kontenerze.")
+
+                # 2. Próbujemy zakończyć proces docker exec
+                self._process.terminate()
+                self._process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                print("Proces docker exec nie zakończył się po SIGTERM, wysyłanie SIGKILL...")
+                self._process.kill()
+            except Exception as e:
+                print(f"Błąd podczas przerywania procesu: {e}")
+            finally:
+                # Zamykamy strumienie, aby przerwać wątki _read_stream
+                if self._process.stdout:
+                    self._process.stdout.close()
+                if self._process.stderr:
+                    self._process.stderr.close()
+                self._process = None
 
     def train_model_stream(self, algorithm, *args):
         if algorithm not in self.train_scripts:
             yield f"Błąd: Algorytm {algorithm} nie jest wspierany."
             return
 
+        self._running = True
+        self.current_algorithm = algorithm  # Zapisujemy algorytm, aby użyć go w stop()
         script_name = self.train_scripts[algorithm]
 
         # Parsowanie argumentów
         train_dir = None
         host_train_path = None
         host_val_path = None
+        num_augmentations = "0"
+        epochs = "0"
         for i in range(0, len(args), 2):
             if args[i] == "--train_dir":
                 train_dir = args[i + 1]
@@ -69,7 +132,12 @@ class TrainAPI:
                 host_train_path = args[i + 1]
             elif args[i] == "--host_val_path":
                 host_val_path = args[i + 1]
+            elif args[i] == "--num_augmentations":
+                num_augmentations = args[i + 1]
+            elif args[i] == "--epochs":
+                epochs = args[i + 1]
 
+        # Walidacja
         if not train_dir:
             yield f"Błąd: Ścieżka do danych treningowych (--train_dir) nie została podana."
             return
@@ -84,8 +152,27 @@ class TrainAPI:
             return
 
         try:
+            num_augmentations = int(num_augmentations)
+            if num_augmentations < 0:
+                yield f"Błąd: Liczba augmentacji (--num_augmentations) nie może być ujemna."
+                return
+        except ValueError:
+            yield f"Błąd: Nieprawidłowa wartość dla --num_augmentations: {num_augmentations}"
+            return
+
+        try:
+            epochs = int(epochs)
+            if epochs <= 0:
+                yield f"Błąd: Liczba epok (--epochs) musi być większa od 0."
+                return
+        except ValueError:
+            yield f"Błąd: Nieprawidłowa wartość dla --epochs: {epochs}"
+            return
+
+        try:
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+            env["PYTHONIOENCODING"] = "utf-8"
 
             if algorithm == "Mask R-CNN":
                 script_path = f"/app/backend/Mask_RCNN/scripts/{script_name}"
@@ -111,11 +198,12 @@ class TrainAPI:
                     elif os.path.isdir(src_path):
                         shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
                 print(f"Skopiowano dane treningowe z {host_train_path} do {host_train_dir}")
+                yield f"Skopiowano dane treningowe do {host_train_dir}"
             except Exception as e:
                 yield f"Błąd: Nie udało się skopiować danych treningowych do {host_train_dir}: {e}"
                 return
 
-            # Katalog walidacyjny na hoście (jeśli podano host_val_path)
+            # Katalog walidacyjny na hoście
             if host_val_path:
                 host_val_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1].replace("train", "val")
                 host_val_dir.mkdir(parents=True, exist_ok=True)
@@ -128,6 +216,7 @@ class TrainAPI:
                         elif os.path.isdir(src_path):
                             shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
                     print(f"Skopiowano dane walidacyjne z {host_val_path} do {host_val_dir}")
+                    yield f"Skopiowano dane walidacyjne do {host_val_dir}"
                 except Exception as e:
                     yield f"Błąd: Nie udało się skopiować danych walidacyjnych do {host_val_dir}: {e}"
                     return
@@ -138,35 +227,39 @@ class TrainAPI:
             command = [
                 "docker", "exec",
                 "-e", "PYTHONUNBUFFERED=1",
-                "backend-app",
+                self.container_name,
                 "python", script_path
             ]
             command.extend(filtered_args)
 
             print(f"Uruchamiam polecenie: {' '.join(command)}")
+            yield f"Uruchamiam trening z {num_augmentations} augmentacjami na obraz..."
+
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1,
                 universal_newlines=True,
                 env=env
             )
+            self._process = process
 
-            # Kolejka do przechowywania linii z wątków
             output_queue = queue.Queue()
-
-            # Uruchomienie wątków do odczytu stdout i stderr
             stdout_thread = threading.Thread(target=self._read_stream, args=(process.stdout, output_queue))
             stderr_thread = threading.Thread(target=self._read_stream, args=(process.stderr, output_queue))
             stdout_thread.start()
             stderr_thread.start()
 
-            # Odczyt z kolejki, dopóki proces się nie zakończy i wątki są aktywne
             while process.poll() is None or stdout_thread.is_alive() or stderr_thread.is_alive():
+                if not self._running:
+                    self.stop()
+                    yield "Trening przerwany przez użytkownika."
+                    break
                 try:
-                    # Odczyt z kolejki z timeoutem, aby nie blokować
                     stream, line = output_queue.get(timeout=1.0)
                     if stream == process.stdout and line:
                         yield line
@@ -174,17 +267,17 @@ class TrainAPI:
                         print(f"STDERR: {line}")
                         yield f"[STDERR] {line}"
                 except queue.Empty:
-                    continue  # Jeśli kolejka jest pusta, kontynuuj pętlę
+                    continue
 
-            # Czekaj na zakończenie wątków
             stdout_thread.join()
             stderr_thread.join()
 
-            # Sprawdzenie kodu zakończenia
-            if process.returncode != 0:
+            if process.returncode != 0 and self._running:
                 yield f"Błąd podczas uruchamiania skryptu {script_name}: proces zakończony z kodem {process.returncode}"
 
         except subprocess.CalledProcessError as e:
             yield f"Błąd podczas uruchamiania komendy w kontenerze: {e}"
         except Exception as e:
             yield f"Nieoczekiwany błąd: {e}"
+        finally:
+            self._process = None

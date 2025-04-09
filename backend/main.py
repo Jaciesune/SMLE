@@ -1,6 +1,6 @@
 import time
 import mysql.connector
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from login import verify_credentials
 from users_tab import get_users, create_user
@@ -46,15 +46,19 @@ class DetectionRequest(BaseModel):
 
 # Model Pydantic do żądania treningu
 class TrainingRequest(BaseModel):
-    dataset_dir: str
+    train_dir: str  # Zmieniono z dataset_dir na train_dir dla zgodności
     epochs: int
-    batch_size: int
     lr: float
-    num_workers: int = 10
-    patience: int = 8
+    model_name: str  # Dodano
+    coco_train_path: str  # Dodano
     coco_gt_path: str = "/app/backend/data/val/annotations/instances_val.json"
+    host_train_path: str  # Dodano
+    host_val_path: str = None  # Dodano (opcjonalne)
     num_augmentations: int = 8
     resume: str = None
+    batch_size: int = 4  # Zachowano, jeśli skrypty treningowe tego wymagają
+    num_workers: int = 10  # Zachowano
+    patience: int = 8  # Zachowano
 
 # Endpoint logowania
 @app.post("/login")
@@ -79,22 +83,28 @@ def detect(request: DetectionRequest):
 @app.post("/train")
 def train(request: TrainingRequest):
     train_args = [
-        "--dataset_dir", request.dataset_dir,
+        "--train_dir", request.train_dir,
         "--epochs", str(request.epochs),
-        "--batch_size", str(request.batch_size),
         "--lr", str(request.lr),
+        "--model_name", request.model_name,
+        "--coco_train_path", request.coco_train_path,
+        "--coco_gt_path", request.coco_gt_path,
+        "--host_train_path", request.host_train_path,
+        "--num_augmentations", str(request.num_augmentations),
+        "--batch_size", str(request.batch_size),
         "--num_workers", str(request.num_workers),
         "--patience", str(request.patience),
-        "--coco_gt_path", request.coco_gt_path,
-        "--num_augmentations", str(request.num_augmentations),
     ]
+    if request.host_val_path:
+        train_args.extend(["--host_val_path", request.host_val_path])
     if request.resume:
         train_args.extend(["--resume", request.resume])
 
-    result = detection_api.train_model(train_args)
-    if "Błąd" in result:
-        raise HTTPException(status_code=500, detail=result)
-    return {"message": "Trening zakończony", "output": result}
+    try:
+        result = detection_api.train_model(train_args)
+        return {"message": "Trening zakończony", "output": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Inne endpointy
 app.add_api_route("/users", get_users, methods=["GET"])

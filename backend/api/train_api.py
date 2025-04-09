@@ -24,30 +24,35 @@ class TrainAPI:
         }
         self._running = True
         self._process = None
-        self.container_name = "backend-app"  # Nazwa kontenera Docker
+        self.container_name = "backend-app"
 
     def get_algorithms(self):
         return list(self.algorithms.keys())
 
     def get_model_versions(self, algorithm):
         if algorithm not in self.algorithms:
+            print(f"Algorytm {algorithm} nie jest wspierany.", flush=True)
             return []
         model_path = self.algorithms[algorithm]
         if not model_path.exists():
+            print(f"Katalog modeli {model_path} nie istnieje.", flush=True)
             return []
         model_versions = [file.name for file in model_path.iterdir() if file.is_file() and file.name.endswith('_checkpoint.pth')]
+        print(f"Znalezione modele dla {algorithm}: {model_versions}", flush=True)
         return sorted(model_versions)
 
     def get_model_path(self, algorithm, version):
         if algorithm not in self.algorithms:
+            print(f"Algorytm {algorithm} nie jest wspierany.", flush=True)
             return None
-        model_path = self.algorithms[algorithm] / version
-        if model_path.exists() and model_path.is_file() and model_path.name.endswith('_checkpoint.pth'):
-            return str(model_path)
+        # Zwracamy tylko nazwę modelu, bez pełnej ścieżki
+        if version.endswith('_checkpoint.pth'):
+            print(f"Model wybrany: {version}", flush=True)
+            return version
+        print(f"Model niepoprawny: {version}", flush=True)
         return None
 
     def _read_stream(self, stream, q):
-        """Odczytuje linie ze strumienia i umieszcza je w kolejce."""
         while True:
             try:
                 line = stream.readline()
@@ -62,11 +67,9 @@ class TrainAPI:
                 break
 
     def stop(self):
-        """Ustawia flagę zatrzymania i przerywa proces treningowy w kontenerze."""
         self._running = False
         if hasattr(self, '_process') and self._process:
             try:
-                # 1. Znajdź PID procesu Pythona w kontenerze
                 find_pid_cmd = [
                     "docker", "exec", self.container_name,
                     "ps", "-eo", "pid,cmd", "--no-headers"
@@ -74,7 +77,6 @@ class TrainAPI:
                 pid_output = subprocess.check_output(find_pid_cmd, text=True)
                 print(f"Procesy w kontenerze:\n{pid_output}")
 
-                # Szukamy procesu Pythona z naszym skryptem treningowym
                 pid = None
                 script_name = self.train_scripts.get(self.current_algorithm, "")
                 for line in pid_output.splitlines():
@@ -84,7 +86,6 @@ class TrainAPI:
 
                 if pid:
                     print(f"Znaleziono PID procesu treningowego: {pid}")
-                    # Wysyłamy SIGKILL do procesu w kontenerze
                     kill_cmd = [
                         "docker", "exec", self.container_name,
                         "kill", "-9", pid
@@ -94,7 +95,6 @@ class TrainAPI:
                 else:
                     print("Nie znaleziono PID procesu treningowego w kontenerze.")
 
-                # 2. Próbujemy zakończyć proces docker exec
                 self._process.terminate()
                 self._process.wait(timeout=2)
             except subprocess.TimeoutExpired:
@@ -103,7 +103,6 @@ class TrainAPI:
             except Exception as e:
                 print(f"Błąd podczas przerywania procesu: {e}")
             finally:
-                # Zamykamy strumienie, aby przerwać wątki _read_stream
                 if self._process.stdout:
                     self._process.stdout.close()
                 if self._process.stderr:
@@ -116,10 +115,9 @@ class TrainAPI:
             return
 
         self._running = True
-        self.current_algorithm = algorithm  # Zapisujemy algorytm, aby użyć go w stop()
+        self.current_algorithm = algorithm
         script_name = self.train_scripts[algorithm]
 
-        # Parsowanie argumentów
         train_dir = None
         host_train_path = None
         host_val_path = None
@@ -137,7 +135,6 @@ class TrainAPI:
             elif args[i] == "--epochs":
                 epochs = args[i + 1]
 
-        # Walidacja
         if not train_dir:
             yield f"Błąd: Ścieżka do danych treningowych (--train_dir) nie została podana."
             return
@@ -184,11 +181,9 @@ class TrainAPI:
                 yield f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
                 return
 
-            # Katalog treningowy na hoście
             host_train_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1]
             host_train_dir.mkdir(parents=True, exist_ok=True)
 
-            # Kopiowanie danych treningowych
             try:
                 for item in os.listdir(host_train_path):
                     src_path = os.path.join(host_train_path, item)
@@ -203,7 +198,6 @@ class TrainAPI:
                 yield f"Błąd: Nie udało się skopiować danych treningowych do {host_train_dir}: {e}"
                 return
 
-            # Katalog walidacyjny na hoście
             if host_val_path:
                 host_val_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1].replace("train", "val")
                 host_val_dir.mkdir(parents=True, exist_ok=True)
@@ -221,7 +215,6 @@ class TrainAPI:
                     yield f"Błąd: Nie udało się skopiować danych walidacyjnych do {host_val_dir}: {e}"
                     return
 
-            # Usuwamy --host_train_path i --host_val_path z argumentów
             filtered_args = [arg for arg in args if arg not in ["--host_train_path", host_train_path, "--host_val_path", host_val_path]]
 
             command = [
@@ -231,7 +224,6 @@ class TrainAPI:
                 "python", script_path
             ]
             command.extend(filtered_args)
-
             print(f"Uruchamiam polecenie: {' '.join(command)}")
             yield f"Uruchamiam trening z {num_augmentations} augmentacjami na obraz..."
 

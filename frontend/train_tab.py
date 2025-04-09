@@ -7,7 +7,6 @@ import logging
 import os
 import re
 
-# Konfiguracja logowania
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,7 @@ class TrainingThread(QtCore.QThread):
         self.algorithm = algorithm
         self.args = args
         self._running = True
-        self._stopped_by_user = False  # Flaga określająca, czy trening został wstrzymany przez użytkownika
+        self._stopped_by_user = False
 
     def run(self):
         try:
@@ -29,7 +28,6 @@ class TrainingThread(QtCore.QThread):
                 if not self._running:
                     break
                 self.log_signal.emit(log_line)
-            # Sprawdzamy, czy trening został wstrzymany przez użytkownika
             if self._stopped_by_user:
                 self.finished_signal.emit("Zatrzymano trening")
             else:
@@ -39,7 +37,7 @@ class TrainingThread(QtCore.QThread):
 
     def stop(self):
         self._running = False
-        self._stopped_by_user = True  # Ustawiamy flagę, że trening został wstrzymany przez użytkownika
+        self._stopped_by_user = True
         self.train_api.stop()
         self.wait(2000)
 
@@ -49,10 +47,10 @@ class TrainTab(QtWidgets.QWidget):
         self.train_api = TrainAPI()
         self.training_thread = None
         self.DEFAULT_VAL_PATH = os.getenv("DEFAULT_VAL_PATH", "/app/backend/data/val")
-        self.initial_epoch = 0  # Początkowa epoka (dla wznowienia)
-        self.completed_epochs = 0  # Licznik ukończonych epok
-        self.total_epochs = 0  # Całkowita liczba epok (docelowa)
-        self.user_epochs = 0  # Liczba epok podana przez użytkownika
+        self.initial_epoch = 0
+        self.completed_epochs = 0
+        self.total_epochs = 0
+        self.user_epochs = 0
         self.init_ui()
 
     def init_ui(self):
@@ -63,11 +61,9 @@ class TrainTab(QtWidgets.QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(10)
 
-        # Nazwa modelu
         self.model_name_input = QtWidgets.QLineEdit()
         layout.addRow("Nazwa Modelu:", self.model_name_input)
 
-        # Ścieżka do danych treningowych
         self.dataset_path_input = QtWidgets.QLineEdit()
         self.dataset_path_btn = QtWidgets.QPushButton("Wybierz dane treningowe")
         self.dataset_path_btn.clicked.connect(self.select_dataset)
@@ -76,7 +72,6 @@ class TrainTab(QtWidgets.QWidget):
         dataset_layout.addWidget(self.dataset_path_btn)
         layout.addRow("Ścieżka do danych treningowych:", dataset_layout)
 
-        # Ścieżka do danych walidacyjnych (opcjonalne)
         self.val_path_input = QtWidgets.QLineEdit()
         self.val_path_btn = QtWidgets.QPushButton("Wybierz dane walidacyjne (opcjonalne)")
         self.val_path_btn.clicked.connect(self.select_val_dataset)
@@ -85,13 +80,11 @@ class TrainTab(QtWidgets.QWidget):
         val_layout.addWidget(self.val_path_btn)
         layout.addRow("Ścieżka do danych walidacyjnych:", val_layout)
 
-        # Lista rozwijana "Wybierz Algorytm"
         self.algorithm_combo = QtWidgets.QComboBox()
         self.algorithm_combo.addItems(self.train_api.get_algorithms())
         self.algorithm_combo.currentTextChanged.connect(self.update_model_versions)
         layout.addRow("Wybierz Algorytm:", self.algorithm_combo)
 
-        # Wybór modelu do doszkolenia
         self.model_version_label = QtWidgets.QLabel("Wybierz model do doszkolenia (opcjonalne):")
         layout.addRow(self.model_version_label)
         self.model_version_combo = QtWidgets.QComboBox()
@@ -99,13 +92,11 @@ class TrainTab(QtWidgets.QWidget):
         self.update_model_versions()
         layout.addRow(self.model_version_combo)
 
-        # Liczba epok
         self.epochs_input = QtWidgets.QSpinBox()
         self.epochs_input.setRange(1, 1000)
         self.epochs_input.setValue(10)
         layout.addRow("Liczba epok:", self.epochs_input)
 
-        # Współczynnik uczenia
         self.learning_rate_input = QtWidgets.QDoubleSpinBox()
         self.learning_rate_input.setRange(0.0001, 1.0)
         self.learning_rate_input.setSingleStep(0.0001)
@@ -113,13 +104,11 @@ class TrainTab(QtWidgets.QWidget):
         self.learning_rate_input.setValue(0.0005)
         layout.addRow("Współczynnik uczenia:", self.learning_rate_input)
 
-        # Liczba augmentacji na obraz
         self.augmentations_input = QtWidgets.QSpinBox()
         self.augmentations_input.setRange(0, 100)
         self.augmentations_input.setValue(0)
         layout.addRow("Liczba augmentacji na obraz:", self.augmentations_input)
 
-        # Przyciski "Rozpocznij" i "Zatrzymaj"
         self.button_layout = QtWidgets.QHBoxLayout()
         self.train_btn = QtWidgets.QPushButton("Rozpocznij trening")
         self.train_btn.clicked.connect(self.start_training)
@@ -130,12 +119,10 @@ class TrainTab(QtWidgets.QWidget):
         self.button_layout.addWidget(self.stop_btn)
         layout.addRow(self.button_layout)
 
-        # Pasek postępu
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setVisible(False)
         layout.addRow("Postęp:", self.progress_bar)
 
-        # Pole tekstowe do wyświetlania logów
         self.log_text = QtWidgets.QPlainTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setMaximumBlockCount(1000)
@@ -167,11 +154,11 @@ class TrainTab(QtWidgets.QWidget):
             self.model_version_combo.addItems(model_versions)
         else:
             self.model_version_combo.addItem("Brak dostępnych modeli")
+        logger.info(f"Zaktualizowano listę modeli dla algorytmu {algorithm}: {model_versions}")
 
     def log_error(self, message):
         self.log_text.appendPlainText(f"Błąd: {message}")
         QtWidgets.QMessageBox.warning(self, "Błąd", message)
-        # Resetujemy stan po błędzie
         self.train_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.progress_bar.setVisible(False)
@@ -234,13 +221,13 @@ class TrainTab(QtWidgets.QWidget):
             args.extend(["--host_val_path", val_path])
 
         if model_version != "Nowy model":
-            model_path = self.train_api.get_model_path(algorithm, model_version)
-            if model_path:
-                args.extend(["--resume", model_path])
-            else:
-                self.log_error(f"Nie można znaleźć modelu: {model_version}")
-                return None
+            # Przekazujemy tylko nazwę modelu, bez pełnej ścieżki
+            logger.info(f"Wybrano model do doszkolenia: {model_version}")
+            args.extend(["--resume", model_version])
+        else:
+            logger.info("Wybrano nowy model, brak --resume")
 
+        logger.info(f"Przygotowane argumenty: {args}")
         return args
 
     def start_training(self):
@@ -256,6 +243,8 @@ class TrainTab(QtWidgets.QWidget):
         user_epochs = self.epochs_input.value()
         learning_rate = self.learning_rate_input.value()
         augmentations = self.augmentations_input.value()
+
+        logger.info(f"Rozpoczynanie treningu: model_name={model_name}, algorithm={algorithm}, model_version={model_version}")
 
         if not self.validate_inputs(model_name, train_path, val_path, model_version):
             return
@@ -287,7 +276,7 @@ class TrainTab(QtWidgets.QWidget):
             self.training_thread.stop()
             completed = max(0, self.completed_epochs - self.initial_epoch + 1)
             self.log_text.appendPlainText(f"Zatrzymywanie treningu... Ukończono {completed} z {self.user_epochs} epok (od epoki {self.initial_epoch} do {self.completed_epochs}).")
-            QtWidgets.QMessageBox.information(self, "Trening", "Zatrzymano trening")  # Wyświetlamy okno dialogowe
+            QtWidgets.QMessageBox.information(self, "Trening", "Zatrzymano trening")
             self.stop_btn.setEnabled(False)
             self.progress_bar.setVisible(False)
             self.train_btn.setEnabled(True)
@@ -327,5 +316,5 @@ class TrainTab(QtWidgets.QWidget):
         self.stop_btn.setEnabled(False)
         self.progress_bar.setValue(self.user_epochs)
         self.progress_bar.setVisible(False)
-        QtWidgets.QMessageBox.information(self, "Trening", result)  # Wyświetlamy komunikat zależny od wyniku
+        QtWidgets.QMessageBox.information(self, "Trening", result)
         self.training_thread = None

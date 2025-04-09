@@ -1,0 +1,110 @@
+import torch
+from torch.utils.data import DataLoader
+from torchvision.datasets import CocoDetection
+import os
+from PIL import Image
+import numpy as np
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
+def get_dataset_paths(train_path=None, val_path=None, test_path=None):
+    base = os.path.abspath(os.path.join(os.path.dirname(__file__), "dataset"))
+    train_path = train_path or os.path.join(base, "train")
+    val_path = val_path or os.path.join(base, "val")
+    test_path = test_path or os.path.join(base, "test")
+
+    return {
+        "train_images": os.path.join(train_path, "images"),
+        "train_annotations": os.path.join(train_path, "annotations", "instances_train.json"),
+        "val_images": os.path.join(val_path, "images"),
+        "val_annotations": os.path.join(val_path, "annotations", "instances_val.json"),
+        "test_images": os.path.join(test_path, "images")
+    }
+
+def collate_fn(batch):
+    return tuple(zip(*batch))
+
+def get_train_transform():
+    return A.Compose([
+        A.RandomScale(scale_limit=(-0.3, 0.0), p=0.5),
+        A.SmallestMaxSize(max_size=1024, p=1.0),
+        A.PadIfNeeded(min_height=1024, min_width=1024, border_mode=0, constant_values=0, p=1.0),
+        A.RandomCrop(height=1024, width=1024, p=0.4),
+        A.HorizontalFlip(p=0.5),
+        A.RandomBrightnessContrast(p=0.5),
+        A.RandomGamma(p=0.3),
+        A.ISONoise(p=0.3),
+        A.Blur(blur_limit=3, p=0.2),
+        A.MotionBlur(blur_limit=3, p=0.2),
+        A.ColorJitter(p=0.4),
+        A.RandomRotate90(p=0.3),
+        A.Resize(1024, 1024),
+        ToTensorV2()
+    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
+
+def get_val_transform():
+    return A.Compose([
+        A.Resize(1024, 1024),
+        ToTensorV2()
+    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
+
+class CocoDetectionWithAlbumentations(CocoDetection):
+    def __init__(self, root, annFile, transform=None):
+        super().__init__(root, annFile)
+        self.transform = transform
+
+    def __getitem__(self, index):
+        image, target = super().__getitem__(index)
+        image_id = self.ids[index]
+
+        boxes, labels = [], []
+        for obj in target:
+            x, y, w, h = obj["bbox"]
+            if w > 0 and h > 0:
+                boxes.append([x, y, x + w, y + h])
+                labels.append(obj["category_id"])
+
+        image_np = np.array(image).astype(np.float32) / 255.0
+
+        transformed = self.transform(
+            image=image_np,
+            bboxes=boxes,
+            category_ids=labels
+        )
+
+        return transformed["image"], {
+            "boxes": torch.tensor(transformed["bboxes"], dtype=torch.float32),
+            "labels": torch.tensor(transformed["category_ids"], dtype=torch.int64),
+            "image_id": torch.tensor(image_id)
+        }
+
+class UnannotatedImageFolder(torch.utils.data.Dataset):
+    def __init__(self, root, transform=None):
+        self.image_paths = sorted([
+            os.path.join(root, f) for f in os.listdir(root) if f.endswith(('.jpg', '.png'))
+        ])
+        self.transform = transform
+
+    def __getitem__(self, index):
+        image = Image.open(self.image_paths[index]).convert("RGB")
+        image = np.array(image)
+        if self.transform:
+            image = self.transform(image=image)["image"]
+        return image, {}
+
+    def __len__(self):
+        return len(self.image_paths)
+
+def get_data_loaders(batch_size=2, num_workers=0, train_path=None, train_annotations=None, val_path=None, val_annotations=None, test_path=None):
+    train_dataset = CocoDetectionWithAlbumentations(train_path, train_annotations, get_train_transform())
+
+    val_dataset = CocoDetectionWithAlbumentations(val_path, val_annotations, get_val_transform()) \
+        if val_path and val_annotations and os.path.exists(val_annotations) else None
+
+    test_dataset = UnannotatedImageFolder(test_path, A.Compose([A.Resize(1024, 1024), ToTensorV2()]))
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn) if val_dataset else None
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+    return train_loader, val_loader, test_loader

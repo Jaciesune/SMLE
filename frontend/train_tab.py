@@ -1,14 +1,38 @@
 from PyQt5 import QtWidgets, QtCore
+from backend.api.train_api import TrainAPI
+import os
+
+class TrainingThread(QtCore.QThread):
+    """Wątek do uruchamiania treningu w tle i przesyłania logów."""
+    log_signal = QtCore.pyqtSignal(str)  # Sygnał do przesyłania logów
+    finished_signal = QtCore.pyqtSignal(str)  # Sygnał po zakończeniu treningu
+
+    def __init__(self, train_api, algorithm, args):
+        super().__init__()
+        self.train_api = train_api
+        self.algorithm = algorithm
+        self.args = args
+
+    def run(self):
+        """Uruchamia trening i przesyła logi w czasie rzeczywistym."""
+        try:
+            for log_line in self.train_api.train_model_stream(self.algorithm, *self.args):
+                self.log_signal.emit(log_line)  # Wysyłamy każdą linię logu
+            self.finished_signal.emit("Trening zakończony sukcesem!")
+        except Exception as e:
+            self.finished_signal.emit(f"Błąd podczas treningu: {str(e)}")
 
 class TrainTab(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
+        self.train_api = TrainAPI()
+        self.training_thread = None  # Wątek treningowy
         self.init_ui()
 
     def init_ui(self):
         # Zewnętrzny układ do wycentrowania na ekranie
-        outer_layout = QtWidgets.QVBoxLayout()  # Używamy QVBoxLayout dla centrowania pionowego
-        outer_layout.setContentsMargins(0, 0, 0, 0)  # Usuwamy marginesy
+        outer_layout = QtWidgets.QVBoxLayout()
+        outer_layout.setContentsMargins(0, 0, 0, 0)
 
         # Główny layout
         layout = QtWidgets.QFormLayout()
@@ -19,25 +43,28 @@ class TrainTab(QtWidgets.QWidget):
         self.model_name_input = QtWidgets.QLineEdit()
         layout.addRow("Nazwa Modelu:", self.model_name_input)
 
-        # Ścieżka do danych
+        # Ścieżka do danych treningowych
         self.dataset_path_input = QtWidgets.QLineEdit()
-        self.dataset_path_btn = QtWidgets.QPushButton("Wybierz dane")
+        self.dataset_path_btn = QtWidgets.QPushButton("Wybierz dane treningowe")
         self.dataset_path_btn.clicked.connect(self.select_dataset)
         dataset_layout = QtWidgets.QHBoxLayout()
         dataset_layout.addWidget(self.dataset_path_input)
         dataset_layout.addWidget(self.dataset_path_btn)
-        layout.addRow("Ścieżka do danych:", dataset_layout)
+        layout.addRow("Ścieżka do danych treningowych:", dataset_layout)
 
         # Lista rozwijana "Wybierz Algorytm"
         self.algorithm_combo = QtWidgets.QComboBox()
-        self.algorithm_combo.addItem("CNN")
-        self.algorithm_combo.addItem("R-CNN")
-        self.algorithm_combo.addItem("Mask R-CNN")
+        self.algorithm_combo.addItems(self.train_api.get_algorithms())
+        self.algorithm_combo.currentTextChanged.connect(self.update_model_versions)
+        layout.addRow("Wybierz Algorytm:", self.algorithm_combo)
 
-        # Tworzymy layout poziomy dla combo boxa
-        algorithm_layout = QtWidgets.QHBoxLayout()
-        algorithm_layout.addWidget(self.algorithm_combo)
-        layout.addRow("Wybierz Algorytm:", algorithm_layout)
+        # Wybór modelu do doszkolenia
+        self.model_version_label = QtWidgets.QLabel("Wybierz model do doszkolenia (opcjonalne):")
+        layout.addRow(self.model_version_label)
+        self.model_version_combo = QtWidgets.QComboBox()
+        self.model_version_combo.addItem("Nowy model")
+        self.update_model_versions()  # Wypełniamy combo box dla domyślnego algorytmu
+        layout.addRow(self.model_version_combo)
 
         # Liczba epok
         self.epochs_input = QtWidgets.QSpinBox()
@@ -49,13 +76,20 @@ class TrainTab(QtWidgets.QWidget):
         self.learning_rate_input = QtWidgets.QDoubleSpinBox()
         self.learning_rate_input.setRange(0.0001, 1.0)
         self.learning_rate_input.setSingleStep(0.0001)
-        self.learning_rate_input.setValue(0.001)
+        self.learning_rate_input.setDecimals(6)
+        self.learning_rate_input.setValue(0.0005)
         layout.addRow("Współczynnik uczenia:", self.learning_rate_input)
 
         # Przycisk "Rozpocznij trening"
         self.train_btn = QtWidgets.QPushButton("Rozpocznij trening")
         self.train_btn.clicked.connect(self.start_training)
         layout.addRow(self.train_btn)
+
+        # Pole tekstowe do wyświetlania logów
+        self.log_text = QtWidgets.QTextEdit()
+        self.log_text.setReadOnly(True)  # Tylko do odczytu
+        self.log_text.setFixedHeight(200)  # Ustawiamy wysokość pola
+        layout.addRow("Logi treningu:", self.log_text)
 
         # Tworzymy widget, który będzie przechowywał nasz layout
         form_widget = QtWidgets.QWidget()
@@ -76,5 +110,103 @@ class TrainTab(QtWidgets.QWidget):
         if folder:
             self.dataset_path_input.setText(folder)
 
+    def update_model_versions(self):
+        """Aktualizuje listę wersji modeli na podstawie wybranego algorytmu."""
+        self.model_version_combo.clear()
+        self.model_version_combo.addItem("Nowy model")
+        algorithm = self.algorithm_combo.currentText()
+        model_versions = self.train_api.get_model_versions(algorithm)
+        if model_versions:
+            self.model_version_combo.addItems(model_versions)
+        else:
+            self.model_version_combo.addItem("Brak dostępnych modeli")
+
     def start_training(self):
-        QtWidgets.QMessageBox.information(self, "Trening", "Rozpoczynam trening modelu...")
+        model_name = self.model_name_input.text().strip()
+        train_path = self.dataset_path_input.text().strip()  # Ścieżka do katalogu train
+        algorithm = self.algorithm_combo.currentText()
+        model_version = self.model_version_combo.currentText()
+        epochs = self.epochs_input.value()
+        learning_rate = self.learning_rate_input.value()
+
+        # Walidacja
+        if not model_name:
+            QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę podać nazwę modelu.")
+            return
+        if not train_path:
+            QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać ścieżkę do danych treningowych.")
+            return
+        if model_version == "Brak dostępnych modeli":
+            QtWidgets.QMessageBox.warning(self, "Błąd", "Brak dostępnych modeli do doszkolenia. Wybierz 'Nowy model'.")
+            return
+
+        # Sprawdzenie, czy plik adnotacji treningowych istnieje (na hoście)
+        if algorithm == "FasterRCNN":
+            coco_filename = "instances_train.json"
+        else:
+            coco_filename = "coco.json"
+
+        host_coco_train_path = os.path.join(train_path, "annotations", coco_filename)
+        if not os.path.exists(host_coco_train_path):
+            QtWidgets.QMessageBox.warning(self, "Błąd", f"Plik adnotacji treningowych nie istnieje: {host_coco_train_path}")
+            return
+
+        # Ścieżki w kontenerze
+        container_train_path = "/data/train"
+        container_val_path = "/app/data/val"
+
+        # Ścieżki do plików coco
+        coco_train_path = os.path.join(container_train_path, "annotations", coco_filename).replace("\\", "/")
+
+        # Specjalna ścieżka walidacyjna dla MCNN i FasterRCNN
+        if algorithm == "MCNN":
+            coco_val_path = "/app/MCNN/dataset/val/annotations/instances_val.json"
+        elif algorithm =="FasterRCNN":
+            coco_val_path = "/app/FasterRCNN/dataset/val/annotations/instances_val.json"
+        else:
+            coco_val_path = os.path.join(container_val_path, "annotations", "coco.json").replace("\\", "/")
+
+        # Przygotowanie argumentów dla train.py
+        args = [
+            "--train_dir", container_train_path,
+            "--epochs", str(epochs),
+            "--lr", str(learning_rate),
+            "--model_name", model_name,
+            "--coco_train_path", coco_train_path,
+            "--coco_gt_path", coco_val_path,
+            "--host_train_path", train_path
+        ]
+
+        if model_version != "Nowy model":
+            model_path = self.train_api.get_model_path(algorithm, model_version)
+            if model_path:
+                args.extend(["--resume", model_path])
+            else:
+                QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie można znaleźć modelu: {model_version}")
+                return
+
+        self.log_text.clear()
+        self.train_btn.setEnabled(False)
+
+        self.training_thread = TrainingThread(self.train_api, algorithm, args)
+        self.training_thread.log_signal.connect(self.update_log, QtCore.Qt.QueuedConnection)
+        self.training_thread.finished_signal.connect(self.training_finished, QtCore.Qt.QueuedConnection)
+        self.training_thread.start()
+
+    def update_log(self, log_line):
+        """Aktualizuje pole tekstowe z logami."""
+        print(f"Debug: Received log: {log_line}")  # Debugowanie
+        # Zamiast append, dodajemy linię do istniejącego tekstu
+        current_text = self.log_text.toPlainText()
+        if current_text:
+            new_text = current_text + "\n" + log_line
+        else:
+            new_text = log_line
+        self.log_text.setPlainText(new_text)
+        self.log_text.ensureCursorVisible()  # Przewijamy do najnowszej linii
+        QtWidgets.QApplication.processEvents()  # Wymuszenie odświeżenia interfejsu graficznego
+
+    def training_finished(self, result):
+        """Wywoływane po zakończeniu treningu."""
+        self.train_btn.setEnabled(True)  # Włączamy przycisk po zakończeniu
+        QtWidgets.QMessageBox.information(self, "Trening", result)

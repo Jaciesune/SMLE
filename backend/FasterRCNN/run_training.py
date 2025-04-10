@@ -13,39 +13,40 @@ from data_loader import get_data_loaders
 from model import get_model
 from train import train_one_epoch
 from val_utils import validate_model
-
 from config import CONFIDENCE_THRESHOLD, NUM_CLASSES
 
+# Wymuszenie UTF-8 z fallbackiem na błędy
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 def main():
-    parser = argparse.ArgumentParser(description="Trening Faster R-CNN z ResNet50")
+    parser = argparse.ArgumentParser(description="Trening Faster R-CNN z ResNet50", allow_abbrev=False)
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument("--batch_size", type=int, help="Wielkosc batcha")
-    parser.add_argument("--epochs", type=int, help="Liczba epok")
-    parser.add_argument("--model_name", type=str, help="Nazwa modelu")
-    parser.add_argument("--lr", type=float, default=0.005, help="Learning rate")
-    parser.add_argument("--train_dir", type=str, help="Sciezka do katalogu danych treningowych")
-    parser.add_argument("--coco_train_path", type=str, help="Sciezka do pliku COCO z adnotacjami treningowymi")
-    parser.add_argument("--coco_gt_path", type=str, help="Sciezka do pliku COCO z adnotacjami walidacyjnymi")
+    parser.add_argument("--batch_size", type=int)
+    parser.add_argument("--epochs", type=int)
+    parser.add_argument("--model_name", type=str)
+    parser.add_argument("--lr", type=float, default=0.005)
+    parser.add_argument("--train_dir", type=str)
+    parser.add_argument("--coco_train_path", type=str)
+    parser.add_argument("--coco_gt_path", type=str)
 
-    args = parser.parse_args()
+    # Catch-all for nieobsługiwane argumenty (np. --num_augmentations)
+    args, _ = parser.parse_known_args()
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model_name = args.model_name or f"faster_rcnn_{timestamp}"
-    batch_size = args.batch_size if args.batch_size is not None else 2
-    epochs = args.epochs if args.epochs is not None else 40
+    batch_size = args.batch_size or 2
+    epochs = args.epochs or 40
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"\nUzywane urzadzenie: {torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'}")
+    print(f"\nUżywane urządzenie: {torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'}")
 
-    os.makedirs(f"/app/FasterRCNN/train/{model_name}", exist_ok=True)
-    os.makedirs(f"/app/FasterRCNN/val/{model_name}", exist_ok=True)
-    os.makedirs(f"/app/FasterRCNN/saved_models", exist_ok=True)
-    os.makedirs(f"/app/FasterRCNN/test/{model_name}", exist_ok=True)
+    os.makedirs(f"/app/backend/FasterRCNN/train/{model_name}", exist_ok=True)
+    os.makedirs(f"/app/backend/FasterRCNN/val/{model_name}", exist_ok=True)
+    os.makedirs(f"/app/backend/FasterRCNN/saved_models", exist_ok=True)
+    os.makedirs(f"/app/backend/FasterRCNN/test/{model_name}", exist_ok=True)
 
-    print("\nDebug - Sciezki danych:")
+    print("\nDebug - Ścieżki danych:")
     train_path = os.path.join(args.train_dir, "images")
     val_path = os.path.join(os.path.dirname(os.path.dirname(args.coco_gt_path)), "images")
     test_path = os.path.join(os.path.dirname(args.train_dir), "test", "images")
@@ -68,7 +69,6 @@ def main():
 
     model = get_model(num_classes=NUM_CLASSES, device=device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
-
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
     best_val_loss = float("inf")
@@ -96,16 +96,16 @@ def main():
         print(f"                - mAP@0.5: {map_50:.4f} | mAP@0.5:0.95: {map_5095:.4f} | Prec: {precision:.4f} | Rec: {recall:.4f}")
 
         scheduler.step(val_loss)
-        current_lr = optimizer.param_groups[0]['lr']
-        print(f"Learning rate: {current_lr:.6f}")
+        print(f"Learning rate: {optimizer.param_groups[0]['lr']:.6f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
-            best_model_path = f"/app/FasterRCNN/saved_models/{model_name}_checkpoint.pth"
+            best_model_path = f"/app/backend/FasterRCNN/saved_models/{model_name}_checkpoint.pth"
             torch.save(model.state_dict(), best_model_path)
 
-    model_dir = f"/app/FasterRCNN/saved_models/"
+    # Kasowanie innych modeli
+    model_dir = f"/app/backend/FasterRCNN/saved_models/"
     for path in glob.glob(os.path.join(model_dir, "*.pth")):
         if not path.endswith(f"{model_name}_checkpoint.pth"):
             os.remove(path)
@@ -114,41 +114,22 @@ def main():
     print(f"\nModel końcowy zapisano jako: {best_model_path}")
     print(f"Najlepszy model pochodzi z epoki {best_epoch} (val_loss = {best_val_loss:.4f})")
 
-    # Wykres strat
-    plt.figure(figsize=(10, 5))
-    plt.plot(train_losses, label="Strata treningowa")
-    plt.plot(val_losses, label="Strata walidacyjna")
-    plt.xlabel("Epoka")
-    plt.ylabel("Strata")
-    plt.legend()
-    plt.grid(True)
-    plt.title("Strata w czasie treningu")
-    plt.savefig(f"/app/FasterRCNN/test/{model_name}/loss_plot.png")
-    plt.close()
+    # Wykresy
+    def save_plot(data1, data2, labels, title, filename, ylabel):
+        plt.figure(figsize=(10, 5))
+        plt.plot(data1, label=labels[0])
+        plt.plot(data2, label=labels[1])
+        plt.xlabel("Epoka")
+        plt.ylabel(ylabel)
+        plt.title(title)
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"/app/backend/FasterRCNN/test/{model_name}/{filename}")
+        plt.close()
 
-    # Wykres liczby detekcji
-    plt.figure(figsize=(10, 5))
-    plt.plot(pred_counts, label="Wykryte obiekty")
-    plt.plot(gt_counts, label="Obiekty GT")
-    plt.xlabel("Epoka")
-    plt.ylabel("Liczba obiektów")
-    plt.legend()
-    plt.grid(True)
-    plt.title("Porównanie predykcji i GT")
-    plt.savefig(f"/app/FasterRCNN/test/{model_name}/detections_plot.png")
-    plt.close()
-
-    # Wykres mAP
-    plt.figure(figsize=(10, 5))
-    plt.plot(map_50_list, label="mAP@0.5")
-    plt.plot(map_5095_list, label="mAP@0.5:0.95")
-    plt.xlabel("Epoka")
-    plt.ylabel("mAP")
-    plt.title("Mean Average Precision")
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(f"/app/FasterRCNN/test/{model_name}/map_plot.png")
-    plt.close()
+    save_plot(train_losses, val_losses, ["Strata treningowa", "Strata walidacyjna"], "Strata w czasie treningu", "loss_plot.png", "Strata")
+    save_plot(pred_counts, gt_counts, ["Wykryte obiekty", "Obiekty GT"], "Porównanie predykcji i GT", "detections_plot.png", "Liczba obiektów")
+    save_plot(map_50_list, map_5095_list, ["mAP@0.5", "mAP@0.5:0.95"], "Mean Average Precision", "map_plot.png", "mAP")
 
     print("Wykresy zapisane w folderze test.")
 

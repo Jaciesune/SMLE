@@ -8,7 +8,13 @@ from pycocotools.coco import COCO
 import json
 from tqdm import tqdm
 from pycocotools.cocoeval import COCOeval
-from config import CONFIDENCE_THRESHOLD
+from config import (
+    CONFIDENCE_THRESHOLD,
+    MIN_ASPECT_RATIO,
+    MAX_ASPECT_RATIO,
+    MIN_BOX_AREA_RATIO,
+    MAX_BOX_AREA_RATIO
+)
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -38,15 +44,28 @@ def validate_model(model, dataloader, device, epoch, model_name):
             for box, score, label in zip(boxes, scores, labels):
                 if score < CONFIDENCE_THRESHOLD:
                     continue
+
                 x1, y1, x2, y2 = box
                 width = x2 - x1
                 height = y2 - y1
+                area = width * height
+                aspect_ratio = width / height if height > 0 else 0
+                image_area = images[i].shape[1] * images[i].shape[2]
+                area_ratio = area / image_area
+
+                # FILTRUJEMY BOXY
+                if not (MIN_ASPECT_RATIO <= aspect_ratio <= MAX_ASPECT_RATIO):
+                    continue
+                if not (MIN_BOX_AREA_RATIO <= area_ratio <= MAX_BOX_AREA_RATIO):
+                    continue
+
                 predictions.append({
                     "image_id": image_id,
                     "category_id": int(label),
                     "bbox": [x1, y1, width, height],
                     "score": float(score)
                 })
+
             pred_count += len(scores)
             image_ids.append(image_id)
 

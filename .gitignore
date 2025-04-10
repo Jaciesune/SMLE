@@ -56,7 +56,6 @@ debug.log
 tests/__pycache__/
 tests/output/
 logs/
-val
 
 # ⚠️ Pliki specyficzne dla systemów operacyjnych
 .DS_Store
@@ -68,3 +67,5 @@ Thumbs.db
 
 *__pycache__*
 test
+train_user*
+val_user*

@@ -1,3 +1,6 @@
+import sys
+print("Interpreter:", sys.executable)
+
 import torch
 import numpy as np
 import cv2

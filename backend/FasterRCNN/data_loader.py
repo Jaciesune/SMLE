@@ -2,10 +2,14 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision.datasets import CocoDetection
 import os
+import sys
 from PIL import Image
 import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+from config import INPUT_SIZE
+
+sys.stdout.reconfigure(encoding='utf-8')
 
 def get_dataset_paths(train_path=None, val_path=None, test_path=None):
     base = os.path.abspath(os.path.join(os.path.dirname(__file__), "dataset"))
@@ -27,8 +31,8 @@ def collate_fn(batch):
 def get_train_transform():
     return A.Compose([
         A.RandomScale(scale_limit=(-0.3, 0.0), p=0.5),
-        A.SmallestMaxSize(max_size=1024, p=1.0),
-        A.PadIfNeeded(min_height=1024, min_width=1024, border_mode=0, constant_values=0, p=1.0),
+        A.SmallestMaxSize(max_size=INPUT_SIZE, p=1.0),
+        A.PadIfNeeded(min_height=INPUT_SIZE, min_width=INPUT_SIZE, border_mode=0, p=1.0),
         A.RandomCrop(height=1024, width=1024, p=0.4),
         A.HorizontalFlip(p=0.5),
         A.RandomBrightnessContrast(p=0.5),
@@ -38,13 +42,15 @@ def get_train_transform():
         A.MotionBlur(blur_limit=3, p=0.2),
         A.ColorJitter(p=0.4),
         A.RandomRotate90(p=0.3),
-        A.Resize(1024, 1024),
+        A.Resize(INPUT_SIZE, INPUT_SIZE),
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
 
 def get_val_transform():
     return A.Compose([
-        A.Resize(1024, 1024),
+        A.SmallestMaxSize(max_size=INPUT_SIZE, p=1.0),
+        A.PadIfNeeded(min_height=INPUT_SIZE, min_width=INPUT_SIZE, border_mode=0, p=1.0),
+        A.Resize(INPUT_SIZE, INPUT_SIZE),
         ToTensorV2()
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
 

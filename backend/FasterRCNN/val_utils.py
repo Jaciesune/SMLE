@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import cv2
 import numpy as np
@@ -7,7 +8,9 @@ from pycocotools.coco import COCO
 import json
 from tqdm import tqdm
 from pycocotools.cocoeval import COCOeval
+from config import CONFIDENCE_THRESHOLD
 
+sys.stdout.reconfigure(encoding='utf-8')
 
 def validate_model(model, dataloader, device, epoch, model_name):
     model.eval()
@@ -33,7 +36,7 @@ def validate_model(model, dataloader, device, epoch, model_name):
             image_id = targets[i]["image_id"].cpu().item()
 
             for box, score, label in zip(boxes, scores, labels):
-                if score < 0.05:
+                if score < CONFIDENCE_THRESHOLD:
                     continue
                 x1, y1, x2, y2 = box
                 width = x2 - x1
@@ -50,7 +53,7 @@ def validate_model(model, dataloader, device, epoch, model_name):
     # Zapis predykcji do pliku
     result_file = f"val/{model_name}/epoch_{epoch}_predictions.json"
     os.makedirs(os.path.dirname(result_file), exist_ok=True)
-    with open(result_file, 'w') as f:
+    with open(result_file, 'w', encoding="utf-8") as f:
         json.dump(predictions, f)
 
     # Sprawdzenie czy są jakiekolwiek predykcje
@@ -69,7 +72,7 @@ def validate_model(model, dataloader, device, epoch, model_name):
         image_name = f"img_{image_id}_ep{epoch}.jpg"
 
         for box, score in zip(outputs[i]["boxes"], outputs[i]["scores"]):
-            if score < 0.05:  # filtruj niskie
+            if score < CONFIDENCE_THRESHOLD:
                 continue
             x1, y1, x2, y2 = map(int, box)
             cv2.rectangle(image_np, (x1, y1), (x2, y2), (0, 0, 255), 2)

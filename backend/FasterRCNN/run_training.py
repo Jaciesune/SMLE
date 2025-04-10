@@ -4,73 +4,72 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
 import argparse
 import matplotlib.pyplot as plt
+import sys
+import io
 from datetime import datetime
+import glob
 
 from data_loader import get_data_loaders
 from model import get_model
 from train import train_one_epoch
 from val_utils import validate_model
 
-from config import CONFIDENCE_THRESHOLD
+from config import CONFIDENCE_THRESHOLD, NUM_CLASSES
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 def main():
     parser = argparse.ArgumentParser(description="Trening Faster R-CNN z ResNet50")
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument("--batch_size", type=int, help="Wielkość batcha")
+    parser.add_argument("--batch_size", type=int, help="Wielkosc batcha")
     parser.add_argument("--epochs", type=int, help="Liczba epok")
     parser.add_argument("--model_name", type=str, help="Nazwa modelu")
     parser.add_argument("--lr", type=float, default=0.005, help="Learning rate")
-    parser.add_argument("--train_dir", type=str, help="Ścieżka do katalogu danych treningowych")
-    parser.add_argument("--coco_train_path", type=str, help="Ścieżka do pliku COCO z adnotacjami treningowymi")
-    parser.add_argument("--coco_gt_path", type=str, help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
+    parser.add_argument("--train_dir", type=str, help="Sciezka do katalogu danych treningowych")
+    parser.add_argument("--coco_train_path", type=str, help="Sciezka do pliku COCO z adnotacjami treningowymi")
+    parser.add_argument("--coco_gt_path", type=str, help="Sciezka do pliku COCO z adnotacjami walidacyjnymi")
 
     args = parser.parse_args()
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
     model_name = args.model_name or f"faster_rcnn_{timestamp}"
     batch_size = args.batch_size if args.batch_size is not None else 2
     epochs = args.epochs if args.epochs is not None else 40
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"\nUżywane urządzenie: {torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'}")
+    print(f"\nUzywane urzadzenie: {torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'}")
 
     os.makedirs(f"/app/FasterRCNN/train/{model_name}", exist_ok=True)
     os.makedirs(f"/app/FasterRCNN/val/{model_name}", exist_ok=True)
-    os.makedirs(f"/app/FasterRCNN/saved_models/{model_name}", exist_ok=True)
+    os.makedirs(f"/app/FasterRCNN/saved_models", exist_ok=True)
     os.makedirs(f"/app/FasterRCNN/test/{model_name}", exist_ok=True)
 
-    print("\nDebug - Ścieżki danych:")
+    print("\nDebug - Sciezki danych:")
     train_path = os.path.join(args.train_dir, "images")
     val_path = os.path.join(os.path.dirname(os.path.dirname(args.coco_gt_path)), "images")
     test_path = os.path.join(os.path.dirname(args.train_dir), "test", "images")
-    print("+ train_path:", os.path.join(args.train_dir, "images"))
+    print("+ train_path:", train_path)
     print("+ train_annotations:", args.coco_train_path)
-    print("+ val_path:", os.path.abspath(os.path.join(os.path.dirname(args.coco_gt_path), "images")))
+    print("+ val_path:", val_path)
     print("+ val_annotations:", args.coco_gt_path)
-    print("+ test_path:", os.path.abspath(os.path.join(args.train_dir, "../test/images")))
+    print("+ test_path:", test_path)
 
     print("\nWczytywanie danych...")
     train_loader, val_loader, _ = get_data_loaders(
         batch_size=batch_size,
         num_workers=args.num_workers,
-        train_path=os.path.join(args.train_dir, "images"),
+        train_path=train_path,
         train_annotations=args.coco_train_path,
-        val_path = os.path.abspath(os.path.join(os.path.dirname(args.coco_gt_path), "..", "images")),
+        val_path=val_path,
         val_annotations=args.coco_gt_path,
-        test_path = os.path.abspath(os.path.join(args.train_dir, "../test/images"))
+        test_path=test_path
     )
 
-    model = get_model(num_classes=2, device=device)
+    model = get_model(num_classes=NUM_CLASSES, device=device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
 
-    # Scheduler
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        factor=0.5,
-        patience=3
-    )
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
     best_val_loss = float("inf")
     best_epoch = 0
@@ -100,16 +99,19 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Learning rate: {current_lr:.6f}")
 
-        if epoch % 5 == 0:
-            torch.save(model.state_dict(), f"/app/FasterRCNN/saved_models/{model_name}/model_epoch_{epoch}.pth")
-
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
-            torch.save(model.state_dict(), f"/app/FasterRCNN/saved_models/{model_name}/model_best_epoch_{epoch}.pth")
+            best_model_path = f"/app/FasterRCNN/saved_models/{model_name}_checkpoint.pth"
+            torch.save(model.state_dict(), best_model_path)
 
-    torch.save(model.state_dict(), f"/app/FasterRCNN/saved_models/{model_name}_final_checkpoint.pth")
-    print(f"\nModel końcowy zapisano jako: saved_models/{model_name}/model_final_checkpoint.pth")
+    model_dir = f"/app/FasterRCNN/saved_models/"
+    for path in glob.glob(os.path.join(model_dir, "*.pth")):
+        if not path.endswith(f"{model_name}_checkpoint.pth"):
+            os.remove(path)
+            print(f"Usunięto: {path}")
+
+    print(f"\nModel końcowy zapisano jako: {best_model_path}")
     print(f"Najlepszy model pochodzi z epoki {best_epoch} (val_loss = {best_val_loss:.4f})")
 
     # Wykres strat

@@ -1,4 +1,7 @@
 import torch
+import sys
+
+sys.stdout.reconfigure(encoding='utf-8')
 
 def train_one_epoch(model, dataloader, optimizer, device, epoch):
     model.train()

@@ -38,7 +38,7 @@ simsimd                6.2.1
 six                    1.17.0
 stringzilla            3.12.3
 sympy                  1.13.1
-torch                  2.6.0+cu118
+torch                  2.1.0+cu118
 torchaudio             2.6.0+cu118
 torchvision            0.21.0+cu118
 tqdm                   4.67.1

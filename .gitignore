@@ -59,7 +59,6 @@ debug.log
 tests/__pycache__/
 tests/output/
 logs/
-val
 
 # ⚠️ Pliki specyficzne dla systemów operacyjnych
 .DS_Store

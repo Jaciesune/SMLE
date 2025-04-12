@@ -9,7 +9,7 @@ import time
 import sys
 
 # Ścieżki
-RESULTS_PATH = "/app/data/detectes"
+RESULTS_PATH = "/app/backend/Mask_RCNN/data/detectes"
 os.makedirs(RESULTS_PATH, exist_ok=True)
 
 # Parametry wykrywania

@@ -8,10 +8,14 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from login import verify_credentials
 from users_tab import get_users, create_user
+
+
 from api.detection_api import DetectionAPI
 from api.auto_label_api import AutoLabelAPI
 from api.auto_label_routes import router as auto_label_router
 from api.dataset_routes import router as dataset_router
+from api.detection_routes import router as detection_router
+
 from glob import glob
 import logging
 
@@ -50,6 +54,7 @@ auto_label_api = AutoLabelAPI()
 # Rejestracja routera z auto_label_routes
 app.include_router(auto_label_router)
 app.include_router(dataset_router)
+app.include_router(detection_router)
 
 class LoginRequest(BaseModel):
     username: str
@@ -83,14 +88,6 @@ def login(request: LoginRequest):
     else:
         raise HTTPException(status_code=401, detail="Nieprawidłowe dane logowania")
 
-@app.post("/detect")
-def detect(request: DetectionRequest):
-    result = detection_api.analyze_with_model(
-        request.image_path, request.algorithm, request.model_version
-    )
-    if "Błąd" in result:
-        raise HTTPException(status_code=500, detail=result)
-    return {"result_path": result}
 
 @app.post("/train")
 def train(request: TrainingRequest):

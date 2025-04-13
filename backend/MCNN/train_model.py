@@ -114,9 +114,9 @@ def train_model(args):
     model_name = args.model_name or f"train_{timestamp}"
     nazwa_modelu = f"{model_name}_{timestamp}"
 
-    os.makedirs(f"/app/logs/train/{nazwa_modelu}", exist_ok=True)
-    os.makedirs(f"/app/logs/val/{nazwa_modelu}", exist_ok=True)
-    os.makedirs("/app/MCNN/models", exist_ok=True)
+    os.makedirs(f"/app/backend/logs/train/{nazwa_modelu}", exist_ok=True)
+    os.makedirs(f"/app/backend/logs/val/{nazwa_modelu}", exist_ok=True)
+    os.makedirs("/app/backend/MCNN/models", exist_ok=True)
 
     train_dir = args.train_dir
     val_dir = os.path.join(train_dir, "..", "val")
@@ -133,7 +133,7 @@ def train_model(args):
     model.to(device)
 
     train_dataset = ImageDataset(os.path.join(train_dir, "images"), coco_train_path, transform=data_transforms)
-    val_dataset = ImageDataset(os.path.join('/app/MCNN/dataset', 'val', 'images'), coco_val_path, transform=data_transforms)
+    val_dataset = ImageDataset(os.path.join('/app/backend/MCNN/dataset', 'val', 'images'), coco_val_path, transform=data_transforms)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size or 3, shuffle=True, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size or 3, shuffle=False, pin_memory=True)
@@ -182,19 +182,19 @@ def train_model(args):
             logger.info(f"Epoch {epoch+1} took {epoch_time:.2f} seconds.")
 
             if (epoch + 1) % 10 == 0:
-                save_path = f"/app/MCNN/models/{nazwa_modelu}_epoch_{epoch+1}_checkpoint.pth"
+                save_path = f"/app/backend/MCNN/models/{nazwa_modelu}_epoch_{epoch+1}_checkpoint.pth"
                 torch.save(model.state_dict(), save_path)
                 logger.info(f"Zapisano checkpoint: {save_path}")
 
             clear_memory()
 
-        model_path = f"/app/MCNN/models/{nazwa_modelu}_final_checkpoint.pth"
+        model_path = f"/app/backend/MCNN/models/{nazwa_modelu}_final_checkpoint.pth"
         torch.save(model.state_dict(), model_path)
         logger.info(f"Model zapisany jako: {model_path}")
 
     except Exception as e:
         logger.exception("Błąd podczas treningu! Zapisuję awaryjny checkpoint...")
-        emergency_path = f"/app/MCNN/models/{nazwa_modelu}_emergency_checkpoint.pth"
+        emergency_path = f"/app/backend/MCNN/models/{nazwa_modelu}_emergency_checkpoint.pth"
         torch.save(model.state_dict(), emergency_path)
         logger.info(f"Awaryjny model zapisany jako: {emergency_path}")
 
@@ -209,6 +209,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=3)
     parser.add_argument('--coco_train_path', required=True)
     parser.add_argument('--coco_gt_path', required=True)
+    parser.add_argument('--num_augmentations', type=int, default=1, help="Liczba augmentacji (na razie nieużywana)")
     args = parser.parse_args()
 
     logger.debug("Arguments received: %s", sys.argv)

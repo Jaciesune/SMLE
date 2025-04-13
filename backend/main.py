@@ -10,7 +10,8 @@ from login import verify_credentials
 from users_tab import get_users, create_user
 from api.detection_api import DetectionAPI
 from api.auto_label_api import AutoLabelAPI
-from api.auto_label_routes import router as auto_label_router  # Nowy import
+from api.auto_label_routes import router as auto_label_router
+from api.dataset_routes import router as dataset_router
 from glob import glob
 import logging
 
@@ -48,6 +49,7 @@ auto_label_api = AutoLabelAPI()
 
 # Rejestracja routera z auto_label_routes
 app.include_router(auto_label_router)
+app.include_router(dataset_router)
 
 class LoginRequest(BaseModel):
     username: str

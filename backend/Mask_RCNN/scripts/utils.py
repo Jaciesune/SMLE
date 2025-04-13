@@ -120,8 +120,9 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
     całkowita_liczba_gt = 0
     pełne_iou_sum = 0
     pełne_iou_count = 0
-    ścieżka_zapisu = f"../logs/val/{nazwa_modelu}/epoch_{epoch:02d}"
-    ścieżka_zapisu_gt = f"../logs/val/{nazwa_modelu}/gt_image"
+    # Ścieżki dostosowane do struktury Dockera
+    ścieżka_zapisu = f"/app/backend/Mask_RCNN/logs/val/{nazwa_modelu}/epoch_{epoch:02d}"
+    ścieżka_zapisu_gt = f"/app/backend/Mask_RCNN/logs/val/{nazwa_modelu}/gt_image"
     os.makedirs(ścieżka_zapisu, exist_ok=True)
 
     # Wczytanie danych ground truth

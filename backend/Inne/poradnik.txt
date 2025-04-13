@@ -1,8 +1,0 @@
-Do images_annotations_all dajemy pliki które mają być zamienione z labelme do jednego coco, (train i val) i zapisane ze zdjęciami w data w stosunku 70 do 30, data kopiujemy po prostu do dokera i mamy (/app/backend [tu dajemy data] )
-
-W jednym katalogu images_annotations_all ma być .jpg i .json, całego projektu, inaczej źle zadziała, zgubimy zdjęcia.
-Kompresujemy wszyskie .jsony dlatego
-
-
-
-

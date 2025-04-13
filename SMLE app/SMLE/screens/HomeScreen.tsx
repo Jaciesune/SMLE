@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity, PermissionsAndroid, Platform, FlatList, Modal, Alert } from 'react-native';
+import CameraRoll from '@react-native-camera-roll/camera-roll';
 import { Picker } from '@react-native-picker/picker';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import PushNotification from 'react-native-push-notification';
 import ReactNativeBlobUtil from 'react-native-blob-util';
+import { encode } from 'base-64'; 
+
 
 // Typy dla wyników analizy
 type AnalysisResult = {
@@ -69,7 +72,7 @@ const HomeScreen: React.FC = () => {
   // Pobieranie listy algorytmów
   useEffect(() => {
     const fetchModels = async () => {
-      console.log('Wybrany algorytm:', selectedAlgorithm); // Dodaj log
+      console.log('Wybrany algorytm:', selectedAlgorithm);
       if (!selectedAlgorithm) return;
       try {
         const response = await fetch(`${API_URL}/detect_model_versions/${selectedAlgorithm}`);
@@ -118,27 +121,6 @@ const HomeScreen: React.FC = () => {
     };
     fetchAlgorithms();
   }, []);
-
-  // Pobieranie listy modeli dla wybranego algorytmu
-  useEffect(() => {
-    const fetchModels = async () => {
-      if (!selectedAlgorithm) return;
-      try {
-        const response = await fetch(`${API_URL}/detect_model_versions/${selectedAlgorithm}`);
-        const data = await response.json();
-        setAvailableModels(data);
-        if (data.length > 0) {
-          setSelectedModel(data[0]);
-        } else {
-          setSelectedModel('');
-        }
-      } catch (error) {
-        console.log('Błąd podczas pobierania modeli:', error);
-        Alert.alert('Błąd', `Nie udało się pobrać listy modeli dla ${selectedAlgorithm}.`);
-      }
-    };
-    fetchModels();
-  }, [selectedAlgorithm]);
 
   const loadPhotoHistory = async () => {
     try {
@@ -311,6 +293,12 @@ const HomeScreen: React.FC = () => {
       return;
     }
 
+    const storageGranted = await requestStoragePermission();
+    if (!storageGranted) {
+      Alert.alert('Błąd', 'Brak uprawnień do zapisu na urządzeniu.');
+      return;
+    }
+
     try {
       const pipesDetected: number[] = [];
       const photosAfter: string[] = [];
@@ -327,6 +315,8 @@ const HomeScreen: React.FC = () => {
         formData.append('algorithm', selectedAlgorithm);
         formData.append('model_version', selectedModel);
 
+        console.log('Wersja Androida:', Platform.Version);
+        console.log('Wysyłanie żądania detekcji dla zdjęcia:', photo);
         const response = await fetch(`${API_URL}/detect_image`, {
           method: 'POST',
           body: formData,
@@ -344,18 +334,53 @@ const HomeScreen: React.FC = () => {
         pipesDetected.push(detectionsCount);
         totalPipes += detectionsCount;
 
-        const fileName = `detected_${Date.now()}_${photos.indexOf(photo)}.jpg`;
-        const filePath = `${ReactNativeBlobUtil.fs.dirs.CacheDir}/${fileName}`;
+        // Zapisz obraz tymczasowo w katalogu cache
+        const tempFileName = `temp_${Date.now()}_${photos.indexOf(photo)}.jpg`;
+        const tempFilePath = `${ReactNativeBlobUtil.fs.dirs.CacheDir}/${tempFileName}`;
 
-        await ReactNativeBlobUtil.config({
-          path: filePath,
-        })
-          .fetch('GET', response.url)
-          .then((res) => {
-            console.log('Zdjęcie zapisane w:', res.path());
-          });
+        // Pobierz dane binarne obrazu wynikowego
+        const arrayBuffer = await response.arrayBuffer();
 
-        photosAfter.push(`file://${filePath}`);
+        // Konwertuj arrayBuffer na base64
+        const uint8Array = new Uint8Array(arrayBuffer);
+        const binaryString = uint8Array.reduce((acc, byte) => acc + String.fromCharCode(byte), '');
+        const base64Image = encode(binaryString);
+
+        // Zapisz plik tymczasowy
+        await ReactNativeBlobUtil.fs.writeFile(tempFilePath, base64Image, 'base64');
+        console.log('Zdjęcie tymczasowe zapisane w:', tempFilePath);
+
+        // Zapisz w galerii za pomocą Media Store API
+        const fileName = `${detectionsCount}_rur_${Date.now()}.jpg`;
+        let finalFilePath;
+
+        if (Platform.OS === 'android') {
+          const mediaStoreResponse = await ReactNativeBlobUtil.MediaCollection.copyToMediaStore(
+            {
+              name: fileName,
+              parentFolder: 'SMLE',
+              mimeType: 'image/jpeg',
+            },
+            'Image',
+            tempFilePath
+          );
+          console.log('Zdjęcie zapisane w galerii przez Media Store:', mediaStoreResponse);
+          finalFilePath = mediaStoreResponse;
+        } else {
+          // iOS: Zapisz w DocumentDir
+          finalFilePath = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/${fileName}`;
+          await ReactNativeBlobUtil.fs.writeFile(finalFilePath, base64Image, 'base64');
+          // Uwaga: Na iOS możesz potrzebować innego sposobu zapisu do galerii
+          // Jeśli testujesz na iOS, możemy wrócić do CameraRoll po naprawieniu
+        }
+
+        // Usuń plik tymczasowy
+        await ReactNativeBlobUtil.fs.unlink(tempFilePath).catch((err) => {
+          console.log('Błąd podczas usuwania pliku tymczasowego:', err);
+        });
+
+        // Użyj base64 do wyświetlenia w modalu
+        photosAfter.push(`data:image/jpeg;base64,${base64Image}`);
       }
 
       setAnalysisResult({

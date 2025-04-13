@@ -4,6 +4,7 @@ from count_tab import CountTab
 from train_tab import TrainTab
 from models_tab import ModelsTab
 from users_tab import UsersTab
+from auto_labeling_tab import AutoLabelingTab
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, user_role):
@@ -23,10 +24,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.train_tab = TrainTab()
         self.models_tab = ModelsTab()
         self.archive_tab = ArchiveTab()
+        self.auto_labeling_tab = AutoLabelingTab(self.user_role)  # Poprawione: najpierw tworzymy zakładkę
 
         self.tabs.addTab(self.count_tab, "Zliczanie")
         self.tabs.addTab(self.train_tab, "Trening")
         self.tabs.addTab(self.models_tab, "Modele")
+        self.tabs.addTab(self.auto_labeling_tab, "Automatyczne oznaczanie zdjęć")  # Poprawione: teraz używamy zakładki
 
         if self.user_role == "admin":
             # Jeśli rola to admin, dodajemy te karty

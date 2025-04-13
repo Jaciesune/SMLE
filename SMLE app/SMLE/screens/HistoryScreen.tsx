@@ -9,7 +9,6 @@ type AnalysisResult = {
   photosAfter: string[];
   pipesDetected: number[];
   totalPipes: number;
-  confidence: number;
   algorithm: string;
   model: string;
   timestamp: string;
@@ -18,13 +17,11 @@ type AnalysisResult = {
 const HistoryScreen: React.FC = () => {
   const [history, setHistory] = useState<AnalysisResult[]>([]);
 
-  // Ładowanie historii z AsyncStorage
   const loadHistory = async () => {
     try {
       const storedHistory = await AsyncStorage.getItem('analysisHistory');
       if (storedHistory) {
         const parsedHistory = JSON.parse(storedHistory);
-        // Filtruj wpisy, które mają poprawne dane
         const validHistory = parsedHistory.filter((item: AnalysisResult) => {
           return (
             item &&
@@ -51,7 +48,6 @@ const HistoryScreen: React.FC = () => {
     loadHistory();
   }, []);
 
-  // Odświeżanie historii przy każdym wejściu do zakładki
   useFocusEffect(
     React.useCallback(() => {
       loadHistory();
@@ -66,11 +62,7 @@ const HistoryScreen: React.FC = () => {
       </View>
       <View style={styles.imageWrapper}>
         <Text style={styles.imageLabel}>Po</Text>
-        <View style={styles.imageOverlay}>
-          <Image source={{ uri: photoAfter }} style={styles.image} />
-          {/* Symulacja zaznaczonych rur - czerwony prostokąt */}
-          <View style={styles.overlayBox} />
-        </View>
+        <Image source={{ uri: photoAfter }} style={styles.image} />
       </View>
       <Text style={styles.statsText}>Zdjęcie {index + 1}: {pipes} rur</Text>
     </View>
@@ -79,7 +71,6 @@ const HistoryScreen: React.FC = () => {
   const renderHistoryItem = ({ item }: { item: AnalysisResult }) => (
     <View style={styles.historyItem}>
       <Text style={styles.timestamp}>{new Date(item.timestamp).toLocaleString()}</Text>
-      {/* Zabezpieczenie przed undefined w photosBefore */}
       {Array.isArray(item.photosBefore) && item.photosBefore.length > 0 ? (
         item.photosBefore.map((photoBefore, index) =>
           renderPhotoPair(
@@ -96,7 +87,6 @@ const HistoryScreen: React.FC = () => {
         <Text style={styles.statsText}>Łącznie: {item.totalPipes} rur</Text>
         <Text style={styles.statsText}>Algorytm: {item.algorithm}</Text>
         <Text style={styles.statsText}>Model: {item.model}</Text>
-        <Text style={styles.statsText}>Pewność: {item.confidence}%</Text>
       </View>
     </View>
   );
@@ -156,25 +146,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 5,
   },
-  imageOverlay: {
-    position: 'relative',
-  },
   image: {
     width: imageSize,
     height: imageSize,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#00A1D6',
-  },
-  overlayBox: {
-    position: 'absolute',
-    top: 20,
-    left: 20,
-    width: 50,
-    height: 50,
-    borderWidth: 2,
-    borderColor: '#FF0000',
-    backgroundColor: 'rgba(255, 0, 0, 0.2)',
   },
   statsContainer: {
     marginTop: 10,

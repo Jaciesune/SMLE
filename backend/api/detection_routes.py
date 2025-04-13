@@ -18,6 +18,7 @@ detection_api = DetectionAPI()
 @router.get("/detect_algorithms")
 def get_algorithms():
     """Zwraca listę dostępnych algorytmów."""
+    logger.debug("Otrzymano żądanie GET /detect_algorithms")
     algorithms = detection_api.get_algorithms()
     logger.debug("Zwracam algorytmy: %s", algorithms)
     return algorithms
@@ -25,10 +26,11 @@ def get_algorithms():
 @router.get("/detect_model_versions/{algorithm}")
 def get_model_versions(algorithm: str):
     """Zwraca listę wersji modeli dla wybranego algorytmu."""
+    logger.debug("Otrzymano żądanie GET /detect_model_versions/%s", algorithm)
     versions = detection_api.get_model_versions(algorithm)
     logger.debug("Zwracam wersje modeli dla %s: %s", algorithm, versions)
     return versions
-
+    
 @router.post("/detect_image")
 async def detect_image(
     algorithm: str = Form(...),

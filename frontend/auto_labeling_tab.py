@@ -37,7 +37,7 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.model_version_label = QtWidgets.QLabel("Wybierz model (tylko Mask R-CNN):")
         layout.addWidget(self.model_version_label)
         self.model_version_combo = QtWidgets.QComboBox()
-        self.update_model_versions()
+        # Nie wywołujemy update_model_versions tutaj, zrobimy to później
         layout.addWidget(self.model_version_combo)
 
         self.label_button = QtWidgets.QPushButton("Uruchom automatyczne labelowanie")
@@ -52,6 +52,9 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.log_text = QtWidgets.QTextEdit()
         self.log_text.setReadOnly(True)
         layout.addWidget(self.log_text)
+
+        # Teraz, gdy self.log_text jest zainicjalizowany, możemy wywołać update_model_versions
+        self.update_model_versions()
 
         self.setLayout(layout)
 

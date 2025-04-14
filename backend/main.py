@@ -1,5 +1,7 @@
 import sys
 import os
+
+from models_tab import get_db_connection
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 import time
@@ -87,6 +89,44 @@ def login(request: LoginRequest):
         return {"role": auth_response["role"]}
     else:
         raise HTTPException(status_code=401, detail="Nieprawidłowe dane logowania")
+
+@app.get("/models")
+def get_models():
+    """Endpoint do pobierania listy modeli z bazy danych"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # Zapytanie SQL, aby pobrać dane o modelach
+        cursor.execute("SELECT id, name, algorithm, version, accuracy, creation_date, training_date, status FROM model")
+        models = cursor.fetchall()  # Pobieramy wszystkie modele
+    except mysql.connector.Error as err:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Błąd zapytania: {err}")
+    
+    cursor.close()
+    conn.close()
+    
+    return models
+
+@app.get("/archives")
+def get_models():
+    """Endpoint do pobierania listy archive z bazy danych"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # Zapytanie SQL, aby pobrać dane o modelach
+        cursor.execute("SELECT id, action, user_id, model_id, date  FROM archive")
+        models = cursor.fetchall()  # Pobieramy wszystkie modele
+    except mysql.connector.Error as err:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Błąd zapytania: {err}")
+    
+    cursor.close()
+    conn.close()
+    
+    return models
 
 
 @app.post("/train")

@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity, PermissionsAndroid, Platform, FlatList, Modal, Alert } from 'react-native';
-import CameraRoll from '@react-native-camera-roll/camera-roll';
 import { Picker } from '@react-native-picker/picker';
-import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
+import { launchCamera, launchImageLibrary, ImagePickerResponse, Asset } from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import PushNotification from 'react-native-push-notification';
 import ReactNativeBlobUtil from 'react-native-blob-util';
-import { encode } from 'base-64'; 
+import { encode } from 'base-64';
+import { BottomTabParamList } from '../types/navigation';
+import { getApiUrl } from '../utils/api';
 
+// Typy dla nawigacji
+type NavigationProp = BottomTabNavigationProp<BottomTabParamList, 'Home'>;
 
 // Typy dla wyników analizy
 type AnalysisResult = {
@@ -52,108 +56,213 @@ PushNotification.createChannel(
 );
 
 const HomeScreen: React.FC = () => {
+  const navigation = useNavigation<NavigationProp>();
   const [photos, setPhotos] = useState<string[]>([]);
   const [photoHistory, setPhotoHistory] = useState<string[]>([]);
   const [algorithms, setAlgorithms] = useState<string[]>([]);
-  const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>('');
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState<boolean>(false);
   const [analysisResult, setAnalysisResult] = useState<{
     pipesDetected: number[];
     totalPipes: number;
     photosAfter: string[];
   } | null>(null);
+  const [apiUrl, setApiUrl] = useState<string>('');
 
-  // Adres API – dostosuj do swojego środowiska
-  const API_URL = 'http://192.168.0.3:8000'; // Ustaw adres ip swojego serwera
+  // Wczytaj API_URL i przekieruj na Settings, jeśli nie ma zapisanego IP
+  useEffect(() => {
+    let isMounted = true;
 
+    const initializeApiUrl = async () => {
+      try {
+        const url = await getApiUrl();
+        if (isMounted) {
+          setApiUrl(url);
+
+          const storedIp = await AsyncStorage.getItem('serverIp');
+          if (!storedIp && isMounted) {
+            navigation.navigate('Settings');
+          }
+        }
+      } catch (error) {
+        console.log('Błąd podczas inicjalizacji API_URL:', error);
+        if (isMounted) {
+          Alert.alert('Błąd', 'Nie udało się zainicjalizować adresu API.');
+        }
+      }
+    };
+
+    initializeApiUrl();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [navigation]);
 
   // Pobieranie listy algorytmów
   useEffect(() => {
-    const fetchModels = async () => {
-      console.log('Wybrany algorytm:', selectedAlgorithm);
-      if (!selectedAlgorithm) return;
-      try {
-        const response = await fetch(`${API_URL}/detect_model_versions/${selectedAlgorithm}`);
-        const data = await response.json();
-        setAvailableModels(data);
-        if (data.length > 0) {
-          setSelectedModel(data[0]);
-        } else {
-          setSelectedModel('');
-        }
-      } catch (error) {
-        console.log('Błąd podczas pobierania modeli:', error);
-        Alert.alert('Błąd', `Nie udało się pobrać listy modeli dla ${selectedAlgorithm}.`);
-      }
-    };
-    fetchModels();
-  }, [selectedAlgorithm]);
+    let isMounted = true;
 
-  useEffect(() => {
     const fetchAlgorithms = async () => {
+      if (!apiUrl) return;
+
       try {
-        console.log('Pobieranie algorytmów z:', `${API_URL}/detect_algorithms`);
-        const response = await fetch(`${API_URL}/detect_algorithms`, {
+        console.log('Pobieranie algorytmów z:', `${apiUrl}/detect_algorithms`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // Timeout 10 sekund
+        const response = await fetch(`${apiUrl}/detect_algorithms`, {
           method: 'GET',
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
           },
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId); // Wyczyść timeout
+
         if (!response.ok) {
           throw new Error(`Błąd HTTP: ${response.status} - ${response.statusText}`);
         }
-        const data = await response.json();
+
+        const data: string[] = await response.json();
         console.log('Dane algorytmów:', data);
-        setAlgorithms(data);
-        if (data.length > 0) {
-          setSelectedAlgorithm(data[0]);
-        } else {
-          Alert.alert('Błąd', 'Backend nie zwrócił żadnych algorytmów. Sprawdź konfigurację serwera.');
+        if (isMounted) {
+          setAlgorithms(data);
+          if (data.length > 0) {
+            setSelectedAlgorithm(data[0]);
+          } else {
+            setSelectedAlgorithm(null);
+            Alert.alert('Błąd', 'Backend nie zwrócił żadnych algorytmów. Sprawdź konfigurację serwera.');
+          }
         }
       } catch (error) {
-        console.log('Błąd podczas pobierania algorytmów:', error);
         const errorMessage = error instanceof Error ? error.message : 'Nieznany błąd';
-        Alert.alert('Błąd', `Nie udało się pobrać listy algorytmów: ${errorMessage}`);
+        console.log('Błąd podczas pobierania algorytmów:', errorMessage);
+        if (isMounted) {
+          Alert.alert('Błąd', `Nie udało się pobrać listy algorytmów: ${errorMessage}`);
+        }
       }
     };
+
     fetchAlgorithms();
-  }, []);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [apiUrl]);
+
+  // Pobieranie listy modeli dla wybranego algorytmu
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchModels = async () => {
+      if (!selectedAlgorithm || !apiUrl) return;
+
+      try {
+        console.log('Pobieranie modeli z:', `${apiUrl}/detect_model_versions/${selectedAlgorithm}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // Timeout 10 sekund
+        const response = await fetch(`${apiUrl}/detect_model_versions/${selectedAlgorithm}`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId); // Wyczyść timeout
+
+        if (!response.ok) {
+          throw new Error(`Błąd HTTP: ${response.status}`);
+        }
+
+        const data: string[] = await response.json();
+        if (isMounted) {
+          setAvailableModels(data);
+          if (data.length > 0) {
+            setSelectedModel(data[0]);
+          } else {
+            setSelectedModel(null);
+            Alert.alert('Błąd', `Nie znaleziono modeli dla algorytmu ${selectedAlgorithm}.`);
+          }
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Nieznany błąd';
+        console.log('Błąd podczas pobierania modeli:', errorMessage);
+        if (isMounted) {
+          Alert.alert('Błąd', `Nie udało się pobrać listy modeli dla ${selectedAlgorithm}: ${errorMessage}`);
+          setSelectedModel(null);
+        }
+      }
+    };
+
+    fetchModels();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedAlgorithm, apiUrl]);
 
   const loadPhotoHistory = async () => {
     try {
       const storedPhotos = await AsyncStorage.getItem('photoHistory');
-      if (storedPhotos) {
-        setPhotoHistory(JSON.parse(storedPhotos));
-      } else {
-        setPhotoHistory([]);
-      }
+      const parsedPhotos = storedPhotos ? JSON.parse(storedPhotos) as string[] : [];
+      setPhotoHistory(parsedPhotos);
     } catch (error) {
       console.log('Błąd podczas ładowania historii zdjęć:', error);
+      Alert.alert('Błąd', 'Nie udało się wczytać historii zdjęć.');
+      setPhotoHistory([]);
     }
   };
 
   useEffect(() => {
-    loadPhotoHistory();
+    let isMounted = true;
+
+    if (isMounted) {
+      loadPhotoHistory();
+    }
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useFocusEffect(
     React.useCallback(() => {
-      loadPhotoHistory();
+      let isActive = true;
+
+      const fetchHistory = async () => {
+        try {
+          const storedPhotos = await AsyncStorage.getItem('photoHistory');
+          const parsedPhotos = storedPhotos ? JSON.parse(storedPhotos) as string[] : [];
+          if (isActive) {
+            setPhotoHistory(parsedPhotos);
+          }
+        } catch (error) {
+          console.log('Błąd podczas ładowania historii zdjęć (useFocusEffect):', error);
+          if (isActive) {
+            Alert.alert('Błąd', 'Nie udało się wczytać historii zdjęć.');
+            setPhotoHistory([]);
+          }
+        }
+      };
+
+      fetchHistory();
+
+      return () => {
+        isActive = false;
+      };
     }, [])
   );
 
   const savePhotoToHistory = async (uri: string) => {
     if (!uri) return;
+
     try {
-      const updatedHistory = [uri, ...photoHistory].slice(0, 10);
+      const updatedHistory = [...new Set([uri, ...photoHistory])].slice(0, 10); // Usuwamy duplikaty za pomocą Set
       await AsyncStorage.setItem('photoHistory', JSON.stringify(updatedHistory));
       setPhotoHistory(updatedHistory);
       console.log('Zapisano zdjęcie do historii:', uri);
     } catch (error) {
       console.log('Błąd podczas zapisywania zdjęcia:', error);
+      Alert.alert('Błąd', 'Nie udało się zapisać zdjęcia do historii.');
     }
   };
 
@@ -167,7 +276,7 @@ const HomeScreen: React.FC = () => {
   }) => {
     try {
       const storedHistory = await AsyncStorage.getItem('analysisHistory');
-      const history = storedHistory ? JSON.parse(storedHistory) : [];
+      const history = storedHistory ? JSON.parse(storedHistory) as AnalysisResult[] : [];
       const newEntry: AnalysisResult = {
         id: Date.now().toString(),
         photosBefore: result.photosBefore,
@@ -183,6 +292,7 @@ const HomeScreen: React.FC = () => {
       console.log('Zapisano analizę do historii:', newEntry);
     } catch (error) {
       console.log('Błąd podczas zapisywania historii analizy:', error);
+      Alert.alert('Błąd', 'Nie udało się zapisać historii analizy.');
     }
   };
 
@@ -201,7 +311,8 @@ const HomeScreen: React.FC = () => {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn(err);
+        console.warn('Błąd podczas żądania uprawnień do aparatu:', err);
+        Alert.alert('Błąd', 'Nie udało się uzyskać dostępu do aparatu.');
         return false;
       }
     }
@@ -211,19 +322,25 @@ const HomeScreen: React.FC = () => {
   const requestStoragePermission = async () => {
     if (Platform.OS === 'android') {
       try {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-          {
-            title: 'Prośba o dostęp do pamięci',
-            message: 'Aplikacja potrzebuje dostępu do pamięci, aby zapisać zdjęcie.',
-            buttonNeutral: 'Zapytaj później',
-            buttonNegative: 'Anuluj',
-            buttonPositive: 'OK',
-          }
-        );
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
+        const permissions: (typeof PermissionsAndroid.PERMISSIONS)[keyof typeof PermissionsAndroid.PERMISSIONS][] = [];
+        if (Platform.Version >= 33) {
+          permissions.push(PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES);
+        } else {
+          permissions.push(PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE);
+          permissions.push(PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE);
+        }
+        const granted = await PermissionsAndroid.requestMultiple(permissions);
+        if (Platform.Version >= 33) {
+          return granted[PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES] === PermissionsAndroid.RESULTS.GRANTED;
+        } else {
+          return (
+            granted[PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE] === PermissionsAndroid.RESULTS.GRANTED &&
+            granted[PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE] === PermissionsAndroid.RESULTS.GRANTED
+          );
+        }
       } catch (err) {
-        console.warn(err);
+        console.warn('Błąd podczas żądania uprawnień do pamięci:', err);
+        Alert.alert('Błąd', 'Nie udało się uzyskać dostępu do pamięci.');
         return false;
       }
     }
@@ -235,11 +352,12 @@ const HomeScreen: React.FC = () => {
     const storageGranted = await requestStoragePermission();
 
     if (cameraGranted && storageGranted) {
-      launchCamera({ mediaType: 'photo', saveToPhotos: true }, (response) => {
+      launchCamera({ mediaType: 'photo', saveToPhotos: true }, (response: ImagePickerResponse) => {
         if (response.didCancel) {
-          console.log('Anulowano');
+          console.log('Anulowano robienie zdjęcia');
         } else if (response.errorCode) {
-          console.log('Błąd: ', response.errorMessage);
+          console.log('Błąd podczas robienia zdjęcia:', response.errorMessage);
+          Alert.alert('Błąd', `Nie udało się zrobić zdjęcia: ${response.errorMessage}`);
         } else if (response.assets) {
           const uri = response.assets[0]?.uri;
           if (uri) {
@@ -249,7 +367,7 @@ const HomeScreen: React.FC = () => {
         }
       });
     } else {
-      console.log('Brak uprawnień do aparatu lub pamięci');
+      Alert.alert('Błąd', 'Brak uprawnień do aparatu lub pamięci.');
     }
   };
 
@@ -257,21 +375,22 @@ const HomeScreen: React.FC = () => {
     const storageGranted = await requestStoragePermission();
 
     if (storageGranted) {
-      launchImageLibrary({ mediaType: 'photo', selectionLimit: 0 }, (response) => {
+      launchImageLibrary({ mediaType: 'photo', selectionLimit: 0 }, (response: ImagePickerResponse) => {
         if (response.didCancel) {
-          console.log('Anulowano');
+          console.log('Anulowano wybieranie zdjęć');
         } else if (response.errorCode) {
-          console.log('Błąd: ', response.errorMessage);
+          console.log('Błąd podczas wybierania zdjęć:', response.errorMessage);
+          Alert.alert('Błąd', `Nie udało się wybrać zdjęć: ${response.errorMessage}`);
         } else if (response.assets) {
           const uris = response.assets
-            .map((asset) => asset.uri)
+            .map((asset: Asset) => asset.uri)
             .filter((uri): uri is string => uri !== undefined);
           setPhotos((prev) => [...prev, ...uris]);
           uris.forEach((uri) => savePhotoToHistory(uri));
         }
       });
     } else {
-      console.log('Brak uprawnień do pamięci');
+      Alert.alert('Błąd', 'Brak uprawnień do pamięci.');
     }
   };
 
@@ -280,6 +399,12 @@ const HomeScreen: React.FC = () => {
   };
 
   const startAnalysis = async () => {
+    if (!apiUrl) {
+      Alert.alert('Błąd', 'Proszę najpierw skonfigurować adres IP serwera w ustawieniach.');
+      navigation.navigate('Settings');
+      return;
+    }
+
     if (photos.length === 0) {
       Alert.alert('Błąd', 'Proszę wybrać co najmniej jedno zdjęcie przed rozpoczęciem analizy.');
       return;
@@ -300,58 +425,46 @@ const HomeScreen: React.FC = () => {
     }
 
     try {
-      const pipesDetected: number[] = [];
-      const photosAfter: string[] = [];
-      let totalPipes = 0;
-
-      for (const photo of photos) {
+      const analysisPromises = photos.map(async (photo, index) => {
         const formData = new FormData();
         formData.append('image', {
           uri: photo,
           type: 'image/jpeg',
-          name: 'photo.jpg',
+          name: `photo_${index}.jpg`,
         } as any);
-
         formData.append('algorithm', selectedAlgorithm);
         formData.append('model_version', selectedModel);
 
-        console.log('Wersja Androida:', Platform.Version);
         console.log('Wysyłanie żądania detekcji dla zdjęcia:', photo);
-        const response = await fetch(`${API_URL}/detect_image`, {
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // Timeout 15 sekund
+        const response = await fetch(`${apiUrl}/detect_image`, {
           method: 'POST',
           body: formData,
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId); // Wyczyść timeout
 
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || 'Błąd podczas analizy zdjęcia');
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.detail || `Błąd podczas analizy zdjęcia: ${response.status}`);
         }
 
         const detectionsCount = parseInt(response.headers.get('X-Detections-Count') || '0', 10);
-        pipesDetected.push(detectionsCount);
-        totalPipes += detectionsCount;
 
-        // Zapisz obraz tymczasowo w katalogu cache
-        const tempFileName = `temp_${Date.now()}_${photos.indexOf(photo)}.jpg`;
+        const tempFileName = `temp_${Date.now()}_${index}.jpg`;
         const tempFilePath = `${ReactNativeBlobUtil.fs.dirs.CacheDir}/${tempFileName}`;
 
-        // Pobierz dane binarne obrazu wynikowego
         const arrayBuffer = await response.arrayBuffer();
-
-        // Konwertuj arrayBuffer na base64
         const uint8Array = new Uint8Array(arrayBuffer);
         const binaryString = uint8Array.reduce((acc, byte) => acc + String.fromCharCode(byte), '');
         const base64Image = encode(binaryString);
 
-        // Zapisz plik tymczasowy
         await ReactNativeBlobUtil.fs.writeFile(tempFilePath, base64Image, 'base64');
         console.log('Zdjęcie tymczasowe zapisane w:', tempFilePath);
 
-        // Zapisz w galerii za pomocą Media Store API
-        const fileName = `${detectionsCount}_rur_${Date.now()}.jpg`;
+        const fileName = `${detectionsCount}_rur_${Date.now()}_${index}.jpg`;
         let finalFilePath;
 
         if (Platform.OS === 'android') {
@@ -367,21 +480,25 @@ const HomeScreen: React.FC = () => {
           console.log('Zdjęcie zapisane w galerii przez Media Store:', mediaStoreResponse);
           finalFilePath = mediaStoreResponse;
         } else {
-          // iOS: Zapisz w DocumentDir
           finalFilePath = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/${fileName}`;
           await ReactNativeBlobUtil.fs.writeFile(finalFilePath, base64Image, 'base64');
-          // Uwaga: Na iOS możesz potrzebować innego sposobu zapisu do galerii
-          // Jeśli testujesz na iOS, możemy wrócić do CameraRoll po naprawieniu
         }
 
-        // Usuń plik tymczasowy
         await ReactNativeBlobUtil.fs.unlink(tempFilePath).catch((err) => {
           console.log('Błąd podczas usuwania pliku tymczasowego:', err);
         });
 
-        // Użyj base64 do wyświetlenia w modalu
-        photosAfter.push(`data:image/jpeg;base64,${base64Image}`);
-      }
+        return {
+          detectionsCount,
+          base64Image: `data:image/jpeg;base64,${base64Image}`,
+        };
+      });
+
+      const results = await Promise.all(analysisPromises);
+
+      const pipesDetected = results.map((result) => result.detectionsCount);
+      const photosAfter = results.map((result) => result.base64Image);
+      const totalPipes = pipesDetected.reduce((sum, count) => sum + count, 0);
 
       setAnalysisResult({
         pipesDetected,
@@ -389,7 +506,7 @@ const HomeScreen: React.FC = () => {
         photosAfter,
       });
 
-      saveAnalysisToHistory({
+      await saveAnalysisToHistory({
         photosBefore: photos,
         photosAfter,
         pipesDetected,
@@ -409,7 +526,7 @@ const HomeScreen: React.FC = () => {
       });
 
       setModalVisible(true);
-    } catch (error: unknown) {
+    } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.log('Błąd podczas analizy:', errorMessage);
       Alert.alert('Błąd', `Nie udało się przeprowadzić analizy: ${errorMessage}`);
@@ -438,7 +555,7 @@ const HomeScreen: React.FC = () => {
   );
 
   const renderResultPhotoPair = ({ item, index }: { item: { before: string; after: string; pipes: number }; index: number }) => (
-    <View key={index} style={styles.resultPhotoContainer}>
+    <View style={styles.resultPhotoContainer}>
       <View style={styles.imageWrapper}>
         <Text style={styles.imageLabel}>Przed</Text>
         <Image source={{ uri: item.before }} style={styles.resultImage} />
@@ -464,16 +581,16 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.modalTitle}>Wyniki analizy</Text>
             {analysisResult && (
               <>
-                <Text style={styles.modalText}>Algorytm: {selectedAlgorithm}</Text>
-                <Text style={styles.modalText}>Model: {selectedModel}</Text>
+                <Text style={styles.modalText}>Algorytm: {selectedAlgorithm ?? 'Nie wybrano'}</Text>
+                <Text style={styles.modalText}>Model: {selectedModel ?? 'Nie wybrano'}</Text>
                 <FlatList
                   data={analysisResult.photosAfter.map((after, idx) => ({
-                    before: photos[idx],
+                    before: photos[idx] ?? '',
                     after,
-                    pipes: analysisResult.pipesDetected[idx],
+                    pipes: analysisResult.pipesDetected[idx] ?? 0,
                   }))}
                   renderItem={renderResultPhotoPair}
-                  keyExtractor={(item, index) => index.toString()}
+                  keyExtractor={(item, index) => `result-${index}`}
                 />
                 <Text style={styles.modalText}>Łącznie: {analysisResult.totalPipes} rur</Text>
               </>
@@ -490,7 +607,7 @@ const HomeScreen: React.FC = () => {
           <FlatList
             data={photos}
             renderItem={renderSelectedPhoto}
-            keyExtractor={(item, index) => index.toString()}
+            keyExtractor={(item, index) => `photo-${index}`}
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.selectedPhotosList}
@@ -513,7 +630,7 @@ const HomeScreen: React.FC = () => {
               horizontal
               data={photoHistory}
               renderItem={renderPhotoItem}
-              keyExtractor={(item, index) => index.toString()}
+              keyExtractor={(item, index) => `history-${index}`}
               showsHorizontalScrollIndicator={false}
               style={styles.historyList}
             />
@@ -533,7 +650,7 @@ const HomeScreen: React.FC = () => {
               <Picker.Item key={algo} label={algo} value={algo} />
             ))
           ) : (
-            <Picker.Item label="Brak dostępnych algorytmów" value="" />
+            <Picker.Item label="Brak dostępnych algorytmów" value={null} />
           )}
         </Picker>
 
@@ -548,14 +665,14 @@ const HomeScreen: React.FC = () => {
               <Picker.Item key={model} label={model} value={model} />
             ))
           ) : (
-            <Picker.Item label="Brak dostępnych modeli" value="" />
+            <Picker.Item label="Brak dostępnych modeli" value={null} />
           )}
         </Picker>
 
         <TouchableOpacity
-          style={[styles.analyzeButton, { opacity: availableModels.length > 0 ? 1 : 0.5 }]}
+          style={[styles.analyzeButton, { opacity: availableModels.length > 0 && selectedModel ? 1 : 0.5 }]}
           onPress={startAnalysis}
-          disabled={availableModels.length === 0}
+          disabled={!availableModels.length || !selectedModel}
         >
           <Text style={styles.buttonText}>Rozpocznij analizę</Text>
         </TouchableOpacity>

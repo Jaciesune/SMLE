@@ -1,21 +1,28 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import HomeScreen from './screens/HomeScreen';
 import ModelsScreen from './screens/ModelsScreen';
 import SettingsScreen from './screens/SettingsScreen';
-import HistoryScreen from './screens/HistoryScreen'; // Nowy ekran
+import HistoryScreen from './screens/HistoryScreen';
+import { BottomTabParamList } from './types/navigation';
 
-const Tab = createBottomTabNavigator();
+// Utwórz navigator z typami
+const Tab = createBottomTabNavigator<BottomTabParamList>();
 
 const App = () => {
+  // Stan dla wybranego modelu (dla ModelsScreen)
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  // Stan dla domyślnego modelu (dla SettingsScreen)
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
+
   return (
     <NavigationContainer>
       <Tab.Navigator
         screenOptions={({ route }) => ({
           tabBarIcon: ({ color, size }) => {
-            let iconName;
+            let iconName: string = 'home'; // Domyślna wartość
             if (route.name === 'Home') {
               iconName = 'home';
             } else if (route.name === 'Models') {
@@ -43,8 +50,14 @@ const App = () => {
         })}
       >
         <Tab.Screen name="Home" component={HomeScreen} />
-        <Tab.Screen name="Models" component={ModelsScreen} />
-        <Tab.Screen name="Settings" component={SettingsScreen} />
+        <Tab.Screen
+          name="Models"
+          children={() => <ModelsScreen setSelectedModel={setSelectedModel} />}
+        />
+        <Tab.Screen
+          name="Settings"
+          children={() => <SettingsScreen setDefaultModel={setDefaultModel} />}
+        />
         <Tab.Screen name="Historia" component={HistoryScreen} />
       </Tab.Navigator>
     </NavigationContainer>

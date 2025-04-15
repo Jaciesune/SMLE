@@ -1,57 +1,185 @@
-import React from 'react';
-import { View, Text, SectionList, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, SectionList, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BottomTabParamList } from '../types/navigation';
+import { getApiUrl } from '../utils/api';
 
-const mockModels = [
-  {
-    algorithm: 'MCNN',
-    data: [
-      {
-        id: '1',
-        name: 'DrugyTestMCNN_20250404_173029_checkpoint.pth',
-        date: '2025-04-04',
-        description: 'Model MCNN do analizy obrazów, zoptymalizowany pod kątem precyzji.',
-      },
-    ],
-  },
-  {
-    algorithm: 'YOLO',
-    data: [
-      {
-        id: '2',
-        name: 'ModelYOLO_20250405_123456.pth',
-        date: '2025-04-05',
-        description: 'Model YOLO v5, szybki i skuteczny w detekcji obiektów.',
-      },
-      {
-        id: '4',
-        name: 'YOLOv8_20250407_654321.pth',
-        date: '2025-04-07',
-        description: 'Model YOLO v8, najnowsza wersja z poprawioną dokładnością.',
-      },
-    ],
-  },
-  {
-    algorithm: 'Faster R-CNN',
-    data: [
-      {
-        id: '3',
-        name: 'FasterRCNN_20250406_789012.pth',
-        date: '2025-04-06',
-        description: 'Model Faster R-CNN, idealny do złożonych analiz obrazów.',
-      },
-    ],
-  },
-];
+// Typy dla nawigacji
+type NavigationProp = BottomTabNavigationProp<BottomTabParamList, 'Models'>;
+
+// Typy dla danych modelu
+type ModelItem = {
+  id: string;
+  name: string;
+  date: string;
+  description: string;
+};
+
+type SectionData = {
+  algorithm: string;
+  data: ModelItem[];
+};
 
 type Props = {
   setSelectedModel: (model: string) => void;
 };
 
 const ModelsScreen: React.FC<Props> = ({ setSelectedModel }) => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp>();
+  const [sections, setSections] = useState<SectionData[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [apiUrl, setApiUrl] = useState<string>('');
 
-  const renderModelItem = ({ item }: { item: typeof mockModels[0]['data'][0] }) => (
+  // Wczytaj API_URL i przekieruj na Settings, jeśli nie ma zapisanego IP
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializeApiUrl = async () => {
+      try {
+        const url = await getApiUrl();
+        if (isMounted) {
+          setApiUrl(url);
+
+          const storedIp = await AsyncStorage.getItem('serverIp');
+          if (!storedIp && isMounted) {
+            navigation.navigate('Settings');
+          }
+        }
+      } catch (error) {
+        console.log('Błąd podczas inicjalizacji API_URL:', error);
+        if (isMounted) {
+          Alert.alert('Błąd', 'Nie udało się zainicjalizować adresu API.');
+        }
+      }
+    };
+
+    initializeApiUrl();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [navigation]);
+
+  // Funkcja do wyodrębnienia daty z nazwy modelu
+  const extractDateFromModelName = (modelName: string): string => {
+    const regex = /(\d{8})/;
+    const match = modelName.match(regex);
+    if (match) {
+      const dateStr = match[0];
+      return `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+    }
+    return new Date().toISOString().split('T')[0];
+  };
+
+  // Generowanie opisu na podstawie nazwy modelu
+  const generateDescription = (modelName: string, algorithm: string): string => {
+    return `Model ${algorithm} z pliku ${modelName}, zoptymalizowany pod kątem detekcji.`;
+  };
+
+  // Pobieranie danych z serwera
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchModels = async () => {
+      if (!apiUrl) return;
+
+      try {
+        if (isMounted) {
+          setLoading(true);
+        }
+
+        // Tworzymy AbortController dla pierwszego żądania
+        const controller1 = new AbortController();
+        const timeoutId1 = setTimeout(() => controller1.abort(), 10000); // Timeout 10 sekund
+
+        const algorithmsResponse = await fetch(`${apiUrl}/detect_algorithms`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          signal: controller1.signal,
+        });
+
+        clearTimeout(timeoutId1); // Wyczyść timeout po zakończeniu żądania
+
+        if (!algorithmsResponse.ok) {
+          throw new Error(`Błąd pobierania algorytmów: ${algorithmsResponse.status}`);
+        }
+
+        const algorithms: string[] = await algorithmsResponse.json();
+        console.log('Pobrane algorytmy:', algorithms);
+
+        const sectionsData: SectionData[] = [];
+        for (const algorithm of algorithms) {
+          try {
+            // Tworzymy AbortController dla drugiego żądania
+            const controller2 = new AbortController();
+            const timeoutId2 = setTimeout(() => controller2.abort(), 10000); // Timeout 10 sekund
+
+            const modelsResponse = await fetch(`${apiUrl}/detect_model_versions/${algorithm}`, {
+              method: 'GET',
+              signal: controller2.signal,
+            });
+
+            clearTimeout(timeoutId2); // Wyczyść timeout po zakończeniu żądania
+
+            if (!modelsResponse.ok) {
+              throw new Error(`Błąd pobierania modeli dla ${algorithm}: ${modelsResponse.status}`);
+            }
+
+            const models: string[] = await modelsResponse.json();
+            console.log(`Modele dla ${algorithm}:`, models);
+
+            const modelItems: ModelItem[] = models.map((modelName, index) => ({
+              id: `${algorithm}-${index}`,
+              name: modelName,
+              date: extractDateFromModelName(modelName),
+              description: generateDescription(modelName, algorithm),
+            }));
+
+            sectionsData.push({
+              algorithm,
+              data: modelItems,
+            });
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.log(`Błąd pobierania modeli dla ${algorithm}:`, errorMessage);
+            if (isMounted) {
+              Alert.alert(
+                'Ostrzeżenie',
+                `Nie udało się pobrać modeli dla algorytmu ${algorithm}: ${errorMessage}`
+              );
+            }
+          }
+        }
+
+        if (isMounted) {
+          setSections(sectionsData);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.log('Błąd podczas pobierania modeli:', errorMessage);
+        if (isMounted) {
+          Alert.alert('Błąd', `Nie udało się pobrać listy modeli: ${errorMessage}`);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchModels();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [apiUrl]);
+
+  const renderModelItem = ({ item }: { item: ModelItem }) => (
     <TouchableOpacity
       style={styles.modelCard}
       onPress={() => {
@@ -65,20 +193,29 @@ const ModelsScreen: React.FC<Props> = ({ setSelectedModel }) => {
     </TouchableOpacity>
   );
 
-  const renderSectionHeader = ({ section }: { section: typeof mockModels[0] }) => (
+  const renderSectionHeader = ({ section }: { section: SectionData }) => (
     <Text style={styles.sectionHeader}>{section.algorithm}</Text>
   );
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Lista modeli</Text>
-      <SectionList
-        sections={mockModels}
-        renderItem={renderModelItem}
-        renderSectionHeader={renderSectionHeader}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
-      />
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#FFD700" />
+          <Text style={styles.loadingText}>Ładowanie modeli...</Text>
+        </View>
+      ) : sections.length === 0 ? (
+        <Text style={styles.noModelsText}>Brak dostępnych modeli.</Text>
+      ) : (
+        <SectionList
+          sections={sections}
+          renderItem={renderModelItem}
+          renderSectionHeader={renderSectionHeader}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+        />
+      )}
     </View>
   );
 };
@@ -133,6 +270,22 @@ const styles = StyleSheet.create({
   modelDescription: {
     fontSize: 14,
     color: '#FFF',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#FFF',
+    fontSize: 16,
+    marginTop: 10,
+  },
+  noModelsText: {
+    color: '#FFF',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 20,
   },
 });
 

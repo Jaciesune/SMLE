@@ -100,13 +100,19 @@ def main():
             best_val_loss = val_loss
             best_epoch = epoch
             best_model_path = f"/app/backend/FasterRCNN/saved_models/{model_name}_checkpoint.pth"
-            torch.save(model.state_dict(), best_model_path)
 
-    model_dir = f"/app/backend/FasterRCNN/saved_models/"
-    for path in glob.glob(os.path.join(model_dir, "*.pth")):
-        if not path.endswith(f"{model_name}_checkpoint.pth"):
-            os.remove(path)
-            print(f"Usunięto: {path}")
+            # Zapis najlepszego (obecnie) modelu
+            torch.save(model.state_dict(), best_model_path)
+            print(f"[✓] Zapisano nowy najlepszy model: {best_model_path}")
+
+            # Usunięcie pozostałych
+            for path in glob.glob(f"/app/backend/FasterRCNN/saved_models/{model_name}_*.pth"):
+                if path != best_model_path:
+                    try:
+                        os.remove(path)
+                        print(f"[✓] Usunięto stary model: {path}")
+                    except Exception as e:
+                        print(f"[✗] Błąd przy usuwaniu {path}: {e}")
 
     print(f"\nModel końcowy zapisano jako: {best_model_path}")
     print(f"Najlepszy model pochodzi z epoki {best_epoch} (val_loss = {best_val_loss:.4f})")

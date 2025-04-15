@@ -57,18 +57,17 @@ def main():
     print("+ test_path:", test_path)
 
     print("\nWczytywanie danych...")
-    train_loader, val_loader, _ = get_data_loaders(
+    train_loader, val_loader = get_data_loaders(
         batch_size=batch_size,
         num_workers=args.num_workers,
         train_path=train_path,
         train_annotations=args.coco_train_path,
         val_path=val_path,
-        val_annotations=args.coco_gt_path,
-        test_path=test_path
+        val_annotations=args.coco_gt_path
     )
 
     model = get_model(num_classes=NUM_CLASSES, device=device)
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
     best_val_loss = float("inf")

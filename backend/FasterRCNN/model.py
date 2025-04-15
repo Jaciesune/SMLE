@@ -2,41 +2,33 @@ import torch
 import torchvision
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
-from torchvision.models import resnet50, ResNet50_Weights
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from torchvision.models import ResNet50_Weights
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
-from config import (
-    ANCHOR_SIZES,
-    ANCHOR_RATIOS,
-    NMS_THRESHOLD,
-    NUM_CLASSES,
-    USE_CUSTOM_ANCHORS
-)
+from config import ANCHOR_SIZES, ANCHOR_RATIOS, USE_CUSTOM_ANCHORS, NUM_CLASSES, NMS_THRESHOLD
 
 def get_model(num_classes, device):
-    # Backbone z FPN i pretrenowanymi wagami
-    backbone = resnet_fpn_backbone(backbone_name='resnet50', weights=ResNet50_Weights.IMAGENET1K_V1)
-
-    # Jeśli używamy custom anchorów – twórz generator
     if USE_CUSTOM_ANCHORS:
         anchor_generator = AnchorGenerator(
             sizes=ANCHOR_SIZES,
             aspect_ratios=ANCHOR_RATIOS
         )
-        model = FasterRCNN(
-            backbone,
-            num_classes=num_classes,
-            rpn_anchor_generator=anchor_generator,
-            box_nms_thresh=NMS_THRESHOLD
-        )
     else:
-        model = FasterRCNN(
-            backbone,
-            num_classes=num_classes,
-            box_nms_thresh=NMS_THRESHOLD
-        )
+        anchor_generator = None
 
-    # Nadpisujemy box_predictora (dla pewności, np. przy transfer learningu)
+    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
+        weights=None,
+        weights_backbone=ResNet50_Weights.DEFAULT,
+        rpn_anchor_generator=anchor_generator,
+        box_nms_thresh=NMS_THRESHOLD,
+        rpn_pre_nms_top_n_train=2000,
+        rpn_post_nms_top_n_train=1000,
+        rpn_pre_nms_top_n_test=1000,
+        rpn_post_nms_top_n_test=1000,
+        rpn_batch_size_per_image=256,
+        box_detections_per_img=2000,
+        box_score_thresh=0.25
+    )
+
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
 

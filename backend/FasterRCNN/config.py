@@ -1,15 +1,15 @@
 # Detekcja
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = 0.05
 NMS_THRESHOLD = 0.3  # sensowna wartość
 
 # Augmentacja i obraz
 INPUT_SIZE = 1024
 
 # Filtry dla bounding boxów – teraz z zakresem min i max
-MAX_ASPECT_RATIO = 1.5
-MIN_ASPECT_RATIO = 0.7
-MAX_BOX_AREA_RATIO = 0.3
-MIN_BOX_AREA_RATIO = 0.001
+MIN_ASPECT_RATIO = 0.01
+MAX_ASPECT_RATIO = 9999
+MIN_BOX_AREA_RATIO = 0.00001
+MAX_BOX_AREA_RATIO = 1.0
 
 # Model selection (dla checkpointów)
 SAVE_PERFECT_MODEL_RATIO_RANGE = (0.93, 1.07)

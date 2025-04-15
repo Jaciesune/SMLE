@@ -7,7 +7,7 @@ from torchvision import transforms
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from PIL import Image, ImageDraw, ImageFont
 import argparse
-from config import CONFIDENCE_THRESHOLD
+from torchvision.ops import nms
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -24,7 +24,7 @@ def load_image(image_path):
     transform = transforms.ToTensor()
     return image, transform(image)
 
-def draw_predictions(image, boxes, labels, scores):
+def draw_predictions(image, boxes, labels, scores, threshold):
     draw = ImageDraw.Draw(image)
     try:
         font = ImageFont.truetype("arial.ttf", 16)
@@ -32,18 +32,18 @@ def draw_predictions(image, boxes, labels, scores):
         font = ImageFont.load_default()
 
     for box, label, score in zip(boxes, labels, scores):
-        if score >= CONFIDENCE_THRESHOLD:
+        if score >= threshold:
             box = box.tolist()
             draw.rectangle(box, outline="red", width=3)
             draw.text((box[0], max(0, box[1] - 15)), f"{label}: {score:.2f}", fill="red", font=font)
     return image
 
-def save_results(image_name, boxes, labels, scores, output_folder):
+def save_results(image_name, boxes, labels, scores, output_folder, threshold):
     os.makedirs(output_folder, exist_ok=True)
 
     results = []
     for box, label, score in zip(boxes, labels, scores):
-        if score >= CONFIDENCE_THRESHOLD:
+        if score >= threshold:
             x1, y1, x2, y2 = box.tolist()
             results.append({
                 "image_id": image_name,
@@ -64,6 +64,7 @@ def main():
     parser.add_argument("--model_path", required=True, help="Sciezka do wytrenowanego modelu (model_final.pth)")
     parser.add_argument("--output_dir", default="test", help="Folder zapisu wynikow")
     parser.add_argument("--num_classes", type=int, default=2, help="Liczba klas (łacznie z backgroundem)")
+    parser.add_argument("--threshold", type=float, default=0.25, help="Minimalny próg ufności dla predykcji")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -86,13 +87,31 @@ def main():
     labels = prediction[0]['labels'].cpu()
     scores = prediction[0]['scores'].cpu()
 
-    annotated_image = draw_predictions(image_pil.copy(), boxes, labels, scores)
+    # Ograniczenie pokrycia się boxów w obszarze
+    keep_indices = nms(boxes, scores, iou_threshold=0.25)
+    boxes = boxes[keep_indices].cpu()
+    scores = scores[keep_indices].cpu()
+    labels = labels[keep_indices].cpu()
+
+    # Wywalanie za dużych
+    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    mean_area = areas.mean()
+    min_area = 0.3 * mean_area
+    max_area = 3.0 * mean_area
+
+    valid_indices = (areas >= min_area) & (areas <= max_area)
+    boxes = boxes[valid_indices].cpu()
+    scores = scores[valid_indices].cpu()
+    labels = labels[valid_indices].cpu()
+
+    annotated_image = draw_predictions(image_pil.copy(), boxes, labels, scores, args.threshold)
     os.makedirs(args.output_dir, exist_ok=True)
     save_path = os.path.join(args.output_dir, f"{image_name}_detected.jpg")
     annotated_image.save(save_path)
     print(f"[✓] Zapisano obraz z wykryciami do {save_path}")
 
-    save_results(image_name, boxes, labels, scores, args.output_dir)
+    save_results(image_name, boxes, labels, scores, args.output_dir, args.threshold)
+    print(f"Detections: {(scores >= args.threshold).sum().item()}")
 
 if __name__ == "__main__":
     main()

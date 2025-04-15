@@ -1,6 +1,6 @@
 import torch
 import torch.optim as optim
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import StepLR
 import os
 import argparse
 import matplotlib.pyplot as plt
@@ -30,7 +30,6 @@ def main():
     parser.add_argument("--coco_train_path", type=str)
     parser.add_argument("--coco_gt_path", type=str)
 
-    # Catch-all for nieobsługiwane argumenty (np. --num_augmentations)
     args, _ = parser.parse_known_args()
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -68,7 +67,7 @@ def main():
 
     model = get_model(num_classes=NUM_CLASSES, device=device)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    scheduler = StepLR(optimizer, step_size=10, gamma=0.1)  # Zmiana tu
 
     best_val_loss = float("inf")
     best_epoch = 0
@@ -94,7 +93,7 @@ def main():
         print(f"                - Detekcje: {pred_count} | GT: {gt_count}")
         print(f"                - mAP@0.5: {map_50:.4f} | mAP@0.5:0.95: {map_5095:.4f} | Prec: {precision:.4f} | Rec: {recall:.4f}")
 
-        scheduler.step(val_loss)
+        scheduler.step()
         print(f"Learning rate: {optimizer.param_groups[0]['lr']:.6f}")
 
         if val_loss < best_val_loss:
@@ -103,7 +102,6 @@ def main():
             best_model_path = f"/app/backend/FasterRCNN/saved_models/{model_name}_checkpoint.pth"
             torch.save(model.state_dict(), best_model_path)
 
-    # Kasowanie innych modeli
     model_dir = f"/app/backend/FasterRCNN/saved_models/"
     for path in glob.glob(os.path.join(model_dir, "*.pth")):
         if not path.endswith(f"{model_name}_checkpoint.pth"):
@@ -113,7 +111,6 @@ def main():
     print(f"\nModel końcowy zapisano jako: {best_model_path}")
     print(f"Najlepszy model pochodzi z epoki {best_epoch} (val_loss = {best_val_loss:.4f})")
 
-    # Wykresy
     def save_plot(data1, data2, labels, title, filename, ylabel):
         plt.figure(figsize=(10, 5))
         plt.plot(data1, label=labels[0])

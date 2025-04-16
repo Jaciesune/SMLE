@@ -7,6 +7,11 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 import albumentations as A
 from pycocotools import mask as mask_utils
+import logging
+
+# Konfiguracja logowania
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 class RuryDataset(Dataset):
     def __init__(self, root, split, image_size=(1024, 1024), augment=False, num_augmentations=1, annotation_path=None):
@@ -39,7 +44,26 @@ class RuryDataset(Dataset):
             self.annotations = json.load(f)
 
         self.image_info = {img['id']: img for img in self.annotations['images']}
-        self.image_ids = list(self.image_info.keys())
+
+        # Filtruj obrazy: tylko te, które istnieją i mają adnotacje
+        self.image_ids = []
+        for img_id in self.image_info.keys():
+            image_path = os.path.join(self.image_dir, self.image_info[img_id]['file_name'])
+            # Sprawdź, czy obraz istnieje
+            if not os.path.exists(image_path):
+                logger.warning("Pomijam obraz, plik nie istnieje: %s", image_path)
+                continue
+            # Sprawdź, czy obraz ma adnotacje
+            anns = [a for a in self.annotations['annotations'] if a['image_id'] == img_id]
+            if not anns:
+                logger.warning("Pomijam obraz bez adnotacji: %s", image_path)
+                continue
+            self.image_ids.append(img_id)
+
+        logger.info("Załadowano %d obrazów z adnotacjami w %s", len(self.image_ids), self.image_dir)
+
+        if not self.image_ids:
+            raise ValueError(f"Brak obrazów z adnotacjami w {self.image_dir}")
 
         self.base_transform = T.Compose([T.ToTensor()])
 
@@ -61,7 +85,6 @@ class RuryDataset(Dataset):
             min_area=3,
             min_visibility=0.1
         ), additional_targets={'masks': 'masks'})
-
 
     def __len__(self):
         return len(self.image_ids) * self.num_augmentations
@@ -93,12 +116,26 @@ class RuryDataset(Dataset):
         # Wczytaj obraz
         image = cv2.imread(image_path)
         if image is None:
-            raise ValueError(f"Nie można wczytać obrazu: {image_path}")
+            logger.warning("Nie można wczytać obrazu: %s, pomijam...", image_path)
+            # Przejdź do następnego obrazu
+            next_idx = (orig_idx + 1) % len(self.image_ids)
+            if next_idx == orig_idx:  # Jeśli to jedyny obraz w zbiorze
+                raise ValueError(f"Brak dostępnych obrazów w zbiorze danych: {self.image_dir}")
+            return self.__getitem__(next_idx * self.num_augmentations + aug_idx)
+
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         orig_height, orig_width = image.shape[:2]
 
         # Wczytaj adnotacje
         anns = [a for a in self.annotations['annotations'] if a['image_id'] == image_id]
+        if not anns:
+            logger.warning("Brak adnotacji dla obrazu: %s, pomijam...", image_path)
+            # Przejdź do następnego obrazu
+            next_idx = (orig_idx + 1) % len(self.image_ids)
+            if next_idx == orig_idx:
+                raise ValueError(f"Brak obrazów z adnotacjami w zbiorze danych: {self.image_dir}")
+            return self.__getitem__(next_idx * self.num_augmentations + aug_idx)
+
         boxes = [ann['bbox'] for ann in anns]  # [x, y, w, h]
         masks = [self.decode_rle(ann['segmentation'], ann['bbox'], (orig_height, orig_width)) 
                  if 'segmentation' in ann else None for ann in anns]
@@ -170,7 +207,7 @@ class RuryDataset(Dataset):
             # Sprawdzanie poprawności bboxów
             invalid_boxes = (boxes[:, 2] <= boxes[:, 0]) | (boxes[:, 3] <= boxes[:, 1])
             if invalid_boxes.any():
-                print(f"Niepoprawne bboxy w {image_info['file_name']}: {boxes[invalid_boxes]}")
+                logger.warning("Niepoprawne bboxy w %s: %s", image_info['file_name'], boxes[invalid_boxes])
                 boxes = boxes[~invalid_boxes]
                 labels = labels[~invalid_boxes]
                 masks = masks[~invalid_boxes] if masks.shape[0] > 0 else masks

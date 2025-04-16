@@ -45,6 +45,7 @@ MIN_LR = 1e-6
 def parse_args():
     parser = argparse.ArgumentParser(description="Trening Mask R-CNN (v2)")
     parser.add_argument("--train_dir", type=str, default=DEFAULT_TRAIN_DIR, help="Ścieżka do danych treningowych")
+    parser.add_argument("--val_dir", type=str, default=DEFAULT_VAL_DIR, help="Ścieżka do danych walidacyjnych")  # Dodajemy --val_dir
     parser.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS, help="Liczba wątków dla DataLoadera")
     parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE, help="Rozmiar batcha")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help="Liczba epok do wykonania")
@@ -132,7 +133,7 @@ def train_model(args, is_api_call=False):
     os.makedirs(MODELS_DIR, exist_ok=True)
 
     train_dir = args.train_dir
-    val_dir = DEFAULT_VAL_DIR
+    val_dir = args.val_dir  # Używamy podanego --val_dir zamiast DEFAULT_VAL_DIR
 
     coco_train_path = args.coco_train_path if args.coco_train_path else os.path.join(train_dir, "annotations", "instances_train.json")
     coco_val_path = args.coco_gt_path if args.coco_gt_path else os.path.join(val_dir, "annotations", "instances_val.json")

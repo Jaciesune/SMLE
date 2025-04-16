@@ -165,7 +165,6 @@ def save_image_with_annotations(image_name, image, predictions, orig_width, orig
     for idx, (box, score, mask) in enumerate(zip(boxes, predictions['scores'], masks)):
         if score >= CONFIDENCE_THRESHOLD:
             x_min, y_min, x_max, y_max = map(int, box)
-            # Usunięto: print(f"Raw bbox dla {image_name}: ({x_min}, {y_min}, {x_max}, {y_max})", flush=True)
             cv2.rectangle(image_np, (x_min, y_min), (x_max, y_max), (0, 255, 0), 1)
             cv2.putText(image_np, f"Score: {score:.2f}", (x_min, y_min - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
@@ -202,10 +201,23 @@ def save_image_with_annotations(image_name, image, predictions, orig_width, orig
 def save_labelme_json(image_path, image_name, predictions, orig_width, orig_height, output_dir):
     output_image_path = os.path.join(output_dir, f"{image_name}.jpg")
     try:
-        shutil.copy(image_path, output_image_path)
-        print(f"Skopiowano obraz do: {output_image_path}", flush=True)
+        # Wczytaj obraz i upewnij się, że jest w formacie RGB (24 bity, 8 bitów na kanał)
+        image = Image.open(image_path).convert("RGB")  # Konwersja do RGB (usunięcie kanału alfa, jeśli istnieje)
+        image_array = np.array(image)
+
+        # Sprawdź głębię bitową i upewnij się, że jest 24-bitowa (8 bitów na kanał, 3 kanały)
+        if image_array.dtype != np.uint8:
+            print(f"Konwertuję głębię bitową obrazu {image_path} z {image_array.dtype} na uint8...", flush=True)
+            image_array = image_array.astype(np.uint8)
+
+        # Zapisz obraz jako JPEG
+        success = cv2.imwrite(output_image_path, cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR))
+        if not success:
+            print(f"Błąd: Nie udało się zapisać obrazu {output_image_path}.", flush=True)
+            return
+        print(f"Zapisano obraz w formacie RGB do: {output_image_path}", flush=True)
     except Exception as e:
-        print(f"Błąd podczas kopiowania obrazu do {output_image_path}: {e}", flush=True)
+        print(f"Błąd podczas zapisywania obrazu do {output_image_path}: {e}", flush=True)
         return
 
     json_data = {

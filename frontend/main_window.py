@@ -9,9 +9,10 @@ from auto_labeling_tab import AutoLabelingTab
 from dataset_creation_tab import DatasetCreationTab
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, user_role):
+    def __init__(self, user_role, user_name):
         super().__init__()
         self.user_role = user_role
+        self.username = user_name
         self.setWindowTitle("System Maszynowego Liczenia Elementów")
         self.setGeometry(100, 100, 1600, 900)
         self.init_ui()
@@ -22,7 +23,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(self.tabs)
 
         # Tworzymy odpowiednie zakładki
-        self.count_tab = CountTab()
+        self.count_tab = CountTab(self.username)
         self.train_tab = TrainTab()
         self.models_tab = ModelsTab()
         self.archive_tab = ArchiveTab()

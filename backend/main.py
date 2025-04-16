@@ -86,7 +86,8 @@ class TrainingRequest(BaseModel):
 def login(request: LoginRequest):
     auth_response = verify_credentials(request.username, request.password)
     if auth_response:
-        return {"role": auth_response["role"]}
+        # Zwracamy pełne dane, w tym username i role
+        return {"role": auth_response["role"], "username": auth_response["username"]}
     else:
         raise HTTPException(status_code=401, detail="Nieprawidłowe dane logowania")
 

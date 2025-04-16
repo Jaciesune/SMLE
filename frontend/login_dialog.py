@@ -41,6 +41,7 @@ class LoginDialog(QtWidgets.QDialog):
         if role:
             print(f"Zalogowano jako {role}")  # Debugowanie roli
             self.accepted_role = role  # Przypisujemy rolę
+            self.accepted_username = username
             self.accept()  # Akceptujemy logowanie i przechodzimy do głównego okna
         else:
             self.error_label.setText("Niepoprawne dane logowania!")

@@ -30,7 +30,6 @@ async def auto_label(
     input_dir_docker = f"/app/backend/data/Auto_labeling/{job_name}_before"
     output_dir_docker = f"/app/backend/data/Auto_labeling/{job_name}_after"
     debug_dir_docker = f"/app/backend/data/Auto_labeling/{job_name}_debug"
-    zip_path = f"/app/backend/data/Auto_labeling/{job_name}_results.zip"
 
     try:
         # Zapisz przesłane obrazy
@@ -51,74 +50,46 @@ async def auto_label(
             logger.error("Błąd w auto_label: %s", result)
             raise HTTPException(status_code=500, detail=result)
 
-        # Tworzenie zip bezpośrednio z wyników
-        logger.debug("Pakuję wyniki do %s...", zip_path)
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            if os.path.exists(output_dir_docker):
-                for root, _, files in os.walk(output_dir_docker):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.join(f"{job_name}_after", os.path.relpath(file_path, output_dir_docker))
-                        zipf.write(file_path, arcname)
-                        logger.debug("Dodano do zip: %s", arcname)
-            else:
-                logger.warning("Katalog wyjściowy %s nie istnieje.", output_dir_docker)
-
-            if os.path.exists(debug_dir_docker):
-                for root, _, files in os.walk(debug_dir_docker):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.join(f"{job_name}_debug", os.path.relpath(file_path, debug_dir_docker))
-                        zipf.write(file_path, arcname)
-                        logger.debug("Dodano do zip: %s", arcname)
-            else:
-                logger.warning("Katalog debug %s nie istnieje.", debug_dir_docker)
-
-        # Ustaw uprawnienia do pliku zip (odczyt/zapis dla wszystkich)
-        try:
-            os.chmod(zip_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH)
-            logger.debug("Ustawiono uprawnienia dla %s", zip_path)
-        except Exception as e:
-            logger.warning("Nie udało się ustawić uprawnień dla %s: %s", zip_path, e)
-
-        # Weryfikacja istnienia pliku zip
-        if not os.path.exists(zip_path):
-            logger.error("Plik %s nie został utworzony.", zip_path)
-            raise HTTPException(status_code=500, detail=f"Plik {zip_path} nie został utworzony.")
-
-        # Usuwanie folderów po spakowaniu
-        logger.debug("Dodaję zadania czyszczenia w tle...")
-        background_tasks.add_task(shutil.rmtree, input_dir_docker, ignore_errors=True)
-        background_tasks.add_task(shutil.rmtree, output_dir_docker, ignore_errors=True)
-        background_tasks.add_task(shutil.rmtree, debug_dir_docker, ignore_errors=True)
-
-        logger.debug("Zwracam plik %s", zip_path)
-        return FileResponse(zip_path, filename=f"{job_name}_results.zip")
+        return {"status": "success", "message": "Labelowanie zakończone pomyślnie", "job_name": job_name}
     except Exception as e:
         logger.error("Błąd w endpointcie /auto_label: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Błąd podczas auto-labelingu: {str(e)}")
     finally:
-        # Zamknij wszystkie przesłane pliki
         for image in images:
             await image.close()
 
-@router.get("/download_results/{job_name}")
-async def download_results(job_name: str):
+@router.get("/get_results/{job_name}")
+async def get_results(job_name: str):
+    output_dir = f"/app/backend/data/Auto_labeling/{job_name}_after"
+    debug_dir = f"/app/backend/data/Auto_labeling/{job_name}_debug"
     zip_path = f"/app/backend/data/Auto_labeling/{job_name}_results.zip"
-    logger.debug("Próba dostępu do pliku %s", zip_path)
-    if not os.path.exists(zip_path):
-        logger.error("Plik %s nie istnieje.", zip_path)
-        raise HTTPException(status_code=404, detail=f"Plik wyników dla zadania {job_name} nie istnieje.")
+
     try:
-        # Weryfikacja uprawnień
-        if not os.access(zip_path, os.R_OK):
-            logger.error("Brak uprawnień do odczytu pliku %s", zip_path)
-            raise HTTPException(status_code=403, detail=f"Brak uprawnień do pliku {zip_path}")
-        logger.debug("Zwracam plik %s", zip_path)
+        # Utwórz ZIP z folderów tymczasowych
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            if os.path.exists(output_dir):
+                for root, _, files in os.walk(output_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.join(f"{job_name}_after", os.path.relpath(file_path, output_dir))
+                        zipf.write(file_path, arcname)
+                        logger.debug("Dodano do zip: %s", arcname)
+            if os.path.exists(debug_dir):
+                for root, _, files in os.walk(debug_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.join(f"{job_name}_debug", os.path.relpath(file_path, debug_dir))
+                        zipf.write(file_path, arcname)
+                        logger.debug("Dodano do zip: %s", arcname)
+
+        # Ustaw uprawnienia do pliku ZIP
+        os.chmod(zip_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+        logger.debug("Ustawiono uprawnienia dla %s", zip_path)
+
         return FileResponse(zip_path, filename=f"{job_name}_results.zip")
     except Exception as e:
-        logger.error("Błąd podczas zwracania pliku %s: %s", zip_path, str(e))
-        raise HTTPException(status_code=500, detail=f"Błąd podczas zwracania pliku: {str(e)}")
+        logger.error("Błąd podczas tworzenia wyników: %s", str(e))
+        raise HTTPException(status_code=500, detail=f"Błąd podczas tworzenia wyników: {str(e)}")
 
 @router.get("/auto_label_jobs")
 def get_auto_label_jobs():

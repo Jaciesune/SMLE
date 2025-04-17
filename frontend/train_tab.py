@@ -219,9 +219,9 @@ class TrainTab(QtWidgets.QWidget):
         ]
         if val_path:
             args.extend(["--host_val_path", val_path])
+            args.extend(["--val_dir", container_val_path.as_posix()])  # Dodajemy --val_dir
 
         if model_version != "Nowy model":
-            # Przekazujemy tylko nazwę modelu, bez pełnej ścieżki
             logger.info(f"Wybrano model do doszkolenia: {model_version}")
             args.extend(["--resume", model_version])
         else:

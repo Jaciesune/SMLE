@@ -1,7 +1,7 @@
 import sys
 import os
 
-from models_tab import get_db_connection
+from models_tab import get_db_connection, router as models_router
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 import time
@@ -57,6 +57,7 @@ auto_label_api = AutoLabelAPI()
 app.include_router(auto_label_router)
 app.include_router(dataset_router)
 app.include_router(detection_router)
+app.include_router(models_router)
 
 class LoginRequest(BaseModel):
     username: str

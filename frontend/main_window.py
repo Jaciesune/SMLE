@@ -24,7 +24,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Tworzymy odpowiednie zakładki
         self.count_tab = CountTab(self.username)
-        self.train_tab = TrainTab()
+        self.train_tab = TrainTab(self.username)
         self.models_tab = ModelsTab()
         self.archive_tab = ArchiveTab()
         self.auto_labeling_tab = AutoLabelingTab(self.user_role)

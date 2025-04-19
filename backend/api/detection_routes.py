@@ -82,11 +82,23 @@ async def detect_image(
                     user_id = row[0]
                 else:
                     raise Exception(f"Nie znaleziono użytkownika: {username}")
-                model_id = 1  # na sztywno
+                # Wyciągnij nazwę modelu przed pierwszym podkreśleniem
+                short_model_name = model_version.split('_')[0]
+
+                # Pobierz model_id na podstawie skróconej nazwy i algorytmu
+                cur.execute("SELECT id FROM model WHERE name = %s AND algorithm = %s", (short_model_name, algorithm))
+                model_row = cur.fetchone()
+                if model_row:
+                    model_id = model_row[0]
+                else:
+                    raise Exception(f"Nie znaleziono modelu: {short_model_name} dla algorytmu: {algorithm}")
+
+
                 cur.execute(
                     "INSERT INTO archive(action, user_id, model_id, date) VALUES (%s,%s,%s,NOW())",
                     ("Detekcja obrazu", user_id, model_id)
                 )
+
                 conn.commit()
                 cur.close()
                 conn.close()

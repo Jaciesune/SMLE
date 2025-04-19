@@ -18,6 +18,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.init_ui()
         self.create_toolbar()
 
+    def on_tab_changed(self, index):  
+        tab_text = self.tabs.tabText(index)
+        if tab_text == "Modele":
+            self.models_tab.load_models()
+        elif tab_text == "Historia":
+            self.archive_tab.load_archive_data()
+        elif tab_text == "Użytkownicy":
+            self.users_tab.load_users()
+
     def init_ui(self):
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -35,6 +44,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.addTab(self.models_tab, "Modele")
         self.tabs.addTab(self.auto_labeling_tab, "Automatyczne oznaczanie zdjęć")
         self.tabs.addTab(self.dataset_creation_tab, "Tworzenie zbioru danych")
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+
 
         if self.user_role == "admin":
             # Jeśli rola to admin, dodajemy te karty

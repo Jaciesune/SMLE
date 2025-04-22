@@ -39,7 +39,7 @@ transform = transforms.Compose([
 ])
 
 # Folder wyjściowy
-output_folder = "/app/MCNN/data/detectes"
+output_folder = "/app/backend/MCNN/data/detectes"
 os.makedirs(output_folder, exist_ok=True)
 
 # Funkcja obliczania współczynnika okrągłości

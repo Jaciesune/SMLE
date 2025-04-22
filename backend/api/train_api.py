@@ -4,6 +4,7 @@ import subprocess
 import shutil
 import threading
 import queue
+import requests
 import signal
 import time
 
@@ -45,7 +46,6 @@ class TrainAPI:
         if algorithm not in self.algorithms:
             print(f"Algorytm {algorithm} nie jest wspierany.", flush=True)
             return None
-        # Zwracamy tylko nazwę modelu, bez pełnej ścieżki
         if version.endswith('_checkpoint.pth'):
             print(f"Model wybrany: {version}", flush=True)
             return version
@@ -70,35 +70,20 @@ class TrainAPI:
         self._running = False
         if hasattr(self, '_process') and self._process:
             try:
-                find_pid_cmd = [
-                    "docker", "exec", self.container_name,
-                    "ps", "-eo", "pid,cmd", "--no-headers"
-                ]
+                find_pid_cmd = ["docker", "exec", self.container_name, "ps", "-eo", "pid,cmd", "--no-headers"]
                 pid_output = subprocess.check_output(find_pid_cmd, text=True)
-                print(f"Procesy w kontenerze:\n{pid_output}")
-
                 pid = None
                 script_name = self.train_scripts.get(self.current_algorithm, "")
                 for line in pid_output.splitlines():
                     if script_name in line and "python" in line.lower():
                         pid = line.split()[0]
                         break
-
                 if pid:
-                    print(f"Znaleziono PID procesu treningowego: {pid}")
-                    kill_cmd = [
-                        "docker", "exec", self.container_name,
-                        "kill", "-9", pid
-                    ]
+                    kill_cmd = ["docker", "exec", self.container_name, "kill", "-9", pid]
                     subprocess.run(kill_cmd, check=True)
-                    print(f"Wysłano SIGKILL do PID {pid} w kontenerze.")
-                else:
-                    print("Nie znaleziono PID procesu treningowego w kontenerze.")
-
                 self._process.terminate()
                 self._process.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                print("Proces docker exec nie zakończył się po SIGTERM, wysyłanie SIGKILL...")
                 self._process.kill()
             except Exception as e:
                 print(f"Błąd podczas przerywania procesu: {e}")
@@ -123,6 +108,9 @@ class TrainAPI:
         host_val_path = None
         num_augmentations = "0"
         epochs = "0"
+        model_name = ""
+        username = "" 
+
         for i in range(0, len(args), 2):
             if args[i] == "--train_dir":
                 train_dir = args[i + 1]
@@ -134,97 +122,64 @@ class TrainAPI:
                 num_augmentations = args[i + 1]
             elif args[i] == "--epochs":
                 epochs = args[i + 1]
+            elif args[i] == "--model_name":
+                model_name = args[i + 1]
+            elif args[i] == "--username":
+                self.username = args[i + 1]
 
-        if not train_dir:
-            yield f"Błąd: Ścieżka do danych treningowych (--train_dir) nie została podana."
-            return
-        if not host_train_path:
-            yield f"Błąd: Ścieżka na hoście (--host_train_path) nie została podana."
-            return
-        if not os.path.exists(host_train_path):
-            yield f"Błąd: Katalog danych treningowych nie istnieje: {host_train_path}"
-            return
-        if host_val_path and not os.path.exists(host_val_path):
-            yield f"Błąd: Katalog danych walidacyjnych nie istnieje: {host_val_path}"
+  
+        if not train_dir or not host_train_path or not os.path.exists(host_train_path):
+            yield f"Błąd: Niepoprawna ścieżka do danych treningowych."
             return
 
         try:
-            num_augmentations = int(num_augmentations)
-            if num_augmentations < 0:
-                yield f"Błąd: Liczba augmentacji (--num_augmentations) nie może być ujemna."
-                return
-        except ValueError:
-            yield f"Błąd: Nieprawidłowa wartość dla --num_augmentations: {num_augmentations}"
-            return
-
-        try:
-            epochs = int(epochs)
-            if epochs <= 0:
-                yield f"Błąd: Liczba epok (--epochs) musi być większa od 0."
-                return
-        except ValueError:
-            yield f"Błąd: Nieprawidłowa wartość dla --epochs: {epochs}"
-            return
-
-        try:
-            env = os.environ.copy()
-            env["PYTHONUNBUFFERED"] = "1"
-            env["PYTHONIOENCODING"] = "utf-8"
-
-            if algorithm == "Mask R-CNN":
-                script_path = f"/app/backend/Mask_RCNN/scripts/{script_name}"
-            elif algorithm == "MCNN":
-                script_path = f"/app/backend/MCNN/{script_name}"
-            elif algorithm == "FasterRCNN":
-                script_path = f"/app/backend/FasterRCNN/{script_name}"
-            else:
-                yield f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
-                return
-
             host_train_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1]
             host_train_dir.mkdir(parents=True, exist_ok=True)
 
+            for item in os.listdir(host_train_path):
+                src_path = os.path.join(host_train_path, item)
+                dst_path = os.path.join(host_train_dir, item)
+                if os.path.isfile(src_path):
+                    shutil.copy(src_path, dst_path)
+                elif os.path.isdir(src_path):
+                    shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+            yield f"Skopiowano dane treningowe do {host_train_dir}"
+        except Exception as e:
+            yield f"Błąd kopiowania danych treningowych: {e}"
+            return
+
+        if host_val_path:
             try:
-                for item in os.listdir(host_train_path):
-                    src_path = os.path.join(host_train_path, item)
-                    dst_path = os.path.join(host_train_dir, item)
+                host_val_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1].replace("train", "val")
+                host_val_dir.mkdir(parents=True, exist_ok=True)
+                for item in os.listdir(host_val_path):
+                    src_path = os.path.join(host_val_path, item)
+                    dst_path = os.path.join(host_val_dir, item)
                     if os.path.isfile(src_path):
                         shutil.copy(src_path, dst_path)
                     elif os.path.isdir(src_path):
                         shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
-                print(f"Skopiowano dane treningowe z {host_train_path} do {host_train_dir}")
-                yield f"Skopiowano dane treningowe do {host_train_dir}"
+                yield f"Skopiowano dane walidacyjne do {host_val_dir}"
             except Exception as e:
-                yield f"Błąd: Nie udało się skopiować danych treningowych do {host_train_dir}: {e}"
+                yield f"Błąd kopiowania danych walidacyjnych: {e}"
                 return
 
-            if host_val_path:
-                host_val_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1].replace("train", "val")
-                host_val_dir.mkdir(parents=True, exist_ok=True)
-                try:
-                    for item in os.listdir(host_val_path):
-                        src_path = os.path.join(host_val_path, item)
-                        dst_path = os.path.join(host_val_dir, item)
-                        if os.path.isfile(src_path):
-                            shutil.copy(src_path, dst_path)
-                        elif os.path.isdir(src_path):
-                            shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
-                    print(f"Skopiowano dane walidacyjne z {host_val_path} do {host_val_dir}")
-                    yield f"Skopiowano dane walidacyjne do {host_val_dir}"
-                except Exception as e:
-                    yield f"Błąd: Nie udało się skopiować danych walidacyjnych do {host_val_dir}: {e}"
-                    return
+        def remove_arg_pair(args_list, key):
+            args = list(args_list)
+            if key in args:
+                idx = args.index(key)
+                # Usuń klucz i wartość
+                del args[idx:idx+2]
+            return args
 
-            filtered_args = [arg for arg in args if arg not in ["--host_train_path", host_train_path, "--host_val_path", host_val_path]]
+        filtered_args = list(args)
+        for arg_name in ["--host_train_path", "--host_val_path", "--username"]:
+            filtered_args = remove_arg_pair(filtered_args, arg_name)
 
-            command = [
-                "docker", "exec",
-                "-e", "PYTHONUNBUFFERED=1",
-                self.container_name,
-                "python", script_path
-            ]
+
+        try:
+            command = ["docker", "exec", "-e", "PYTHONUNBUFFERED=1", self.container_name, "python", f"/app/backend/{algorithm}/{script_name}"]
             command.extend(filtered_args)
-            print(f"Uruchamiam polecenie: {' '.join(command)}")
             yield f"Uruchamiam trening z {num_augmentations} augmentacjami na obraz..."
 
             process = subprocess.Popen(
@@ -235,8 +190,7 @@ class TrainAPI:
                 encoding='utf-8',
                 errors='replace',
                 bufsize=1,
-                universal_newlines=True,
-                env=env
+                universal_newlines=True
             )
             self._process = process
 
@@ -264,12 +218,21 @@ class TrainAPI:
             stdout_thread.join()
             stderr_thread.join()
 
-            if process.returncode != 0 and self._running:
-                yield f"Błąd podczas uruchamiania skryptu {script_name}: proces zakończony z kodem {process.returncode}"
-
-        except subprocess.CalledProcessError as e:
-            yield f"Błąd podczas uruchamiania komendy w kontenerze: {e}"
-        except Exception as e:
-            yield f"Nieoczekiwany błąd: {e}"
+            if process.returncode == 0:
+                # Po zakończeniu treningu, wysyłamy dane do models_tab
+                try:
+                    requests.post("http://localhost:8000/models/add", json={
+                        "name": model_name,
+                        "algorithm": algorithm,
+                        "path": model_name + "_checkpoint.pth",
+                        "epochs": int(epochs),
+                        "augmentations": int(num_augmentations),
+                        "username": self.username
+                    })
+                    yield f"Model zapisany do bazy danych przez models_tab"
+                except Exception as e:
+                    yield f"[OSTRZEŻENIE] Nie udało się wysłać modelu do models_tab: {e}"
+            else:
+                yield f"Błąd podczas uruchamiania skryptu {script_name}: kod {process.returncode}"
         finally:
             self._process = None

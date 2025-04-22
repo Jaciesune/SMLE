@@ -40,10 +40,10 @@ class AutoLabelAPI:
         logger.debug("Ścieżka modelu: %s", model_path)
         return str(model_path)  # Ścieżka w kontenerze
 
-    def auto_label(self, input_dir, job_name, version, input_dir_docker, output_dir_docker, debug_dir_docker):
+    def auto_label(self, input_dir, job_name, version, input_dir_docker, output_dir_docker, debug_dir_docker, custom_label):
         """Przeprowadza automatyczne labelowanie katalogu zdjęć."""
-        logger.debug("Rozpoczynam auto_label: job_name=%s, model_version=%s, input_dir_docker=%s",
-                     job_name, version, input_dir_docker)
+        logger.debug("Rozpoczynam auto_label: job_name=%s, model_version=%s, input_dir_docker=%s, custom_label=%s",
+                     job_name, version, input_dir_docker, custom_label)
         model_path = self.get_model_path(version)
         if not model_path:
             error_msg = f"Błąd: Model {version} dla Mask R-CNN nie istnieje."
@@ -58,31 +58,32 @@ class AutoLabelAPI:
             return error_msg
 
         input_images = glob.glob(os.path.join(input_dir_docker, "*.jpg"))
+        logger.debug(f"Znalezione obrazy w {input_dir_docker}: {input_images}")
         if not input_images:
             error_msg = f"Błąd: Brak obrazów .jpg w katalogu {input_dir_docker}."
             logger.error(error_msg)
             return error_msg
 
-        logger.debug("Uruchamiam auto_label.py z argumentami: input_dir=%s, output_dir=%s, debug_dir=%s, model_path=%s",
-                     input_dir_docker, output_dir_docker, debug_dir_docker, model_path)
+        logger.debug("Uruchamiam auto_label.py z argumentami: input_dir=%s, output_dir=%s, debug_dir=%s, model_path=%s, custom_label=%s",
+                     input_dir_docker, output_dir_docker, debug_dir_docker, model_path, custom_label)
         try:
             sys.argv = [
                 "auto_label.py",
                 "--input_dir", input_dir_docker,
                 "--output_dir", output_dir_docker,
-                "--debug_dir", debug_dir_docker,
-                "--model_path", model_path
+                "--debug_dir", debug_dir_docker if debug_dir_docker else "",
+                "--model_path", model_path,
+                "--custom_label", custom_label  # Przekazujemy etykietę użytkownika
             ]
+            logger.debug("Argumenty przekazane do auto_label_main: %s", sys.argv)
             auto_label_main()
             output_files = os.listdir(output_dir_docker) if os.path.exists(output_dir_docker) else []
-            debug_files = os.listdir(debug_dir_docker) if os.path.exists(debug_dir_docker) else []
             logger.info("Zawartość katalogu wyjściowego %s: %s", output_dir_docker, output_files)
-            logger.info("Zawartość katalogu debug %s: %s", debug_dir_docker, debug_files)
-            if not output_files and not debug_files:
-                error_msg = f"Błąd: Brak wyników w katalogach {output_dir_docker} ani {debug_dir_docker}."
-                logger.error(error_msg)
+            if not output_files:
+                error_msg = f"Błąd: Brak wyników w katalogu {output_dir_docker}. Możliwe, że model nie wykrył żadnych obiektów."
+                logger.warning(error_msg)
                 return error_msg
-            return f"Labelowanie zakończone. Wyniki w {output_dir_docker}, debug w {debug_dir_docker}."
+            return f"Labelowanie zakończone. Wyniki w {output_dir_docker}."
         except Exception as e:
             error_msg = f"Błąd podczas auto-labelingu: {e}"
             logger.error(error_msg, exc_info=True)

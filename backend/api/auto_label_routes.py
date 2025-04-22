@@ -31,10 +31,11 @@ async def auto_label(
     background_tasks: BackgroundTasks,
     job_name: str = Form(...),
     model_version: str = Form(...),
+    custom_label: str = Form(...),  # Nowy parametr
     images: list[UploadFile] = File(...)
 ):
-    logger.debug("Rozpoczynam auto_label dla job_name=%s, model_version=%s, %d obrazów",
-                 job_name, model_version, len(images))
+    logger.debug("Rozpoczynam auto_label dla job_name=%s, model_version=%s, custom_label=%s, %d obrazów",
+                 job_name, model_version, custom_label, len(images))
     input_dir_docker = f"/app/backend/data/Auto_labeling/{job_name}_before"
     output_dir_docker = f"/app/backend/data/Auto_labeling/{job_name}_after"
 
@@ -71,7 +72,7 @@ async def auto_label(
         logger.debug("Wywołuję auto_label_api.auto_label...")
         result = auto_label_api.auto_label(
             input_dir_docker, job_name, model_version,
-            input_dir_docker, output_dir_docker, debug_dir_docker=None
+            input_dir_docker, output_dir_docker, debug_dir_docker=None, custom_label=custom_label
         )
         logger.debug("Wynik auto_label: %s", result)
         if "Błąd" in result:
@@ -82,7 +83,7 @@ async def auto_label(
                 logger.error("Błąd w auto_label: %s", result)
                 raise HTTPException(status_code=500, detail=result)
 
-        # Przetwórz wyniki, aby usunąć polygon_points i poprawić etykiety
+        # Przetwórz wyniki, aby usunąć polygon_points
         annotation_files = glob(os.path.join(output_dir_docker, "*.json"))
         logger.debug(f"Znalezione pliki adnotacji: {annotation_files}")
         for annotation_path in annotation_files:
@@ -95,16 +96,6 @@ async def auto_label(
                 for shape in annotation_data.get("shapes", []):
                     if "polygon_points" in shape:
                         del shape["polygon_points"]
-
-                    # Popraw etykiety na podstawie modelu
-                    if "deski" in model_version.lower():
-                        if shape.get("label") == "pipe":
-                            shape["label"] = "plank"
-                            logger.debug(f"Zmieniono etykietę z 'pipe' na 'plank' w {annotation_path}")
-                    elif "pipes" in model_version.lower():
-                        if shape.get("label") == "plank":
-                            shape["label"] = "pipe"
-                            logger.debug(f"Zmieniono etykietę z 'plank' na 'pipe' w {annotation_path}")
 
                 # Zapisz zmodyfikowane adnotacje
                 with open(annotation_path, 'w', encoding='utf-8') as f:

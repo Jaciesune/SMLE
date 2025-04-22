@@ -40,10 +40,10 @@ class AutoLabelAPI:
         logger.debug("Ścieżka modelu: %s", model_path)
         return str(model_path)  # Ścieżka w kontenerze
 
-    def auto_label(self, input_dir, job_name, version, input_dir_docker, output_dir_docker, debug_dir_docker):
+    def auto_label(self, input_dir, job_name, version, input_dir_docker, output_dir_docker, debug_dir_docker, custom_label):
         """Przeprowadza automatyczne labelowanie katalogu zdjęć."""
-        logger.debug("Rozpoczynam auto_label: job_name=%s, model_version=%s, input_dir_docker=%s",
-                     job_name, version, input_dir_docker)
+        logger.debug("Rozpoczynam auto_label: job_name=%s, model_version=%s, input_dir_docker=%s, custom_label=%s",
+                     job_name, version, input_dir_docker, custom_label)
         model_path = self.get_model_path(version)
         if not model_path:
             error_msg = f"Błąd: Model {version} dla Mask R-CNN nie istnieje."
@@ -64,15 +64,16 @@ class AutoLabelAPI:
             logger.error(error_msg)
             return error_msg
 
-        logger.debug("Uruchamiam auto_label.py z argumentami: input_dir=%s, output_dir=%s, debug_dir=%s, model_path=%s",
-                     input_dir_docker, output_dir_docker, debug_dir_docker, model_path)
+        logger.debug("Uruchamiam auto_label.py z argumentami: input_dir=%s, output_dir=%s, debug_dir=%s, model_path=%s, custom_label=%s",
+                     input_dir_docker, output_dir_docker, debug_dir_docker, model_path, custom_label)
         try:
             sys.argv = [
                 "auto_label.py",
                 "--input_dir", input_dir_docker,
                 "--output_dir", output_dir_docker,
                 "--debug_dir", debug_dir_docker if debug_dir_docker else "",
-                "--model_path", model_path
+                "--model_path", model_path,
+                "--custom_label", custom_label  # Przekazujemy etykietę użytkownika
             ]
             logger.debug("Argumenty przekazane do auto_label_main: %s", sys.argv)
             auto_label_main()

@@ -279,6 +279,14 @@ class AutoLabelingTab(QtWidgets.QWidget):
         mode_layout.addWidget(self.model_version_label)
         self.model_version_combo = QtWidgets.QComboBox()
         mode_layout.addWidget(self.model_version_combo)
+
+        # Dodajemy pole do wpisywania etykiety dla modelu
+        self.custom_label_label = QtWidgets.QLabel("Etykieta dla modelu:")
+        mode_layout.addWidget(self.custom_label_label)
+        self.custom_label_input = QtWidgets.QLineEdit()
+        self.custom_label_input.setPlaceholderText("Wpisz etykietę (np. plank, pipe)")
+        mode_layout.addWidget(self.custom_label_input)
+
         self.load_button = QtWidgets.QPushButton("Wczytaj i oznacz")
         self.load_button.clicked.connect(self.load_and_label)
         mode_layout.addWidget(self.load_button)
@@ -416,133 +424,143 @@ class AutoLabelingTab(QtWidgets.QWidget):
                 logger.debug(f"{subindent}{f}")
 
     def load_and_label(self):
-            input_dir = self.input_dir_edit.text()
-            mode = self.mode_combo.currentText()
+        input_dir = self.input_dir_edit.text()
+        mode = self.mode_combo.currentText()
 
-            if not input_dir:
-                QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać katalog ze zdjęciami!")
+        if not input_dir:
+            QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać katalog ze zdjęciami!")
+            return
+
+        self.original_image_paths = glob.glob(os.path.join(input_dir, "*.jpg"))
+        if not self.original_image_paths:
+            QtWidgets.QMessageBox.warning(self, "Błąd", "Brak obrazów .jpg w katalogu!")
+            return
+
+        self.original_image_paths.sort()
+        self.image_paths = self.original_image_paths.copy()
+        self.annotation_files = []
+
+        for image_path in self.original_image_paths:
+            base_name = os.path.splitext(image_path)[0]
+            annotation_path = f"{base_name}.json"
+            if os.path.exists(annotation_path):
+                self.annotation_files.append(annotation_path)
+            else:
+                json_data = {
+                    "version": "5.8.1",
+                    "flags": {},
+                    "shapes": [],
+                    "imagePath": os.path.basename(image_path),
+                    "imageData": None,
+                    "imageHeight": 0,
+                    "imageWidth": 0
+                }
+                with open(annotation_path, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, indent=2)
+                self.annotation_files.append(annotation_path)
+
+        if mode == "Automatyczne oznaczanie":
+            model_version = self.model_version_combo.currentText()
+            custom_label = self.custom_label_input.text().strip()
+
+            if not model_version or model_version == "Brak dostępnych modeli":
+                QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać model!")
                 return
 
-            self.original_image_paths = glob.glob(os.path.join(input_dir, "*.jpg"))
-            if not self.original_image_paths:
-                QtWidgets.QMessageBox.warning(self, "Błąd", "Brak obrazów .jpg w katalogu!")
+            if not custom_label:
+                QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wpisać etykietę dla modelu!")
                 return
 
-            self.original_image_paths.sort()
-            self.image_paths = self.original_image_paths.copy()
-            self.annotation_files = []
-
-            for image_path in self.original_image_paths:
-                base_name = os.path.splitext(image_path)[0]
-                annotation_path = f"{base_name}.json"
-                if os.path.exists(annotation_path):
-                    self.annotation_files.append(annotation_path)
-                else:
-                    json_data = {
-                        "version": "5.8.1",
-                        "flags": {},
-                        "shapes": [],
-                        "imagePath": os.path.basename(image_path),
-                        "imageData": None,
-                        "imageHeight": 0,
-                        "imageWidth": 0
-                    }
-                    with open(annotation_path, 'w', encoding='utf-8') as f:
-                        json.dump(json_data, f, indent=2)
-                    self.annotation_files.append(annotation_path)
-
-            if mode == "Automatyczne oznaczanie":
-                model_version = self.model_version_combo.currentText()
-                if not model_version or model_version == "Brak dostępnych modeli":
-                    QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać model!")
+            self.job_name = f"auto_label_{uuid.uuid4().hex}"
+            try:
+                files = [('images', (os.path.basename(path), open(path, 'rb'), 'image/jpeg')) for path in self.original_image_paths]
+                data = {
+                    'job_name': self.job_name,
+                    'model_version': model_version,
+                    'custom_label': custom_label  # Przekazujemy etykietę użytkownika
+                }
+                logger.debug(f"Wysyłam żądanie do /auto_label z job_name={self.job_name}, custom_label={custom_label}")
+                response = requests.post(
+                    f"{self.api_url}/auto_label",
+                    files=files,
+                    data=data
+                )
+                response.raise_for_status()
+                result = response.json()
+                logger.debug(f"Otrzymano odpowiedź z /auto_label: {result}")
+                if result["status"] != "success":
+                    QtWidgets.QMessageBox.warning(self, "Błąd", result.get('message', 'Nieznany błąd'))
                     return
 
-                self.job_name = f"auto_label_{uuid.uuid4().hex}"
-                try:
-                    files = [('images', (os.path.basename(path), open(path, 'rb'), 'image/jpeg')) for path in self.original_image_paths]
-                    data = {'job_name': self.job_name, 'model_version': model_version}
-                    logger.debug(f"Wysyłam żądanie do /auto_label z job_name={self.job_name}")
-                    response = requests.post(
-                        f"{self.api_url}/auto_label",
-                        files=files,
-                        data=data
-                    )
-                    response.raise_for_status()
-                    result = response.json()
-                    logger.debug(f"Otrzymano odpowiedź z /auto_label: {result}")
-                    if result["status"] != "success":
-                        QtWidgets.QMessageBox.warning(self, "Błąd", result.get('message', 'Nieznany błąd'))
-                        return
-
-                    # Sprawdź, czy odpowiedź zawiera informację o braku wyników
-                    if "message" in result and "Nie znaleziono obiektów" in result["message"]:
-                        QtWidgets.QMessageBox.information(self, "Informacja", "Auto-labeling nie znalazł żadnych obiektów. Możesz przejść do ręcznego oznaczania.")
-                        # Wczytaj oryginalne obrazy do ręcznego oznaczania
-                        self.current_image_idx = 0
-                        self.load_current_image()
-                        self.update_image_list()
-                        self.download_btn.setEnabled(True)
-                        self.top_widget.setVisible(False)
-                        return
-
-                    # Zmień katalog zapisu na /backend/data
-                    data_dir = os.path.join(os.getcwd(),  "backend", "data")
-                    os.makedirs(data_dir, exist_ok=True)
-
-                    self.temp_dir = os.path.join(data_dir, f"temp_{self.job_name}")
-                    os.makedirs(self.temp_dir, exist_ok=True)
-
-                    logger.debug(f"Pobieram wyniki z /get_results/{self.job_name}")
-                    response = requests.get(f"{self.api_url}/get_results/{self.job_name}")
-                    response.raise_for_status()
-                    zip_path = os.path.join(self.temp_dir, f"{self.job_name}_results.zip")
-                    with open(zip_path, "wb") as f:
-                        f.write(response.content)
-                    logger.debug(f"Zapisano ZIP do {zip_path}")
-
-                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                        zip_ref.extractall(self.temp_dir)
-                    logger.debug(f"Rozpakowano ZIP do {self.temp_dir}")
-
-                    self.log_directory_structure(self.temp_dir)
-
-                    os.remove(zip_path)
-                    logger.debug(f"Usunięto ZIP: {zip_path}")
-
-                    after_dir = self.find_results_dir(self.temp_dir, self.job_name)
-                    if not after_dir:
-                        logger.error(f"Katalog z wynikami auto-labelingu nie istnieje w {self.temp_dir}!")
-                        QtWidgets.QMessageBox.warning(self, "Błąd", "Katalog z wynikami auto-labelingu nie istnieje!")
-                        return
-
-                    self.image_paths = glob.glob(os.path.join(after_dir, "*.jpg"))
-                    self.annotation_files = glob.glob(os.path.join(after_dir, "*.json"))
-                    self.image_paths.sort()
-                    self.annotation_files.sort()
-
-                    if not self.image_paths or not self.annotation_files:
-                        logger.error("Brak plików obrazów lub adnotacji w katalogu wyników!")
-                        QtWidgets.QMessageBox.warning(self, "Błąd", "Brak wyników auto-labelingu (obrazów lub adnotacji)!")
-                        return
-
-                    if len(self.image_paths) != len(self.annotation_files):
-                        logger.error(f"Niezgodność liczby obrazów ({len(self.image_paths)}) i adnotacji ({len(self.annotation_files)})!")
-                        QtWidgets.QMessageBox.warning(self, "Błąd", "Liczba obrazów i adnotacji nie jest zgodna!")
-                        return
-
-                except requests.exceptions.RequestException as e:
-                    logger.error("Błąd podczas labelowania: %s", e)
-                    QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd podczas labelowania: {e}")
+                # Sprawdź, czy odpowiedź zawiera informację o braku wyników
+                if "message" in result and "Nie znaleziono obiektów" in result["message"]:
+                    QtWidgets.QMessageBox.information(self, "Informacja", "Auto-labeling nie znalazł żadnych obiektów. Możesz przejść do ręcznego oznaczania.")
+                    # Wczytaj oryginalne obrazy do ręcznego oznaczania
+                    self.current_image_idx = 0
+                    self.load_current_image()
+                    self.update_image_list()
+                    self.download_btn.setEnabled(True)
+                    self.top_widget.setVisible(False)
                     return
-                finally:
-                    for _, file_tuple in files:
-                        file_tuple[1].close()
 
-            self.current_image_idx = 0
-            self.load_current_image()
-            self.update_image_list()
-            self.download_btn.setEnabled(True)
-            self.top_widget.setVisible(False)
+                # Zmień katalog zapisu na backend/data
+                data_dir = os.path.join(os.getcwd(), "backend", "data")
+                os.makedirs(data_dir, exist_ok=True)
+
+                self.temp_dir = os.path.join(data_dir, f"temp_{self.job_name}")
+                os.makedirs(self.temp_dir, exist_ok=True)
+
+                logger.debug(f"Pobieram wyniki z /get_results/{self.job_name}")
+                response = requests.get(f"{self.api_url}/get_results/{self.job_name}")
+                response.raise_for_status()
+                zip_path = os.path.join(self.temp_dir, f"{self.job_name}_results.zip")
+                with open(zip_path, "wb") as f:
+                    f.write(response.content)
+                logger.debug(f"Zapisano ZIP do {zip_path}")
+
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(self.temp_dir)
+                logger.debug(f"Rozpakowano ZIP do {self.temp_dir}")
+
+                self.log_directory_structure(self.temp_dir)
+
+                os.remove(zip_path)
+                logger.debug(f"Usunięto ZIP: {zip_path}")
+
+                after_dir = self.find_results_dir(self.temp_dir, self.job_name)
+                if not after_dir:
+                    logger.error(f"Katalog z wynikami auto-labelingu nie istnieje w {self.temp_dir}!")
+                    QtWidgets.QMessageBox.warning(self, "Błąd", "Katalog z wynikami auto-labelingu nie istnieje!")
+                    return
+
+                self.image_paths = glob.glob(os.path.join(after_dir, "*.jpg"))
+                self.annotation_files = glob.glob(os.path.join(after_dir, "*.json"))
+                self.image_paths.sort()
+                self.annotation_files.sort()
+
+                if not self.image_paths or not self.annotation_files:
+                    logger.error("Brak plików obrazów lub adnotacji w katalogu wyników!")
+                    QtWidgets.QMessageBox.warning(self, "Błąd", "Brak wyników auto-labelingu (obrazów lub adnotacji)!")
+                    return
+
+                if len(self.image_paths) != len(self.annotation_files):
+                    logger.error(f"Niezgodność liczby obrazów ({len(self.image_paths)}) i adnotacji ({len(self.annotation_files)})!")
+                    QtWidgets.QMessageBox.warning(self, "Błąd", "Liczba obrazów i adnotacji nie jest zgodna!")
+                    return
+
+            except requests.exceptions.RequestException as e:
+                logger.error("Błąd podczas labelowania: %s", e)
+                QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd podczas labelowania: {e}")
+                return
+            finally:
+                for _, file_tuple in files:
+                    file_tuple[1].close()
+
+        self.current_image_idx = 0
+        self.load_current_image()
+        self.update_image_list()
+        self.download_btn.setEnabled(True)
+        self.top_widget.setVisible(False)
 
     def load_current_image(self):
         if not self.image_paths or not self.annotation_files:
@@ -667,66 +685,66 @@ class AutoLabelingTab(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd zapisu adnotacji: {e}")
 
     def download_results(self):
-            if not self.image_paths or not self.annotation_files:
-                QtWidgets.QMessageBox.warning(self, "Błąd", "Brak wyników do pobrania!")
-                return
+        if not self.image_paths or not self.annotation_files:
+            QtWidgets.QMessageBox.warning(self, "Błąd", "Brak wyników do pobrania!")
+            return
 
-            # Zmień katalog zapisu na backend/data
-            data_dir = os.path.join(os.getcwd(), "backend", "data")
-            os.makedirs(data_dir, exist_ok=True)
+        # Zmień katalog zapisu na backend/data
+        data_dir = os.path.join(os.getcwd(), "backend", "data")
+        os.makedirs(data_dir, exist_ok=True)
 
-            zip_path = os.path.join(data_dir, f"results_{uuid.uuid4().hex}.zip")
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                if self.mode_combo.currentText() == "Automatyczne oznaczanie" and self.job_name:
-                    try:
-                        logger.debug(f"Pobieram wyniki z /get_results/{self.job_name}")
-                        response = requests.get(f"{self.api_url}/get_results/{self.job_name}")
-                        response.raise_for_status()
-                        temp_zip_path = os.path.join(data_dir, f"temp_{self.job_name}_results.zip")
-                        with open(temp_zip_path, "wb") as f:
-                            f.write(response.content)
-                        logger.debug(f"Zapisano tymczasowy ZIP do {temp_zip_path}")
+        zip_path = os.path.join(data_dir, f"results_{uuid.uuid4().hex}.zip")
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            if self.mode_combo.currentText() == "Automatyczne oznaczanie" and self.job_name:
+                try:
+                    logger.debug(f"Pobieram wyniki z /get_results/{self.job_name}")
+                    response = requests.get(f"{self.api_url}/get_results/{self.job_name}")
+                    response.raise_for_status()
+                    temp_zip_path = os.path.join(data_dir, f"temp_{self.job_name}_results.zip")
+                    with open(temp_zip_path, "wb") as f:
+                        f.write(response.content)
+                    logger.debug(f"Zapisano tymczasowy ZIP do {temp_zip_path}")
 
-                        temp_extract_dir = os.path.join(data_dir, f"temp_extract_{self.job_name}")
-                        os.makedirs(temp_extract_dir, exist_ok=True)
-                        with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
-                            zip_ref.extractall(temp_extract_dir)
-                        logger.debug(f"Rozpakowano ZIP do {temp_extract_dir}")
+                    temp_extract_dir = os.path.join(data_dir, f"temp_extract_{self.job_name}")
+                    os.makedirs(temp_extract_dir, exist_ok=True)
+                    with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_extract_dir)
+                    logger.debug(f"Rozpakowano ZIP do {temp_extract_dir}")
 
-                        self.log_directory_structure(temp_extract_dir)
+                    self.log_directory_structure(temp_extract_dir)
 
-                        after_dir = self.find_results_dir(temp_extract_dir, self.job_name)
-                        if not after_dir:
-                            logger.error(f"Katalog z wynikami auto-labelingu nie istnieje w {temp_extract_dir}!")
-                            QtWidgets.QMessageBox.warning(self, "Błąd", "Katalog z wynikami auto-labelingu nie istnieje!")
-                            return
-
-                        for file_path in glob.glob(os.path.join(after_dir, "*")):
-                            zipf.write(file_path, os.path.join(f"{self.job_name}_after", os.path.basename(file_path)))
-
-                        shutil.rmtree(temp_extract_dir)
-                        os.remove(temp_zip_path)
-                        logger.debug(f"Usunięto tymczasowe pliki: {temp_extract_dir}, {temp_zip_path}")
-
-                    except requests.exceptions.RequestException as e:
-                        logger.error("Błąd podczas pobierania wyników: %s", e)
-                        QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd podczas pobierania wyników: {e}")
+                    after_dir = self.find_results_dir(temp_extract_dir, self.job_name)
+                    if not after_dir:
+                        logger.error(f"Katalog z wynikami auto-labelingu nie istnieje w {temp_extract_dir}!")
+                        QtWidgets.QMessageBox.warning(self, "Błąd", "Katalog z wynikami auto-labelingu nie istnieje!")
                         return
 
-                for image_path, annotation_path in zip(self.image_paths, self.annotation_files):
-                    zipf.write(image_path, os.path.basename(image_path))
-                    if os.path.exists(annotation_path):
-                        zipf.write(annotation_path, os.path.basename(annotation_path))
+                    for file_path in glob.glob(os.path.join(after_dir, "*")):
+                        zipf.write(file_path, os.path.join(f"{self.job_name}_after", os.path.basename(file_path)))
 
-            save_path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Zapisz wyniki", os.path.basename(zip_path), "ZIP files (*.zip)"
-            )
-            if save_path:
-                shutil.move(zip_path, save_path)
-                QtWidgets.QMessageBox.information(self, "Sukces", f"Wyniki zapisane do: {save_path}")
-            else:
-                os.remove(zip_path)
-                logger.debug(f"Usunięto tymczasowy ZIP: {zip_path}")
+                    shutil.rmtree(temp_extract_dir)
+                    os.remove(temp_zip_path)
+                    logger.debug(f"Usunięto tymczasowe pliki: {temp_extract_dir}, {temp_zip_path}")
+
+                except requests.exceptions.RequestException as e:
+                    logger.error("Błąd podczas pobierania wyników: %s", e)
+                    QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd podczas pobierania wyników: {e}")
+                    return
+
+            for image_path, annotation_path in zip(self.image_paths, self.annotation_files):
+                zipf.write(image_path, os.path.basename(image_path))
+                if os.path.exists(annotation_path):
+                    zipf.write(annotation_path, os.path.basename(annotation_path))
+
+        save_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Zapisz wyniki", os.path.basename(zip_path), "ZIP files (*.zip)"
+        )
+        if save_path:
+            shutil.move(zip_path, save_path)
+            QtWidgets.QMessageBox.information(self, "Sukces", f"Wyniki zapisane do: {save_path}")
+        else:
+            os.remove(zip_path)
+            logger.debug(f"Usunięto tymczasowy ZIP: {zip_path}")
 
     def prev_image(self):
         if self.current_image_idx > 0:

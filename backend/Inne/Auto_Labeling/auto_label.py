@@ -22,24 +22,6 @@ MODEL_INPUT_SIZE = (1024, 1024)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Mapowanie indeksów klas na etykiety
-# ID 0 to tło (background), ID 1 to klasa obiektu
-CLASS_MAPPING = {
-    "deski": {0: "background", 1: "plank"},
-    "pipes": {0: "background", 1: "pipe"},
-    "default": {0: "background", 1: "unknown"}
-}
-
-def get_class_mapping(model_path):
-    """Określa mapowanie klas na podstawie nazwy modelu."""
-    model_name = os.path.basename(model_path).lower()
-    if "deski" in model_name:
-        return CLASS_MAPPING["deski"]
-    elif "pipes" in model_name:
-        return CLASS_MAPPING["pipes"]
-    else:
-        return CLASS_MAPPING["default"]
-
 def load_model(model_path):
     print(f"Sprawdzam model pod ścieżką: {model_path}", flush=True)
     if not model_path.endswith('_checkpoint.pth'):
@@ -173,7 +155,7 @@ def encode_mask_to_base64(cropped_mask):
     print("Błąd podczas kodowania maski do base64.", flush=True)
     return None
 
-def save_labelme_json(image_path, image_name, predictions, orig_width, orig_height, output_dir, class_mapping):
+def save_labelme_json(image_path, image_name, predictions, orig_width, orig_height, output_dir, custom_label):
     output_image_path = os.path.join(output_dir, f"{image_name}.jpg")
     try:
         # Wczytaj obraz i upewnij się, że jest w formacie RGB (24 bity, 8 bitów na kanał)
@@ -222,14 +204,13 @@ def save_labelme_json(image_path, image_name, predictions, orig_width, orig_heig
                 print(f"Nie udało się zakodować maski dla {image_name}, obiekt {idx}.", flush=True)
                 continue
 
-            # Przypisz etykietę na podstawie indeksu klasy i mapowania
-            label = class_mapping.get(label_idx, "unknown")
-            if label == "background":
+            # Używamy etykiety przekazanej przez użytkownika
+            if label_idx == 0:
                 print(f"Pominięto obiekt {idx} w {image_name} - etykieta to 'background'.", flush=True)
                 continue
 
             shape = {
-                "label": label,
+                "label": custom_label,
                 "points": [
                     [float(x_min), float(y_min)],
                     [float(x_max), float(y_max)]
@@ -241,7 +222,7 @@ def save_labelme_json(image_path, image_name, predictions, orig_width, orig_heig
                 "mask": mask_base64
             }
             json_data["shapes"].append(shape)
-            print(f"Dodano kształt dla {image_name}, obiekt {idx}: etykieta={label}, score={score:.2f}", flush=True)
+            print(f"Dodano kształt dla {image_name}, obiekt {idx}: etykieta={custom_label}, score={score:.2f}", flush=True)
 
     json_path = os.path.join(output_dir, f"{image_name}.json")
     try:
@@ -258,13 +239,10 @@ def main():
     parser.add_argument("--output_dir", type=str, required=True, help="Ścieżka do katalogu na obrazy z detekcjami")
     parser.add_argument("--debug_dir", type=str, default="", help="Ścieżka do katalogu na obrazy z adnotacjami (opcjonalne)")
     parser.add_argument("--model_path", type=str, required=True, help="Ścieżka do pliku modelu z końcówką _checkpoint.pth")
+    parser.add_argument("--custom_label", type=str, required=True, help="Etykieta do użycia dla wykrytych obiektów")
     args = parser.parse_args()
 
-    print(f"Argumenty: input_dir={args.input_dir}, output_dir={args.output_dir}, debug_dir={args.debug_dir}, model_path={args.model_path}", flush=True)
-
-    # Określ mapowanie klas na podstawie modelu
-    class_mapping = get_class_mapping(args.model_path)
-    print(f"Używam mapowania klas: {class_mapping}", flush=True)
+    print(f"Argumenty: input_dir={args.input_dir}, output_dir={args.output_dir}, debug_dir={args.debug_dir}, model_path={args.model_path}, custom_label={args.custom_label}", flush=True)
 
     try:
         os.makedirs(args.output_dir, exist_ok=True)
@@ -291,7 +269,7 @@ def main():
         try:
             image_tensor_list, image, orig_width, orig_height = preprocess_image(image_path)
             predictions = predict(model, image_tensor_list)
-            save_labelme_json(image_path, image_name, predictions, orig_width, orig_height, args.output_dir, class_mapping)
+            save_labelme_json(image_path, image_name, predictions, orig_width, orig_height, args.output_dir, args.custom_label)
             total_detections += len([s for s in predictions['scores'] if s >= CONFIDENCE_THRESHOLD])
             processed_images += 1
             print(f"Detections dla {image_path}: {len([s for s in predictions['scores'] if s >= CONFIDENCE_THRESHOLD])}", flush=True)

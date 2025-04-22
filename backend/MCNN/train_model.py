@@ -133,7 +133,7 @@ def train_model(args):
     model.to(device)
 
     train_dataset = ImageDataset(os.path.join(train_dir, "images"), coco_train_path, transform=data_transforms)
-    val_dataset = ImageDataset(os.path.join('/app/backend/MCNN/dataset', 'val', 'images'), coco_val_path, transform=data_transforms)
+    val_dataset = ImageDataset(os.path.join('/app/backend/data', 'val', 'images'), coco_val_path, transform=data_transforms)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size or 3, shuffle=True, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size or 3, shuffle=False, pin_memory=True)

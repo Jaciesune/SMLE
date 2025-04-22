@@ -18,7 +18,7 @@ def main():
     if login.exec_() == QtWidgets.QDialog.Accepted:
         user_role = login.accepted_role
         main_window = MainWindow(user_role)
-        main_window.showMaximized()
+        main_window.showFullScreen()
 
     sys.exit(app.exec_())
 

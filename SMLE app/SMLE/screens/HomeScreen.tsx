@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, PermissionsAndroid, Platform, FlatList, Modal, Alert } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity, PermissionsAndroid, Platform, FlatList, Modal, Alert, ActivityIndicator } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { launchCamera, launchImageLibrary, ImagePickerResponse, Asset } from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -70,6 +70,7 @@ const HomeScreen: React.FC = () => {
     photosAfter: string[];
   } | null>(null);
   const [apiUrl, setApiUrl] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
 
   // Wczytaj API_URL i przekieruj na Settings, jeśli nie ma zapisanego IP
   useEffect(() => {
@@ -77,6 +78,7 @@ const HomeScreen: React.FC = () => {
 
     const initializeApiUrl = async () => {
       try {
+        setLoading(true);
         const url = await getApiUrl();
         if (isMounted) {
           setApiUrl(url);
@@ -90,6 +92,10 @@ const HomeScreen: React.FC = () => {
         console.log('Błąd podczas inicjalizacji API_URL:', error);
         if (isMounted) {
           Alert.alert('Błąd', 'Nie udało się zainicjalizować adresu API.');
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
         }
       }
     };
@@ -109,9 +115,10 @@ const HomeScreen: React.FC = () => {
       if (!apiUrl) return;
 
       try {
+        setLoading(true);
         console.log('Pobieranie algorytmów z:', `${apiUrl}/detect_algorithms`);
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // Timeout 10 sekund
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
         const response = await fetch(`${apiUrl}/detect_algorithms`, {
           method: 'GET',
           headers: {
@@ -120,7 +127,7 @@ const HomeScreen: React.FC = () => {
           },
           signal: controller.signal,
         });
-        clearTimeout(timeoutId); // Wyczyść timeout
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           throw new Error(`Błąd HTTP: ${response.status} - ${response.statusText}`);
@@ -143,6 +150,10 @@ const HomeScreen: React.FC = () => {
         if (isMounted) {
           Alert.alert('Błąd', `Nie udało się pobrać listy algorytmów: ${errorMessage}`);
         }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
@@ -161,13 +172,14 @@ const HomeScreen: React.FC = () => {
       if (!selectedAlgorithm || !apiUrl) return;
 
       try {
+        setLoading(true);
         console.log('Pobieranie modeli z:', `${apiUrl}/detect_model_versions/${selectedAlgorithm}`);
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // Timeout 10 sekund
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
         const response = await fetch(`${apiUrl}/detect_model_versions/${selectedAlgorithm}`, {
           signal: controller.signal,
         });
-        clearTimeout(timeoutId); // Wyczyść timeout
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           throw new Error(`Błąd HTTP: ${response.status}`);
@@ -190,6 +202,10 @@ const HomeScreen: React.FC = () => {
           Alert.alert('Błąd', `Nie udało się pobrać listy modeli dla ${selectedAlgorithm}: ${errorMessage}`);
           setSelectedModel(null);
         }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
@@ -202,6 +218,7 @@ const HomeScreen: React.FC = () => {
 
   const loadPhotoHistory = async () => {
     try {
+      setLoading(true);
       const storedPhotos = await AsyncStorage.getItem('photoHistory');
       const parsedPhotos = storedPhotos ? JSON.parse(storedPhotos) as string[] : [];
       setPhotoHistory(parsedPhotos);
@@ -209,6 +226,8 @@ const HomeScreen: React.FC = () => {
       console.log('Błąd podczas ładowania historii zdjęć:', error);
       Alert.alert('Błąd', 'Nie udało się wczytać historii zdjęć.');
       setPhotoHistory([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -230,6 +249,7 @@ const HomeScreen: React.FC = () => {
 
       const fetchHistory = async () => {
         try {
+          setLoading(true);
           const storedPhotos = await AsyncStorage.getItem('photoHistory');
           const parsedPhotos = storedPhotos ? JSON.parse(storedPhotos) as string[] : [];
           if (isActive) {
@@ -240,6 +260,10 @@ const HomeScreen: React.FC = () => {
           if (isActive) {
             Alert.alert('Błąd', 'Nie udało się wczytać historii zdjęć.');
             setPhotoHistory([]);
+          }
+        } finally {
+          if (isActive) {
+            setLoading(false);
           }
         }
       };
@@ -256,13 +280,16 @@ const HomeScreen: React.FC = () => {
     if (!uri) return;
 
     try {
-      const updatedHistory = [...new Set([uri, ...photoHistory])].slice(0, 10); // Usuwamy duplikaty za pomocą Set
+      setLoading(true);
+      const updatedHistory = [...new Set([uri, ...photoHistory])].slice(0, 10);
       await AsyncStorage.setItem('photoHistory', JSON.stringify(updatedHistory));
       setPhotoHistory(updatedHistory);
       console.log('Zapisano zdjęcie do historii:', uri);
     } catch (error) {
       console.log('Błąd podczas zapisywania zdjęcia:', error);
       Alert.alert('Błąd', 'Nie udało się zapisać zdjęcia do historii.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -275,6 +302,7 @@ const HomeScreen: React.FC = () => {
     model: string;
   }) => {
     try {
+      setLoading(true);
       const storedHistory = await AsyncStorage.getItem('analysisHistory');
       const history = storedHistory ? JSON.parse(storedHistory) as AnalysisResult[] : [];
       const newEntry: AnalysisResult = {
@@ -293,6 +321,8 @@ const HomeScreen: React.FC = () => {
     } catch (error) {
       console.log('Błąd podczas zapisywania historii analizy:', error);
       Alert.alert('Błąd', 'Nie udało się zapisać historii analizy.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -350,19 +380,40 @@ const HomeScreen: React.FC = () => {
   const takePhoto = async () => {
     const cameraGranted = await requestCameraPermission();
     const storageGranted = await requestStoragePermission();
-
+  
     if (cameraGranted && storageGranted) {
-      launchCamera({ mediaType: 'photo', saveToPhotos: true }, (response: ImagePickerResponse) => {
+      launchCamera({ mediaType: 'photo', saveToPhotos: true }, async (response: ImagePickerResponse) => {
         if (response.didCancel) {
           console.log('Anulowano robienie zdjęcia');
         } else if (response.errorCode) {
           console.log('Błąd podczas robienia zdjęcia:', response.errorMessage);
           Alert.alert('Błąd', `Nie udało się zrobić zdjęcia: ${response.errorMessage}`);
         } else if (response.assets) {
-          const uri = response.assets[0]?.uri;
-          if (uri) {
-            setPhotos((prev) => [...prev, uri]);
-            savePhotoToHistory(uri);
+          const asset = response.assets[0];
+          if (asset.uri) {
+            let persistentUri = asset.uri;
+            if (Platform.OS === 'android') {
+              try {
+                const fileName = `original_${Date.now()}.jpg`;
+                const mediaStoreResponse = await ReactNativeBlobUtil.MediaCollection.copyToMediaStore(
+                  {
+                    name: fileName,
+                    parentFolder: 'SMLE/Originals',
+                    mimeType: 'image/jpeg',
+                  },
+                  'Image',
+                  asset.uri
+                );
+                persistentUri = mediaStoreResponse;
+                console.log('Zdjęcie zapisane w MediaStore:', persistentUri);
+              } catch (error) {
+                console.log('Błąd zapisu zdjęcia do MediaStore:', error);
+                Alert.alert('Błąd', 'Nie udało się zapisać zdjęcia w galerii.');
+                return;
+              }
+            }
+            setPhotos((prev) => [...prev, persistentUri]);
+            savePhotoToHistory(persistentUri);
           }
         }
       });
@@ -370,21 +421,45 @@ const HomeScreen: React.FC = () => {
       Alert.alert('Błąd', 'Brak uprawnień do aparatu lub pamięci.');
     }
   };
-
+  
   const pickPhotos = async () => {
     const storageGranted = await requestStoragePermission();
-
+  
     if (storageGranted) {
-      launchImageLibrary({ mediaType: 'photo', selectionLimit: 0 }, (response: ImagePickerResponse) => {
+      launchImageLibrary({ mediaType: 'photo', selectionLimit: 0 }, async (response: ImagePickerResponse) => {
         if (response.didCancel) {
           console.log('Anulowano wybieranie zdjęć');
         } else if (response.errorCode) {
           console.log('Błąd podczas wybierania zdjęć:', response.errorMessage);
           Alert.alert('Błąd', `Nie udało się wybrać zdjęć: ${response.errorMessage}`);
         } else if (response.assets) {
-          const uris = response.assets
-            .map((asset: Asset) => asset.uri)
-            .filter((uri): uri is string => uri !== undefined);
+          const uris: string[] = [];
+          for (const asset of response.assets) {
+            if (asset.uri) {
+              let persistentUri = asset.uri;
+              if (Platform.OS === 'android') {
+                try {
+                  const fileName = `original_${Date.now()}_${uris.length}.jpg`;
+                  const mediaStoreResponse = await ReactNativeBlobUtil.MediaCollection.copyToMediaStore(
+                    {
+                      name: fileName,
+                      parentFolder: 'SMLE/Originals',
+                      mimeType: 'image/jpeg',
+                    },
+                    'Image',
+                    asset.uri
+                  );
+                  persistentUri = mediaStoreResponse;
+                  console.log('Zdjęcie zapisane w MediaStore:', persistentUri);
+                } catch (error) {
+                  console.log('Błąd zapisu zdjęcia do MediaStore:', error);
+                  Alert.alert('Błąd', 'Nie udało się zapisać zdjęcia w galerii.');
+                  continue;
+                }
+              }
+              uris.push(persistentUri);
+            }
+          }
           setPhotos((prev) => [...prev, ...uris]);
           uris.forEach((uri) => savePhotoToHistory(uri));
         }
@@ -425,6 +500,7 @@ const HomeScreen: React.FC = () => {
     }
 
     try {
+      setLoading(true);
       const analysisPromises = photos.map(async (photo, index) => {
         const formData = new FormData();
         formData.append('image', {
@@ -438,13 +514,13 @@ const HomeScreen: React.FC = () => {
         console.log('Wysyłanie żądania detekcji dla zdjęcia:', photo);
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // Timeout 15 sekund
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         const response = await fetch(`${apiUrl}/detect_image`, {
           method: 'POST',
           body: formData,
           signal: controller.signal,
         });
-        clearTimeout(timeoutId); // Wyczyść timeout
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
@@ -530,6 +606,8 @@ const HomeScreen: React.FC = () => {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.log('Błąd podczas analizy:', errorMessage);
       Alert.alert('Błąd', `Nie udało się przeprowadzić analizy: ${errorMessage}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -570,6 +648,12 @@ const HomeScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#00A1D6" />
+          <Text style={styles.loadingText}>Ładowanie...</Text>
+        </View>
+      )}
       <Modal
         animationType="slide"
         transparent={true}
@@ -672,7 +756,7 @@ const HomeScreen: React.FC = () => {
         <TouchableOpacity
           style={[styles.analyzeButton, { opacity: availableModels.length > 0 && selectedModel ? 1 : 0.5 }]}
           onPress={startAnalysis}
-          disabled={!availableModels.length || !selectedModel}
+          disabled={!availableModels.length || !selectedModel || loading}
         >
           <Text style={styles.buttonText}>Rozpocznij analizę</Text>
         </TouchableOpacity>
@@ -865,6 +949,22 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 16,
     marginTop: 5,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    zIndex: 1000,
+  },
+  loadingText: {
+    color: '#FFF',
+    fontSize: 16,
+    marginTop: 10,
   },
 });
 

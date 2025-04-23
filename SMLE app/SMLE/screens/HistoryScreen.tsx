@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, Dimensions } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, Image, Dimensions, Alert, TouchableOpacity, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -16,21 +16,32 @@ type AnalysisResult = {
 
 const HistoryScreen: React.FC = () => {
   const [history, setHistory] = useState<AnalysisResult[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
 
   const loadHistory = async () => {
+    setLoading(true);
     try {
       const storedHistory = await AsyncStorage.getItem('analysisHistory');
+      console.log('Surowa historia z AsyncStorage:', storedHistory);
       if (storedHistory) {
         const parsedHistory = JSON.parse(storedHistory);
+        console.log('Sparowana historia:', parsedHistory);
         const validHistory = parsedHistory.filter((item: AnalysisResult) => {
-          return (
+          const isValid =
             item &&
             Array.isArray(item.photosBefore) &&
             Array.isArray(item.photosAfter) &&
             Array.isArray(item.pipesDetected) &&
             item.photosBefore.length === item.photosAfter.length &&
-            item.photosBefore.length === item.pipesDetected.length
-          );
+            item.photosBefore.length === item.pipesDetected.length &&
+            typeof item.totalPipes === 'number' &&
+            typeof item.algorithm === 'string' &&
+            typeof item.model === 'string' &&
+            typeof item.timestamp === 'string';
+          if (!isValid) {
+            console.log('Nieprawidłowy wpis w historii:', item);
+          }
+          return isValid;
         });
         setHistory(validHistory);
         console.log('Załadowano historię:', validHistory);
@@ -40,7 +51,10 @@ const HistoryScreen: React.FC = () => {
       }
     } catch (error) {
       console.log('Błąd podczas ładowania historii analizy:', error);
+      Alert.alert('Błąd', 'Nie udało się wczytać historii. Spróbuj ponownie.');
       setHistory([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -49,24 +63,57 @@ const HistoryScreen: React.FC = () => {
   }, []);
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadHistory();
     }, [])
   );
 
-  const renderPhotoPair = (photoBefore: string, photoAfter: string, index: number, pipes: number) => (
-    <View key={index} style={styles.imageContainer}>
-      <View style={styles.imageWrapper}>
-        <Text style={styles.imageLabel}>Przed</Text>
-        <Image source={{ uri: photoBefore }} style={styles.image} />
+  const checkUriExists = async (uri: string): Promise<boolean> => {
+    try {
+      const response = await fetch(uri);
+      return response.ok;
+    } catch (error) {
+      console.log(`Błąd sprawdzania URI ${uri}:`, error);
+      return false;
+    }
+  };
+
+  const renderPhotoPair = (photoBefore: string, photoAfter: string, index: number, pipes: number) => {
+    const [beforeUriValid, setBeforeUriValid] = useState<boolean>(false);
+    const [afterUriValid, setAfterUriValid] = useState<boolean>(false);
+
+    useEffect(() => {
+      const validateUris = async () => {
+        const beforeValid = await checkUriExists(photoBefore);
+        const afterValid = await checkUriExists(photoAfter);
+        setBeforeUriValid(beforeValid);
+        setAfterUriValid(afterValid);
+      };
+      validateUris();
+    }, [photoBefore, photoAfter]);
+
+    return (
+      <View key={index} style={styles.imageContainer}>
+        <View style={styles.imageWrapper}>
+          <Text style={styles.imageLabel}>Przed</Text>
+          {beforeUriValid ? (
+            <Image source={{ uri: photoBefore }} style={styles.image} onError={() => setBeforeUriValid(false)} />
+          ) : (
+            <Text style={styles.errorText}>Zdjęcie niedostępne</Text>
+          )}
+        </View>
+        <View style={styles.imageWrapper}>
+          <Text style={styles.imageLabel}>Po</Text>
+          {afterUriValid ? (
+            <Image source={{ uri: photoAfter }} style={styles.image} onError={() => setAfterUriValid(false)} />
+          ) : (
+            <Text style={styles.errorText}>Zdjęcie niedostępne</Text>
+          )}
+        </View>
+        <Text style={styles.statsText}>Zdjęcie {index + 1}: {pipes} rur</Text>
       </View>
-      <View style={styles.imageWrapper}>
-        <Text style={styles.imageLabel}>Po</Text>
-        <Image source={{ uri: photoAfter }} style={styles.image} />
-      </View>
-      <Text style={styles.statsText}>Zdjęcie {index + 1}: {pipes} rur</Text>
-    </View>
-  );
+    );
+  };
 
   const renderHistoryItem = ({ item }: { item: AnalysisResult }) => (
     <View style={styles.historyItem}>
@@ -93,7 +140,12 @@ const HistoryScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {history.length === 0 ? (
+      {loading ? (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#00A1D6" />
+          <Text style={styles.loadingText}>Ładowanie historii...</Text>
+        </View>
+      ) : history.length === 0 ? (
         <Text style={styles.emptyText}>Brak wyników w historii.</Text>
       ) : (
         <FlatList
@@ -174,6 +226,22 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingBottom: 20,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    zIndex: 1000,
+  },
+  loadingText: {
+    color: '#FFF',
+    fontSize: 16,
+    marginTop: 10,
   },
 });
 

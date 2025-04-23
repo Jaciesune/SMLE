@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -16,6 +16,7 @@ const App = () => {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   // Stan dla domyślnego modelu (dla SettingsScreen)
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
+
 
   return (
     <NavigationContainer>

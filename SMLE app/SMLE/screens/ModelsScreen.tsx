@@ -201,8 +201,8 @@ const ModelsScreen: React.FC<Props> = ({ setSelectedModel }) => {
     <View style={styles.container}>
       <Text style={styles.title}>Lista modeli</Text>
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FFD700" />
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#00A1D6" />
           <Text style={styles.loadingText}>Ładowanie modeli...</Text>
         </View>
       ) : sections.length === 0 ? (
@@ -271,10 +271,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#FFF',
   },
-  loadingContainer: {
-    flex: 1,
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    zIndex: 1000,
   },
   loadingText: {
     color: '#FFF',

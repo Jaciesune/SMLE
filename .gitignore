@@ -47,13 +47,13 @@ checkpoints/
 
 
 # 📷 Tymczasowe pliki obrazów i logów
-# *.log
-# logs/
+*.log
+logs/
 *.png
 *.jpg
-# *.jpeg
-# *.gif
-# *.bmp
+*.jpeg
+*.gif
+*.bmp
 
 # 🔬 Debug i testy
 debug.log
@@ -78,3 +78,5 @@ backend/Inne/data/
 backend/Inne/Auto_Labeling/images_annotations
 backend/Inne/Auto_Labeling/images_before
 backend/Inne/Auto_Labeling/images_debug
+
+node_modules

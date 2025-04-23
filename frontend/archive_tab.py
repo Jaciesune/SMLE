@@ -1,9 +1,11 @@
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets
+import requests
 
 class ArchiveTab(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
+        self.load_archive_data()  # Załaduj dane z archiwum przy starcie
 
     def init_ui(self):
         # Główny layout
@@ -13,18 +15,11 @@ class ArchiveTab(QtWidgets.QWidget):
 
         # Tabela dla Archiwum
         self.archive_table = QtWidgets.QTableWidget()
-        self.archive_table.setRowCount(1)  # Dodajemy 1 wiersz (przykładowy wpis)
-        self.archive_table.setColumnCount(5)  # 5 kolumn: Model, Algorytm, Operacja, Data, Użytkownik
+        self.archive_table.setRowCount(0)  # Rozpoczynamy od pustej tabeli
+        self.archive_table.setColumnCount(4)  # 5 kolumn: Model, Algorytm, Operacja, Data, Użytkownik
 
         # Ustawiamy nagłówki kolumn
-        self.archive_table.setHorizontalHeaderLabels(["Model", "Algorytm", "Operacja", "Data", "Użytkownik"])
-
-        # Wypełniamy tabelę przykładowymi danymi
-        self.archive_table.setItem(0, 0, QtWidgets.QTableWidgetItem("Model Testowy CNN"))
-        self.archive_table.setItem(0, 1, QtWidgets.QTableWidgetItem("CNN"))
-        self.archive_table.setItem(0, 2, QtWidgets.QTableWidgetItem("Zliczanie"))
-        self.archive_table.setItem(0, 3, QtWidgets.QTableWidgetItem("08:13 08.03.2025"))
-        self.archive_table.setItem(0, 4, QtWidgets.QTableWidgetItem("Uzytkownik_TEST"))
+        self.archive_table.setHorizontalHeaderLabels(["Model", "Operacja", "Data", "Użytkownik"])
 
         # Zablokowanie edytowania danych
         self.archive_table.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
@@ -40,7 +35,6 @@ class ArchiveTab(QtWidgets.QWidget):
         self.archive_table.setColumnWidth(1, 200)
         self.archive_table.setColumnWidth(2, 200)
         self.archive_table.setColumnWidth(3, 200)
-        self.archive_table.setColumnWidth(4, 200)
 
         # Włączamy rozciąganie tabeli, aby zajmowała całą przestrzeń
         self.archive_table.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -58,6 +52,29 @@ class ArchiveTab(QtWidgets.QWidget):
 
         self.setLayout(layout)
 
+    def load_archive_data(self):
+        """Pobiera dane z archiwum z API backendu i wyświetla je w tabeli"""
+        try:
+            response = requests.get("http://localhost:8000/archives")  # Poprawiony URL API
+            response.raise_for_status()  # Sprawdzenie, czy odpowiedź jest poprawna
+
+            archive_data = response.json()
+            self.display_archive_data(archive_data)  # 🔥 Wywołujemy funkcję wyświetlania danych
+        except requests.exceptions.RequestException as e:
+            QtWidgets.QMessageBox.warning(self, "Błąd", f"Nie udało się pobrać danych: {e}")
+
+    def display_archive_data(self, archive_data):
+        """Wypełnia tabelę danymi z archiwum"""
+        self.archive_table.setRowCount(len(archive_data))
+        for row, record in enumerate(archive_data):
+            # Przypisanie danych do odpowiednich kolumn
+            # Należy założyć, że backend zwrócił również `model_name` i `user_name` na podstawie `model_id` i `user_id`
+            self.archive_table.setItem(row, 0, QtWidgets.QTableWidgetItem(str(record["model_id"])))  # Model
+            self.archive_table.setItem(row, 1, QtWidgets.QTableWidgetItem(record["action"]))  # Operacja
+            self.archive_table.setItem(row, 2, QtWidgets.QTableWidgetItem(record["date"]))  # Data
+            self.archive_table.setItem(row, 3, QtWidgets.QTableWidgetItem(str(record["user_id"])))  # Użytkownik
+            
     def view_details(self):
-        # Funkcja przenosząca do szczegółów (implementacja zależna od wymagań)
+        """Funkcja przenosząca do szczegółów (implementacja zależna od wymagań)"""
         QtWidgets.QMessageBox.information(self, "Szczegóły", "Wyświetlanie szczegółów operacji...")
+

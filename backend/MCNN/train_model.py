@@ -112,11 +112,11 @@ def train_model(args):
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     model_name = args.model_name or f"train_{timestamp}"
-    nazwa_modelu = f"{model_name}_{timestamp}_checkpoint"
+    nazwa_modelu = f"{model_name}_{timestamp}"
 
-    os.makedirs(f"/app/logs/train/{nazwa_modelu}", exist_ok=True)
-    os.makedirs(f"/app/logs/val/{nazwa_modelu}", exist_ok=True)
-    os.makedirs("/app/MCNN/models", exist_ok=True)
+    os.makedirs(f"/app/backend/logs/train/{nazwa_modelu}", exist_ok=True)
+    os.makedirs(f"/app/backend/logs/val/{nazwa_modelu}", exist_ok=True)
+    os.makedirs("/app/backend/MCNN/models", exist_ok=True)
 
     train_dir = args.train_dir
     val_dir = os.path.join(train_dir, "..", "val")
@@ -133,7 +133,7 @@ def train_model(args):
     model.to(device)
 
     train_dataset = ImageDataset(os.path.join(train_dir, "images"), coco_train_path, transform=data_transforms)
-    val_dataset = ImageDataset(os.path.join('/app/MCNN/dataset', 'val', 'images'), coco_val_path, transform=data_transforms)
+    val_dataset = ImageDataset(os.path.join('/app/backend/data', 'val', 'images'), coco_val_path, transform=data_transforms)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size or 3, shuffle=True, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size or 3, shuffle=False, pin_memory=True)
@@ -157,33 +157,46 @@ def train_model(args):
                 val_loss += loss.item()
         logger.info(f'Validation Loss: {val_loss / len(val_loader):.4f}')
 
-    for epoch in range(args.epochs):
-        start_time = time.time()
-        model.train()
-        running_loss = 0.0
-        for i, (inputs, density_maps) in enumerate(train_loader):
-            inputs, density_maps = inputs.to(device), density_maps.to(device)
-            optimizer.zero_grad()
-            with autocast(device_type='cuda' if torch.cuda.is_available() else 'cpu'):
-                outputs = model(inputs)
-                loss = criterion(outputs, density_maps) + 0.1 * ssim_loss(outputs, density_maps)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            running_loss += loss.item()
+    try:
+        for epoch in range(args.epochs):
+            start_time = time.time()
+            model.train()
+            running_loss = 0.0
+            for i, (inputs, density_maps) in enumerate(train_loader):
+                inputs, density_maps = inputs.to(device), density_maps.to(device)
+                optimizer.zero_grad()
+                with autocast(device_type='cuda' if torch.cuda.is_available() else 'cpu'):
+                    outputs = model(inputs)
+                    loss = criterion(outputs, density_maps) + 0.1 * ssim_loss(outputs, density_maps)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                running_loss += loss.item()
 
-            if i % 10 == 0:
-                logger.info(f'Epoch {epoch+1}/{args.epochs}, Batch {i+1}/{len(train_loader)}, Loss: {running_loss/10:.4f}')
-                running_loss = 0.0
+                if i % 10 == 0:
+                    logger.info(f'Epoch {epoch+1}/{args.epochs}, Batch {i+1}/{len(train_loader)}, Loss: {running_loss/10:.4f}')
+                    running_loss = 0.0
 
-        validate(model, val_loader, criterion, device)
-        epoch_time = time.time() - start_time
-        logger.info(f"Epoch {epoch+1} took {epoch_time:.2f} seconds.")
-        clear_memory()
+            validate(model, val_loader, criterion, device)
+            epoch_time = time.time() - start_time
+            logger.info(f"Epoch {epoch+1} took {epoch_time:.2f} seconds.")
 
-    model_path = f"/app/MCNN/models/{nazwa_modelu}.pth"
-    torch.save(model.state_dict(), model_path)
-    logger.info(f"Model zapisany jako: {model_path}")
+            if (epoch + 1) % 10 == 0:
+                save_path = f"/app/backend/MCNN/models/{nazwa_modelu}_epoch_{epoch+1}_checkpoint.pth"
+                torch.save(model.state_dict(), save_path)
+                logger.info(f"Zapisano checkpoint: {save_path}")
+
+            clear_memory()
+
+        model_path = f"/app/backend/MCNN/models/{nazwa_modelu}_final_checkpoint.pth"
+        torch.save(model.state_dict(), model_path)
+        logger.info(f"Model zapisany jako: {model_path}")
+
+    except Exception as e:
+        logger.exception("Błąd podczas treningu! Zapisuję awaryjny checkpoint...")
+        emergency_path = f"/app/backend/MCNN/models/{nazwa_modelu}_emergency_checkpoint.pth"
+        torch.save(model.state_dict(), emergency_path)
+        logger.info(f"Awaryjny model zapisany jako: {emergency_path}")
 
 # === GŁÓWNE WYWOŁANIE ===
 if __name__ == "__main__":
@@ -196,6 +209,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=3)
     parser.add_argument('--coco_train_path', required=True)
     parser.add_argument('--coco_gt_path', required=True)
+    parser.add_argument('--num_augmentations', type=int, default=1, help="Liczba augmentacji (na razie nieużywana)")
     args = parser.parse_args()
 
     logger.debug("Arguments received: %s", sys.argv)

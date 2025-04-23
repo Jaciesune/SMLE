@@ -1,5 +1,7 @@
 import sys
 import os
+
+from models_tab import get_db_connection, router as models_router
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 import time
@@ -63,6 +65,7 @@ auto_label_api = AutoLabelAPI()
 app.include_router(auto_label_router)
 app.include_router(dataset_router)
 app.include_router(detection_router)
+app.include_router(models_router)
 
 class LoginRequest(BaseModel):
     username: str
@@ -92,9 +95,49 @@ class TrainingRequest(BaseModel):
 def login(request: LoginRequest):
     auth_response = verify_credentials(request.username, request.password)
     if auth_response:
-        return {"role": auth_response["role"]}
+        # Zwracamy pełne dane, w tym username i role
+        return {"role": auth_response["role"], "username": auth_response["username"]}
     else:
         raise HTTPException(status_code=401, detail="Nieprawidłowe dane logowania")
+
+@app.get("/models")
+def get_models():
+    """Endpoint do pobierania listy modeli z bazy danych"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # Zapytanie SQL, aby pobrać dane o modelach
+        cursor.execute("SELECT id, name, algorithm, version, accuracy, creation_date, training_date, status FROM model")
+        models = cursor.fetchall()  # Pobieramy wszystkie modele
+    except mysql.connector.Error as err:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Błąd zapytania: {err}")
+    
+    cursor.close()
+    conn.close()
+    
+    return models
+
+@app.get("/archives")
+def get_models():
+    """Endpoint do pobierania listy archive z bazy danych"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # Zapytanie SQL, aby pobrać dane o modelach
+        cursor.execute("SELECT id, action, user_id, model_id, date  FROM archive")
+        models = cursor.fetchall()  # Pobieramy wszystkie modele
+    except mysql.connector.Error as err:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Błąd zapytania: {err}")
+    
+    cursor.close()
+    conn.close()
+    
+    return models
+
 
 @app.post("/train")
 def train(request: TrainingRequest):

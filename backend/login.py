@@ -41,5 +41,5 @@ def verify_credentials(username: str, password: str):
     if user["status"] != 'active':
         raise HTTPException(status_code=403, detail="Konto nieaktywne")
 
-    # Zwracamy rolę użytkownika z bazy danych
-    return {"success": True, "role": user["role"]}
+    # Zwracamy dane użytkownika (rola i nazwa użytkownika)
+    return {"success": True, "role": user["role"], "username": user["username"]}

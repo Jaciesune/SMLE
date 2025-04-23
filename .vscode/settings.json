@@ -4,5 +4,6 @@
         "./backend/Controllers",
         "./backend/Models",
         "./backend"
-    ]
+    ],
+    "python.analysis.autoImportCompletions": false
 }

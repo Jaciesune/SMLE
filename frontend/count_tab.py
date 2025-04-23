@@ -9,11 +9,13 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class CountTab(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, username):  
         super().__init__()
+        self.username = username    
         self.current_image_path = None
-        self.api_url = "http://localhost:8000"  # Zmień na "http://host.docker.internal:8000" jeśli WSL2
+        self.api_url = "http://localhost:8000"
         self.init_ui()
+
 
     def init_ui(self):
         # Główny układ poziomy
@@ -140,11 +142,11 @@ class CountTab(QtWidgets.QWidget):
             return
 
         try:
-            logger.debug("Wysyłam żądanie do %s/detect_image: algorithm=%s, model_version=%s",
+            logger.debug("Wysyłam żądanie do %s/detect_image: algorithm=%s, model_version=%s, username=%s",
                          self.api_url, algorithm, model_version)
             with open(self.current_image_path, "rb") as image_file:
                 files = {"image": (os.path.basename(self.current_image_path), image_file, "image/jpeg")}
-                data = {"algorithm": algorithm, "model_version": model_version}
+                data = {"algorithm": algorithm, "model_version": model_version, "username": self.username}
                 response = requests.post(f"{self.api_url}/detect_image", files=files, data=data)
                 response.raise_for_status()
 

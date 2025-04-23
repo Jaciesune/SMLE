@@ -155,57 +155,26 @@ def encode_mask_to_base64(cropped_mask):
     print("Błąd podczas kodowania maski do base64.", flush=True)
     return None
 
-def save_image_with_annotations(image_name, image, predictions, orig_width, orig_height, debug_dir):
-    print(f"Rysuję wyniki detekcji dla {image_name}...", flush=True)
-    image_np = np.array(image)
-    boxes = rescale_boxes(predictions['boxes'], orig_width, orig_height)
-    masks = rescale_masks(predictions.get('masks', []), orig_width, orig_height)
-
-    detections_count = 0
-    for idx, (box, score, mask) in enumerate(zip(boxes, predictions['scores'], masks)):
-        if score >= CONFIDENCE_THRESHOLD:
-            x_min, y_min, x_max, y_max = map(int, box)
-            # Usunięto: print(f"Raw bbox dla {image_name}: ({x_min}, {y_min}, {x_max}, {y_max})", flush=True)
-            cv2.rectangle(image_np, (x_min, y_min), (x_max, y_max), (0, 255, 0), 1)
-            cv2.putText(image_np, f"Score: {score:.2f}", (x_min, y_min - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-
-            x_min = max(0, x_min)
-            y_min = max(0, y_min)
-            x_max = min(orig_width, x_max)
-            y_max = min(orig_height, y_max)
-
-            if x_max <= x_min or y_max <= y_min:
-                print(f"Pominięto nieprawidłowy bbox dla {image_name}, obiekt {idx}.", flush=True)
-                continue
-
-            cropped_mask = mask[y_min:y_max, x_min:x_max]
-            full_mask = np.zeros((orig_height, orig_width), dtype=np.uint8)
-            full_mask[y_min:y_max, x_min:x_max] = cropped_mask
-
-            contours, _ = cv2.findContours(full_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(image_np, contours, -1, (0, 0, 255), 2)
-
-            detections_count += 1
-
-    image_path = os.path.join(debug_dir, f"{image_name}_annotated.jpg")
-    try:
-        success = cv2.imwrite(image_path, cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR))
-        if success:
-            print(f"Zapisano obraz z adnotacjami do: {image_path}", flush=True)
-        else:
-            print(f"Błąd: Nie udało się zapisać obrazu {image_path}.", flush=True)
-    except Exception as e:
-        print(f"Błąd podczas zapisywania obrazu z adnotacjami {image_path}: {e}", flush=True)
-    return detections_count
-
-def save_labelme_json(image_path, image_name, predictions, orig_width, orig_height, output_dir):
+def save_labelme_json(image_path, image_name, predictions, orig_width, orig_height, output_dir, custom_label):
     output_image_path = os.path.join(output_dir, f"{image_name}.jpg")
     try:
-        shutil.copy(image_path, output_image_path)
-        print(f"Skopiowano obraz do: {output_image_path}", flush=True)
+        # Wczytaj obraz i upewnij się, że jest w formacie RGB (24 bity, 8 bitów na kanał)
+        image = Image.open(image_path).convert("RGB")  # Konwersja do RGB (usunięcie kanału alfa, jeśli istnieje)
+        image_array = np.array(image)
+
+        # Sprawdź głębię bitową i upewnij się, że jest 24-bitowa (8 bitów na kanał, 3 kanały)
+        if image_array.dtype != np.uint8:
+            print(f"Konwertuję głębię bitową obrazu {image_path} z {image_array.dtype} na uint8...", flush=True)
+            image_array = image_array.astype(np.uint8)
+
+        # Zapisz obraz jako JPEG
+        success = cv2.imwrite(output_image_path, cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR))
+        if not success:
+            print(f"Błąd: Nie udało się zapisać obrazu {output_image_path}.", flush=True)
+            return
+        print(f"Zapisano obraz w formacie RGB do: {output_image_path}", flush=True)
     except Exception as e:
-        print(f"Błąd podczas kopiowania obrazu do {output_image_path}: {e}", flush=True)
+        print(f"Błąd podczas zapisywania obrazu do {output_image_path}: {e}", flush=True)
         return
 
     json_data = {
@@ -220,8 +189,9 @@ def save_labelme_json(image_path, image_name, predictions, orig_width, orig_heig
 
     boxes = rescale_boxes(predictions['boxes'], orig_width, orig_height)
     masks = rescale_masks(predictions.get('masks', []), orig_width, orig_height)
+    labels = predictions['labels'].cpu().numpy()  # Pobierz indeksy klas z predykcji
 
-    for idx, (box, score, mask) in enumerate(zip(boxes, predictions['scores'], masks)):
+    for idx, (box, score, mask, label_idx) in enumerate(zip(boxes, predictions['scores'], masks, labels)):
         if score >= CONFIDENCE_THRESHOLD:
             x_min, y_min, x_max, y_max = box
             cropped_mask = crop_mask_to_bbox(mask, box, orig_width, orig_height, image_name, idx)
@@ -234,8 +204,13 @@ def save_labelme_json(image_path, image_name, predictions, orig_width, orig_heig
                 print(f"Nie udało się zakodować maski dla {image_name}, obiekt {idx}.", flush=True)
                 continue
 
+            # Używamy etykiety przekazanej przez użytkownika
+            if label_idx == 0:
+                print(f"Pominięto obiekt {idx} w {image_name} - etykieta to 'background'.", flush=True)
+                continue
+
             shape = {
-                "label": "pipe",
+                "label": custom_label,
                 "points": [
                     [float(x_min), float(y_min)],
                     [float(x_max), float(y_max)]
@@ -247,6 +222,7 @@ def save_labelme_json(image_path, image_name, predictions, orig_width, orig_heig
                 "mask": mask_base64
             }
             json_data["shapes"].append(shape)
+            print(f"Dodano kształt dla {image_name}, obiekt {idx}: etykieta={custom_label}, score={score:.2f}", flush=True)
 
     json_path = os.path.join(output_dir, f"{image_name}.json")
     try:
@@ -261,17 +237,17 @@ def main():
     parser = argparse.ArgumentParser(description="Automatyczne labelowanie katalogu zdjęć przy użyciu Mask R-CNN")
     parser.add_argument("--input_dir", type=str, required=True, help="Ścieżka do katalogu z obrazami wejściowymi")
     parser.add_argument("--output_dir", type=str, required=True, help="Ścieżka do katalogu na obrazy z detekcjami")
-    parser.add_argument("--debug_dir", type=str, required=True, help="Ścieżka do katalogu na obrazy z adnotacjami")
+    parser.add_argument("--debug_dir", type=str, default="", help="Ścieżka do katalogu na obrazy z adnotacjami (opcjonalne)")
     parser.add_argument("--model_path", type=str, required=True, help="Ścieżka do pliku modelu z końcówką _checkpoint.pth")
+    parser.add_argument("--custom_label", type=str, required=True, help="Etykieta do użycia dla wykrytych obiektów")
     args = parser.parse_args()
 
-    print(f"Argumenty: input_dir={args.input_dir}, output_dir={args.output_dir}, debug_dir={args.debug_dir}, model_path={args.model_path}", flush=True)
+    print(f"Argumenty: input_dir={args.input_dir}, output_dir={args.output_dir}, debug_dir={args.debug_dir}, model_path={args.model_path}, custom_label={args.custom_label}", flush=True)
 
     try:
         os.makedirs(args.output_dir, exist_ok=True)
-        os.makedirs(args.debug_dir, exist_ok=True)
     except Exception as e:
-        print(f"Błąd podczas tworzenia katalogów: {e}", flush=True)
+        print(f"Błąd podczas tworzenia katalogu wyjściowego: {e}", flush=True)
         sys.exit(1)
 
     try:
@@ -293,24 +269,19 @@ def main():
         try:
             image_tensor_list, image, orig_width, orig_height = preprocess_image(image_path)
             predictions = predict(model, image_tensor_list)
-            save_labelme_json(image_path, image_name, predictions, orig_width, orig_height, args.output_dir)
-            detections_count = save_image_with_annotations(image_name, image, predictions, orig_width, orig_height, args.debug_dir)
-            total_detections += detections_count
+            save_labelme_json(image_path, image_name, predictions, orig_width, orig_height, args.output_dir, args.custom_label)
+            total_detections += len([s for s in predictions['scores'] if s >= CONFIDENCE_THRESHOLD])
             processed_images += 1
-            print(f"Detections dla {image_path}: {detections_count}", flush=True)
+            print(f"Detections dla {image_path}: {len([s for s in predictions['scores'] if s >= CONFIDENCE_THRESHOLD])}", flush=True)
         except Exception as e:
             print(f"Błąd podczas przetwarzania obrazu {image_path}: {e}", flush=True)
             continue
 
     output_files = os.listdir(args.output_dir)
-    debug_files = os.listdir(args.debug_dir)
     print(f"Zawartość katalogu wyjściowego {args.output_dir}: {output_files}", flush=True)
-    print(f"Zawartość katalogu debug {args.debug_dir}: {debug_files}", flush=True)
 
     if not output_files:
         print(f"Ostrzeżenie: Katalog wyjściowy {args.output_dir} jest pusty!", flush=True)
-    if not debug_files:
-        print(f"Ostrzeżenie: Katalog debug {args.debug_dir} jest pusty!", flush=True)
 
     print(f"Przetworzono obrazów: {processed_images}, Całkowita liczba detekcji: {total_detections}", flush=True)
     print("Automatyczne labelowanie zakończone!", flush=True)

@@ -42,8 +42,9 @@ class TrainingThread(QtCore.QThread):
         self.wait(2000)
 
 class TrainTab(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, username):
         super().__init__()
+        self.username = username  
         self.train_api = TrainAPI()
         self.training_thread = None
         self.DEFAULT_VAL_PATH = os.getenv("DEFAULT_VAL_PATH", "/app/backend/data/val")
@@ -215,13 +216,14 @@ class TrainTab(QtWidgets.QWidget):
             "--coco_train_path", coco_train_path,
             "--coco_gt_path", coco_val_path,
             "--host_train_path", train_path,
-            "--num_augmentations", str(backend_augmentations)
+            "--num_augmentations", str(backend_augmentations),
+            "--username", self.username,
         ]
         if val_path:
             args.extend(["--host_val_path", val_path])
+            args.extend(["--val_dir", container_val_path.as_posix()])  # Dodajemy --val_dir
 
         if model_version != "Nowy model":
-            # Przekazujemy tylko nazwę modelu, bez pełnej ścieżki
             logger.info(f"Wybrano model do doszkolenia: {model_version}")
             args.extend(["--resume", model_version])
         else:

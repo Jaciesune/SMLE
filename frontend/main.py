@@ -17,8 +17,10 @@ def main():
     login = LoginDialog()
     if login.exec_() == QtWidgets.QDialog.Accepted:
         user_role = login.accepted_role
-        main_window = MainWindow(user_role)
+        user_name = login.accepted_username
+        main_window = MainWindow(user_role, user_name)
         main_window.showNormal()
+
 
     sys.exit(app.exec_())
 

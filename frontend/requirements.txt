@@ -1,2 +1,4 @@
 PyQt5==5.15.6
 requests
+opencv-python
+Pillow

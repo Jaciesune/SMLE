@@ -2,6 +2,10 @@ import os
 import cv2
 import numpy as np
 from config import CONFIDENCE_THRESHOLD, MAX_BOX_AREA_RATIO, MAX_ASPECT_RATIO
+import sys
+
+sys.stdout.reconfigure(encoding='utf-8')
+
 
 def filter_and_draw_boxes(image_np, boxes, scores, image_size):
     h_img, w_img = image_size

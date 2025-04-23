@@ -109,7 +109,7 @@ class TrainAPI:
         num_augmentations = "0"
         epochs = "0"
         model_name = ""
-        username = "" 
+        username = ""
 
         for i in range(0, len(args), 2):
             if args[i] == "--train_dir":
@@ -127,7 +127,6 @@ class TrainAPI:
             elif args[i] == "--username":
                 self.username = args[i + 1]
 
-  
         if not train_dir or not host_train_path or not os.path.exists(host_train_path):
             yield f"Błąd: Niepoprawna ścieżka do danych treningowych."
             return
@@ -168,17 +167,26 @@ class TrainAPI:
             args = list(args_list)
             if key in args:
                 idx = args.index(key)
-                # Usuń klucz i wartość
                 del args[idx:idx+2]
             return args
 
+        # Dodajemy --val_dir do listy argumentów do usunięcia
         filtered_args = list(args)
-        for arg_name in ["--host_train_path", "--host_val_path", "--username"]:
+        for arg_name in ["--host_train_path", "--host_val_path", "--username", "--val_dir"]:
             filtered_args = remove_arg_pair(filtered_args, arg_name)
 
-
         try:
-            command = ["docker", "exec", "-e", "PYTHONUNBUFFERED=1", self.container_name, "python", f"/app/backend/{algorithm}/{script_name}"]
+            if algorithm == "Mask R-CNN":
+                script_path = f"/app/backend/Mask_RCNN/scripts/{script_name}"
+            elif algorithm == "MCNN":
+                script_path = f"/app/backend/MCNN/{script_name}"
+            elif algorithm == "FasterRCNN":
+                script_path = f"/app/backend/FasterRCNN/{script_name}"
+            else:
+                yield f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
+                return
+
+            command = ["docker", "exec", "-e", "PYTHONUNBUFFERED=1", self.container_name, "python", script_path]
             command.extend(filtered_args)
             yield f"Uruchamiam trening z {num_augmentations} augmentacjami na obraz..."
 
@@ -219,7 +227,6 @@ class TrainAPI:
             stderr_thread.join()
 
             if process.returncode == 0:
-                # Po zakończeniu treningu, wysyłamy dane do models_tab
                 try:
                     requests.post("http://localhost:8000/models/add", json={
                         "name": model_name,

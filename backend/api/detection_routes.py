@@ -83,7 +83,7 @@ async def detect_image(
                 else:
                     raise Exception(f"Nie znaleziono użytkownika: {username}")
                 # Wyciągnij nazwę modelu przed pierwszym podkreśleniem
-                short_model_name = model_version.split('_')[0]
+                short_model_name = model_version.split('_checkpoint')[0]
 
                 # Pobierz model_id na podstawie skróconej nazwy i algorytmu
                 cur.execute("SELECT id FROM model WHERE name = %s AND algorithm = %s", (short_model_name, algorithm))

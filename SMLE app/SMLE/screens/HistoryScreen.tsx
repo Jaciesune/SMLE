@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, Dimensions, Alert, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, Dimensions, Alert, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import ReactNativeBlobUtil from 'react-native-blob-util';
 
 type AnalysisResult = {
   id: string;
@@ -14,6 +15,54 @@ type AnalysisResult = {
   timestamp: string;
 };
 
+type PhotoPairProps = {
+  photoBefore: string;
+  photoAfter: string;
+  index: number;
+  pipes: number;
+};
+
+const PhotoPair: React.FC<PhotoPairProps> = ({ photoBefore, photoAfter, index, pipes }) => {
+  const [beforeUriValid, setBeforeUriValid] = useState<boolean>(true); // Zakładamy, że URI jest poprawne na start
+  const [afterUriValid, setAfterUriValid] = useState<boolean>(true);
+
+  return (
+    <View key={index} style={styles.imageContainer}>
+      <View style={styles.imageWrapper}>
+        <Text style={styles.imageLabel}>Przed</Text>
+        {beforeUriValid ? (
+          <Image
+            source={{ uri: photoBefore }}
+            style={styles.image}
+            onError={(e) => {
+              console.log(`Błąd ładowania zdjęcia Before ${index + 1}:`, e.nativeEvent.error);
+              setBeforeUriValid(false);
+            }}
+          />
+        ) : (
+          <Text style={styles.errorText}>Zdjęcie niedostępne</Text>
+        )}
+      </View>
+      <View style={styles.imageWrapper}>
+        <Text style={styles.imageLabel}>Po</Text>
+        {afterUriValid ? (
+          <Image
+            source={{ uri: photoAfter }}
+            style={styles.image}
+            onError={(e) => {
+              console.log(`Błąd ładowania zdjęcia After ${index + 1}:`, e.nativeEvent.error);
+              setAfterUriValid(false);
+            }}
+          />
+        ) : (
+          <Text style={styles.errorText}>Zdjęcie niedostępne</Text>
+        )}
+      </View>
+      <Text style={styles.statsText}>Zdjęcie {index + 1}: {pipes} rur</Text>
+    </View>
+  );
+};
+
 const HistoryScreen: React.FC = () => {
   const [history, setHistory] = useState<AnalysisResult[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -23,9 +72,17 @@ const HistoryScreen: React.FC = () => {
     try {
       const storedHistory = await AsyncStorage.getItem('analysisHistory');
       console.log('Surowa historia z AsyncStorage:', storedHistory);
+
       if (storedHistory) {
-        const parsedHistory = JSON.parse(storedHistory);
+        let parsedHistory: AnalysisResult[];
+        try {
+          parsedHistory = JSON.parse(storedHistory);
+        } catch (parseError) {
+          console.log('Błąd parsowania JSON:', parseError);
+          throw new Error('Nieprawidłowy format danych w AsyncStorage.');
+        }
         console.log('Sparowana historia:', parsedHistory);
+
         const validHistory = parsedHistory.filter((item: AnalysisResult) => {
           const isValid =
             item &&
@@ -68,75 +125,32 @@ const HistoryScreen: React.FC = () => {
     }, [])
   );
 
-  const checkUriExists = async (uri: string): Promise<boolean> => {
-    try {
-      const response = await fetch(uri);
-      return response.ok;
-    } catch (error) {
-      console.log(`Błąd sprawdzania URI ${uri}:`, error);
-      return false;
-    }
-  };
-
-  const renderPhotoPair = (photoBefore: string, photoAfter: string, index: number, pipes: number) => {
-    const [beforeUriValid, setBeforeUriValid] = useState<boolean>(false);
-    const [afterUriValid, setAfterUriValid] = useState<boolean>(false);
-
-    useEffect(() => {
-      const validateUris = async () => {
-        const beforeValid = await checkUriExists(photoBefore);
-        const afterValid = await checkUriExists(photoAfter);
-        setBeforeUriValid(beforeValid);
-        setAfterUriValid(afterValid);
-      };
-      validateUris();
-    }, [photoBefore, photoAfter]);
-
+  const renderHistoryItem = ({ item }: { item: AnalysisResult }) => {
+    console.log('Renderowanie elementu historii:', item);
     return (
-      <View key={index} style={styles.imageContainer}>
-        <View style={styles.imageWrapper}>
-          <Text style={styles.imageLabel}>Przed</Text>
-          {beforeUriValid ? (
-            <Image source={{ uri: photoBefore }} style={styles.image} onError={() => setBeforeUriValid(false)} />
-          ) : (
-            <Text style={styles.errorText}>Zdjęcie niedostępne</Text>
-          )}
+      <View style={styles.historyItem}>
+        <Text style={styles.timestamp}>{new Date(item.timestamp).toLocaleString()}</Text>
+        {Array.isArray(item.photosBefore) && item.photosBefore.length > 0 ? (
+          item.photosBefore.map((photoBefore, index) => (
+            <PhotoPair
+              key={index}
+              photoBefore={photoBefore}
+              photoAfter={item.photosAfter[index]}
+              index={index}
+              pipes={item.pipesDetected[index]}
+            />
+          ))
+        ) : (
+          <Text style={styles.errorText}>Brak zdjęć dla tej analizy.</Text>
+        )}
+        <View style={styles.statsContainer}>
+          <Text style={styles.statsText}>Łącznie: {item.totalPipes} rur</Text>
+          <Text style={styles.statsText}>Algorytm: {item.algorithm}</Text>
+          <Text style={styles.statsText}>Model: {item.model}</Text>
         </View>
-        <View style={styles.imageWrapper}>
-          <Text style={styles.imageLabel}>Po</Text>
-          {afterUriValid ? (
-            <Image source={{ uri: photoAfter }} style={styles.image} onError={() => setAfterUriValid(false)} />
-          ) : (
-            <Text style={styles.errorText}>Zdjęcie niedostępne</Text>
-          )}
-        </View>
-        <Text style={styles.statsText}>Zdjęcie {index + 1}: {pipes} rur</Text>
       </View>
     );
   };
-
-  const renderHistoryItem = ({ item }: { item: AnalysisResult }) => (
-    <View style={styles.historyItem}>
-      <Text style={styles.timestamp}>{new Date(item.timestamp).toLocaleString()}</Text>
-      {Array.isArray(item.photosBefore) && item.photosBefore.length > 0 ? (
-        item.photosBefore.map((photoBefore, index) =>
-          renderPhotoPair(
-            photoBefore,
-            item.photosAfter[index],
-            index,
-            item.pipesDetected[index]
-          )
-        )
-      ) : (
-        <Text style={styles.errorText}>Brak zdjęć dla tej analizy.</Text>
-      )}
-      <View style={styles.statsContainer}>
-        <Text style={styles.statsText}>Łącznie: {item.totalPipes} rur</Text>
-        <Text style={styles.statsText}>Algorytm: {item.algorithm}</Text>
-        <Text style={styles.statsText}>Model: {item.model}</Text>
-      </View>
-    </View>
-  );
 
   return (
     <View style={styles.container}>

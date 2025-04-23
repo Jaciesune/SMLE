@@ -304,7 +304,11 @@ const HomeScreen: React.FC = () => {
     try {
       setLoading(true);
       const storedHistory = await AsyncStorage.getItem('analysisHistory');
+      console.log('Odczytano historię z AsyncStorage:', storedHistory);
+  
       const history = storedHistory ? JSON.parse(storedHistory) as AnalysisResult[] : [];
+      console.log('Sparowana historia:', history);
+  
       const newEntry: AnalysisResult = {
         id: Date.now().toString(),
         photosBefore: result.photosBefore,
@@ -315,8 +319,15 @@ const HomeScreen: React.FC = () => {
         model: result.model,
         timestamp: new Date().toISOString(),
       };
+      console.log('Nowy wpis do zapisania:', newEntry);
+  
       const updatedHistory = [newEntry, ...history].slice(0, 50);
-      await AsyncStorage.setItem('analysisHistory', JSON.stringify(updatedHistory));
+      console.log('Zaktualizowana historia przed zapisem:', updatedHistory);
+  
+      const serializedHistory = JSON.stringify(updatedHistory);
+      console.log('Rozmiar zserializowanej historii (bajty):', new TextEncoder().encode(serializedHistory).length);
+  
+      await AsyncStorage.setItem('analysisHistory', serializedHistory);
       console.log('Zapisano analizę do historii:', newEntry);
     } catch (error) {
       console.log('Błąd podczas zapisywania historii analizy:', error);
@@ -325,7 +336,6 @@ const HomeScreen: React.FC = () => {
       setLoading(false);
     }
   };
-
   const requestCameraPermission = async () => {
     if (Platform.OS === 'android') {
       try {
@@ -479,7 +489,7 @@ const HomeScreen: React.FC = () => {
       navigation.navigate('Settings');
       return;
     }
-
+  
     if (photos.length === 0) {
       Alert.alert('Błąd', 'Proszę wybrać co najmniej jedno zdjęcie przed rozpoczęciem analizy.');
       return;
@@ -492,13 +502,13 @@ const HomeScreen: React.FC = () => {
       Alert.alert('Błąd', 'Proszę wybrać model do analizy.');
       return;
     }
-
+  
     const storageGranted = await requestStoragePermission();
     if (!storageGranted) {
       Alert.alert('Błąd', 'Brak uprawnień do zapisu na urządzeniu.');
       return;
     }
-
+  
     try {
       setLoading(true);
       const analysisPromises = photos.map(async (photo, index) => {
@@ -510,9 +520,9 @@ const HomeScreen: React.FC = () => {
         } as any);
         formData.append('algorithm', selectedAlgorithm);
         formData.append('model_version', selectedModel);
-
+  
         console.log('Wysyłanie żądania detekcji dla zdjęcia:', photo);
-
+  
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
         const response = await fetch(`${apiUrl}/detect_image`, {
@@ -521,67 +531,70 @@ const HomeScreen: React.FC = () => {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
-
+  
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
           throw new Error(errorData.detail || `Błąd podczas analizy zdjęcia: ${response.status}`);
         }
-
+  
         const detectionsCount = parseInt(response.headers.get('X-Detections-Count') || '0', 10);
-
+  
         const tempFileName = `temp_${Date.now()}_${index}.jpg`;
         const tempFilePath = `${ReactNativeBlobUtil.fs.dirs.CacheDir}/${tempFileName}`;
-
+  
         const arrayBuffer = await response.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
         const binaryString = uint8Array.reduce((acc, byte) => acc + String.fromCharCode(byte), '');
         const base64Image = encode(binaryString);
-
+  
         await ReactNativeBlobUtil.fs.writeFile(tempFilePath, base64Image, 'base64');
         console.log('Zdjęcie tymczasowe zapisane w:', tempFilePath);
-
+  
         const fileName = `${detectionsCount}_rur_${Date.now()}_${index}.jpg`;
-        let finalFilePath;
-
+        let finalUri;
+  
         if (Platform.OS === 'android') {
           const mediaStoreResponse = await ReactNativeBlobUtil.MediaCollection.copyToMediaStore(
             {
               name: fileName,
-              parentFolder: 'SMLE',
+              parentFolder: 'SMLE/Processed',
               mimeType: 'image/jpeg',
             },
             'Image',
             tempFilePath
           );
           console.log('Zdjęcie zapisane w galerii przez Media Store:', mediaStoreResponse);
-          finalFilePath = mediaStoreResponse;
+          finalUri = mediaStoreResponse;
         } else {
-          finalFilePath = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/${fileName}`;
-          await ReactNativeBlobUtil.fs.writeFile(finalFilePath, base64Image, 'base64');
+          finalUri = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/${fileName}`;
+          await ReactNativeBlobUtil.fs.writeFile(finalUri, base64Image, 'base64');
         }
-
+  
         await ReactNativeBlobUtil.fs.unlink(tempFilePath).catch((err) => {
           console.log('Błąd podczas usuwania pliku tymczasowego:', err);
         });
-
+  
         return {
           detectionsCount,
-          base64Image: `data:image/jpeg;base64,${base64Image}`,
+          finalUri,
         };
       });
-
+  
       const results = await Promise.all(analysisPromises);
-
+  
       const pipesDetected = results.map((result) => result.detectionsCount);
-      const photosAfter = results.map((result) => result.base64Image);
+      const photosAfter = results.map((result) => result.finalUri);
       const totalPipes = pipesDetected.reduce((sum, count) => sum + count, 0);
-
+  
+      console.log('Photos Before (przed zapisem do historii):', photos);
+      console.log('Photos After (przed zapisem do historii):', photosAfter);
+  
       setAnalysisResult({
         pipesDetected,
         totalPipes,
         photosAfter,
       });
-
+  
       await saveAnalysisToHistory({
         photosBefore: photos,
         photosAfter,
@@ -590,7 +603,7 @@ const HomeScreen: React.FC = () => {
         algorithm: selectedAlgorithm,
         model: selectedModel,
       });
-
+  
       PushNotification.localNotification({
         channelId: 'smle-analysis-channel',
         title: 'Analiza zakończona',
@@ -600,7 +613,7 @@ const HomeScreen: React.FC = () => {
         vibrate: true,
         vibration: 300,
       });
-
+  
       setModalVisible(true);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -610,7 +623,6 @@ const HomeScreen: React.FC = () => {
       setLoading(false);
     }
   };
-
   const closeModal = () => {
     setModalVisible(false);
     setAnalysisResult(null);

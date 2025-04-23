@@ -1,22 +1,28 @@
 import torch
+import sys
 
-def train_one_epoch(model, dataloader, optimizer, device, epoch):
+sys.stdout.reconfigure(encoding='utf-8')
+
+def train_one_epoch(model, train_loader, optimizer, device, epoch):
     model.train()
-    total_loss = 0
-    print(f"\nEpoka {epoch}... (Batchy: {len(dataloader)})")
+    total_loss = 0.0
+    for images, targets in train_loader:
+        if images is None or targets is None:
+            print("Ostrzeżenie: pominięto partię z powodu None w obrazach lub targetach.")
+            continue
 
-    for batch_idx, (images, targets) in enumerate(dataloader):
-        images = [img.to(device) for img in images]
-        new_targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        images = list(image.to(device) for image in images)
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-        loss_dict = model(images, new_targets)
-        loss = sum(loss for loss in loss_dict.values())
+        # Konwersja i normalizacja obrazów tutaj, bezpośrednio przed przekazaniem do modelu
+        images = [(image.float() / 255.0) for image in images]
 
         optimizer.zero_grad()
-        loss.backward()
+        loss_dict = model(images, targets)
+        losses = sum(loss for loss in loss_dict.values())
+        losses.backward()
         optimizer.step()
 
-        total_loss += loss.item()
-        print(f"Batch {batch_idx+1}/{len(dataloader)} - Strata: {loss.item():.4f}")
+        total_loss += losses.item()
 
-    return total_loss / len(dataloader)
+    return total_loss / len(train_loader) if len(train_loader) > 0 else 0.0

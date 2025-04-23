@@ -26,7 +26,7 @@ def get_model_versions(algorithm: str):
     versions = detection_api.get_model_versions(algorithm)
     logger.debug("Zwracam wersje modeli dla %s: %s", algorithm, versions)
     return versions
-
+    
 @router.post("/detect_image")
 async def detect_image(
     algorithm: str = Form(...),

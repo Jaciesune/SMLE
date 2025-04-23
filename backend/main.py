@@ -7,10 +7,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 import time
 import mysql.connector
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware  # Dodaj import
 from pydantic import BaseModel
 from login import verify_credentials
 from users_tab import get_users, create_user
-
 
 from api.detection_api import DetectionAPI
 from api.auto_label_api import AutoLabelAPI
@@ -18,7 +18,6 @@ from api.auto_label_routes import router as auto_label_router
 from api.dataset_routes import router as dataset_router
 from api.detection_routes import router as detection_router
 
-from glob import glob
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
@@ -50,10 +49,19 @@ if not wait_for_db():
 
 app = FastAPI()
 
+# Dodaj middleware CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Zezwól na wszystkie pochodzenia (dla testów)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 detection_api = DetectionAPI()
 auto_label_api = AutoLabelAPI()
 
-# Rejestracja routera z auto_label_routes
+# Rejestracja routerów
 app.include_router(auto_label_router)
 app.include_router(dataset_router)
 app.include_router(detection_router)

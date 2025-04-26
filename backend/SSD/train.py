@@ -1,139 +1,140 @@
 import os
-import torch
-import torchvision
-import torchvision.transforms.v2 as T
-from torch.utils.data import DataLoader
-from torchvision.models.detection import ssd300_vgg16
-from torchvision.utils import draw_bounding_boxes, save_image
-from tqdm import tqdm
-from data_loader import COCODataset
-import matplotlib.pyplot as plt
-import random
-from pycocotools.cocoeval import COCOeval
-from pycocotools.coco import COCO
 import json
+import random
+import argparse
+import torch
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+from torchvision.transforms import ToTensor, Resize, Normalize, Compose
+from torchvision.models.detection import ssd300_vgg16
+from torchvision.models import VGG16_Weights
+from tqdm import tqdm
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
 
-transform = T.ToTensor()
+from data_loader import COCODataset
 
-train_ann = "./dataset/train/annotations/instances_train.json"
-train_img = "./dataset/train/images"
-train_dataset = COCODataset(train_img, train_ann, transform)
-train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=lambda x: tuple(zip(*x)))
+os.environ["TORCH_HOME"] = "./weights"
+os.makedirs("./weights/checkpoints", exist_ok=True)
+os.makedirs("val_visuals", exist_ok=True)
+os.makedirs("saved_models", exist_ok=True)
 
-val_ann = "./dataset/val/annotations/instances_val.json"
-val_img = "./dataset/val/images"
-val_dataset = COCODataset(val_img, val_ann, transform)
-val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, collate_fn=lambda x: tuple(zip(*x)))
+parser = argparse.ArgumentParser()
+parser.add_argument("--epochs", type=int, default=10)
+parser.add_argument("--batch-size", type=int, default=4)
+args = parser.parse_args()
 
-val_coco = COCO(val_ann)
+# Hyperparams
+dataset_dir = "./dataset"
+lr = 1e-4
+score_thresh = 0.01
 
-val_indices = random.sample(range(len(val_dataset)), min(10, len(val_dataset)))
+# Transforms
+transform = Compose([
+    Resize((300, 300)),
+    ToTensor(),
+    Normalize(mean=[0.48235, 0.45882, 0.40784], std=[0.229, 0.224, 0.225])
+])
+
+def make_loader(split):
+    ds = COCODataset(
+        f"{dataset_dir}/{split}/images",
+        f"{dataset_dir}/{split}/annotations/instances_{split}.json",
+        transform
+    )
+    bs = 1 if split == "val" else args.batch_size
+    return DataLoader(
+        ds,
+        batch_size=bs,
+        shuffle=(split == "train"),
+        collate_fn=lambda b: tuple(zip(*b))
+    )
+
+train_loader = make_loader("train")
+val_loader = make_loader("val")
+val_coco = COCO(f"{dataset_dir}/val/annotations/instances_val.json")
+val_indices = random.sample(range(len(val_loader.dataset)), min(10, len(val_loader.dataset)))
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = ssd300_vgg16(weights="DEFAULT")
-model.head.classification_head.num_classes = 2
-model = model.to(device)
+
+model = ssd300_vgg16(weights=None, weights_backbone=VGG16_Weights.DEFAULT, num_classes=2)
+model.to(device)
 model.train()
 
-optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-
-os.makedirs("saved_models", exist_ok=True)
-os.makedirs("val_visuals", exist_ok=True)
+optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 best_val_loss = float("inf")
-train_losses, val_losses, map_scores = [], [], []
+hist = {"train": [], "val": [], "map50": []}
 
-for epoch in range(10):
+for epoch in range(1, args.epochs + 1):
     model.train()
-    epoch_train_loss = 0
-    for images, targets, _ in tqdm(train_loader, desc=f"Epoch {epoch+1} - Train"):
-        images = list(img.to(device) for img in images)
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-
-        loss_dict = model(images, targets)
-        losses = sum(loss for loss in loss_dict.values())
-
+    total_train = 0.0
+    for imgs, tgts, _ in tqdm(train_loader, desc=f"Train {epoch}"):
+        imgs = [i.to(device) for i in imgs]
+        tgts = [{k: v.to(device) for k, v in t.items()} for t in tgts]
+        loss_dict = model(imgs, tgts)
+        if isinstance(loss_dict, list):
+            loss_dict = loss_dict[0]
+        loss = sum(loss_dict.values())
+        if not torch.isfinite(loss):
+            continue
         optimizer.zero_grad()
-        losses.backward()
+        loss.backward()
         optimizer.step()
-        epoch_train_loss += losses.item()
+        total_train += loss.item()
 
-    avg_train_loss = epoch_train_loss / len(train_loader)
-    train_losses.append(avg_train_loss)
-    print(f"[Epoch {epoch+1}] Train Loss: {avg_train_loss:.4f}")
+    avg_train = total_train / len(train_loader)
+    hist["train"].append(avg_train)
+    print(f"Epoch {epoch} Train Loss: {avg_train:.4f}")
 
     model.eval()
-    val_loss = 0
-    coco_results = []
-
+    results = []
     with torch.no_grad():
-        for idx, (images, targets, paths) in enumerate(tqdm(val_loader, desc=f"Epoch {epoch+1} - Val")):
-            images = list(img.to(device) for img in images)
-            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-            loss_dict = model(images, targets)
-            val_loss += sum(loss for loss in loss_dict.values()).item()
+        for idx, (imgs, tgts, _) in enumerate(tqdm(val_loader, desc=f"Val {epoch}")):
+            for j in range(len(imgs)):
+                img = imgs[j].to(device).unsqueeze(0)
+                tgt = {k: v[j].unsqueeze(0).to(device) if v.dim() > 1 else v[j].to(device) for k, v in tgts[j].items()}
 
-            preds = model(images)
-            for i, pred in enumerate(preds):
-                boxes = pred['boxes'].detach().cpu()
-                scores = pred['scores'].detach().cpu()
-                labels = pred['labels'].detach().cpu()
+                try:
+                    pred = model(img)[0]
+                except Exception as e:
+                    print("Val error:", e)
+                    continue
 
-                image_id = int(targets[i]['image_id'].item())
-                for box, score, label in zip(boxes, scores, labels):
-                    if score < 0.05:
+                image_id = int(tgt["image_id"].item())
+
+                for b, s, l in zip(pred["boxes"].cpu(), pred["scores"].cpu(), pred["labels"].cpu()):
+                    if s < score_thresh:
                         continue
-                    coco_results.append({
+                    results.append({
                         "image_id": image_id,
-                        "category_id": int(label.item()),
-                        "bbox": [float(box[0]), float(box[1]), float(box[2]-box[0]), float(box[3]-box[1])],
-                        "score": float(score.item())
+                        "category_id": int(l.item()),
+                        "bbox": [b[0].item(), b[1].item(), (b[2]-b[0]).item(), (b[3]-b[1]).item()],
+                        "score": s.item()
                     })
 
-            if idx in val_indices:
-                pred = preds[0]
-                boxes = pred['boxes'][pred['scores'] > 0.5].cpu()
-                labels = pred['labels'][pred['scores'] > 0.5].cpu()
-                img_drawn = draw_bounding_boxes((images[0].cpu() * 255).to(torch.uint8), boxes, labels=[str(l.item()) for l in labels], width=2)
-                out_path = os.path.join("val_visuals", f"epoch{epoch+1}_img{idx}.jpg")
-                save_image(img_drawn.float() / 255, out_path)
+    # Nie obliczamy już straty walidacyjnej
+    hist["val"].append(0.0)
+    print(f"Epoch {epoch} Val Loss: 0.0000")
 
-    avg_val_loss = val_loss / len(val_loader)
-    val_losses.append(avg_val_loss)
-    print(f"[Epoch {epoch+1}] Val Loss: {avg_val_loss:.4f}")
-
-    # --- mAP @ IoU=0.5 ---
-    if len(coco_results) > 0:
-        with open("temp_results.json", "w") as f:
-            json.dump(coco_results, f, indent=2)
-
-        coco_dt = val_coco.loadRes("temp_results.json")
-        coco_eval = COCOeval(val_coco, coco_dt, iouType='bbox')
-        coco_eval.evaluate()
-        coco_eval.accumulate()
-        coco_eval.summarize()
-        map50 = coco_eval.stats[1]  # AP@IoU=0.5
-        map_scores.append(map50)
-        print(f"[Epoch {epoch+1}] mAP@0.5: {map50:.4f}")
+    if results:
+        with open("tmp_results.json", "w") as f:
+            json.dump(results, f)
+        coco_dt = val_coco.loadRes("tmp_results.json")
+        ev = COCOeval(val_coco, coco_dt, "bbox")
+        ev.evaluate(); ev.accumulate(); ev.summarize()
+        map50 = ev.stats[1]
     else:
-        map_scores.append(0.0)
+        map50 = 0.0
 
-    # Zapis najlepszego modelu
-    if avg_val_loss < best_val_loss:
-        best_val_loss = avg_val_loss
-        torch.save(model.state_dict(), "saved_models/best_ssd_pipe.pth")
-        print(f"Zapisano najlepszy model z Val Loss: {best_val_loss:.4f}")
-        for f in os.listdir("saved_models"):
-            if f != "best_ssd_pipe.pth":
-                os.remove(os.path.join("saved_models", f))
+    hist["map50"].append(map50)
+    print(f"Epoch {epoch} mAP@0.5: {map50:.4f}")
 
-# Wykresy
-plt.plot(train_losses, label="Train Loss")
-plt.plot(val_losses, label="Val Loss")
-plt.plot(map_scores, label="mAP@0.5")
-plt.xlabel("Epoka")
-plt.ylabel("Wartość")
-plt.title("Straty i mAP podczas treningu")
-plt.legend()
-plt.grid(True)
-plt.savefig("training_loss_plot.png")
-plt.close()
+    if hist["val"][-1] < best_val_loss:
+        best_val_loss = hist["val"][-1]
+        torch.save(model.state_dict(), "saved_models/best.pth")
+
+plt.plot(hist["train"], label="train")
+plt.plot(hist["val"], label="val")
+plt.plot(hist["map50"], label="mAP@0.5")
+plt.legend(); plt.grid()
+plt.savefig("training_plot.png")

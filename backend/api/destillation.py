@@ -10,12 +10,7 @@ from torchvision.transforms import functional as TF
 from torchvision.datasets import CocoDetection
 from tqdm import tqdm
 from torchvision.models.detection.backbone_utils import BackboneWithFPN
-from torchvision.models.detection import MaskRCNN
-from torchvision.models.detection import MaskRCNN
-from torchvision.models.detection import maskrcnn_resnet50_fpn_v2
-from torchvision.models import resnet18
-from torchvision.models.detection.backbone_utils import BackboneWithFPN
-from torchvision.models.detection import MaskRCNN
+from torchvision.models.detection import MaskRCNN, maskrcnn_resnet50_fpn_v2
 
 # Ścieżki do danych i modeli
 MODELS_DIR = "backend/Mask_RCNN/models"
@@ -26,8 +21,7 @@ TRAIN_ANNOTATIONS_PATH = "backend/data/train/annotations/instances_train.json"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def list_available_models():
-    models = [f for f in os.listdir(MODELS_DIR) if f.endswith(".pth")]
-    return models
+    return [f for f in os.listdir(MODELS_DIR) if f.endswith(".pth")]
 
 def load_teacher_model(model_path):
     model = maskrcnn_resnet50_fpn_v2(weights=None)
@@ -39,6 +33,7 @@ def load_teacher_model(model_path):
     )
 
     checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+    
     if "model_state_dict" in checkpoint:
         checkpoint = checkpoint["model_state_dict"]
 
@@ -49,57 +44,36 @@ def load_teacher_model(model_path):
 
 def create_student_model():
     backbone = resnet18(weights="IMAGENET1K_V1")
-
     backbone_with_fpn = BackboneWithFPN(
         backbone,
-        return_layers={
-            'layer1': '0',
-            'layer2': '1',
-            'layer3': '2',
-            'layer4': '3'
-        },
-        in_channels_list=[64, 128, 256, 512],  # dla ResNet18 poprawne kanały
+        return_layers={'layer1': '0', 'layer2': '1', 'layer3': '2', 'layer4': '3'},
+        in_channels_list=[64, 128, 256, 512],
         out_channels=256
     )
-
     model = MaskRCNN(backbone_with_fpn, num_classes=2)
     model.to(device)
-    model.train()
     return model
 
 class CocoTrainDataset(CocoDetection):
     def __init__(self, img_folder, ann_file):
-        super(CocoTrainDataset, self).__init__(img_folder, ann_file)
+        super().__init__(img_folder, ann_file)
     
     def __getitem__(self, idx):
-        img, target = super(CocoTrainDataset, self).__getitem__(idx)
+        img, target = super().__getitem__(idx)
         img = TF.to_tensor(img)
         target = self.prepare_target(target)
         return img, target
 
     def prepare_target(self, target):
-        # Tworzymy target kompatybilny z MaskRCNN
-        boxes = []
-        labels = []
-        masks = []
+        boxes, labels = [], []
         for obj in target:
             boxes.append(obj["bbox"])
             labels.append(obj["category_id"])
-            # maska może być generowana jeśli masz segmentation (tu uproszczenie)
 
-        if boxes:
-            boxes = torch.tensor(boxes, dtype=torch.float32)
-            labels = torch.tensor(labels, dtype=torch.int64)
-        else:
-            boxes = torch.zeros((0, 4), dtype=torch.float32)
-            labels = torch.zeros((0,), dtype=torch.int64)
+        boxes = torch.tensor(boxes, dtype=torch.float32) if boxes else torch.zeros((0, 4), dtype=torch.float32)
+        labels = torch.tensor(labels, dtype=torch.int64) if labels else torch.zeros((0,), dtype=torch.int64)
 
-        new_target = {
-            "boxes": boxes,
-            "labels": labels
-            # maski pomijamy na start - jeśli chcesz, mogę potem dodać
-        }
-        return new_target
+        return {"boxes": boxes, "labels": labels}
 
 def collate_fn(batch):
     return tuple(zip(*batch))
@@ -131,7 +105,7 @@ def distill_model(teacher, student, dataloader, epochs=10):
     optimizer = torch.optim.SGD(student.parameters(), lr=0.001, momentum=0.9)
 
     for epoch in range(epochs):
-        student.eval()  # <-- ważne!!
+        student.eval()
         running_loss = 0.0
         print(f"Epoch {epoch+1}/{epochs}")
 
@@ -141,7 +115,6 @@ def distill_model(teacher, student, dataloader, epochs=10):
             with torch.no_grad():
                 teacher_outputs = teacher(images)
 
-            # dummy targets do zachowania struktury
             dummy_targets = []
             for img in images:
                 dummy_targets.append({
@@ -150,9 +123,10 @@ def distill_model(teacher, student, dataloader, epochs=10):
                     "masks": torch.zeros((0, img.shape[1], img.shape[2]), dtype=torch.uint8, device=img.device),
                 })
 
-            student.eval()  # student w eval z wymuszamy grad
             with torch.set_grad_enabled(True):
-                student_outputs = student(images)
+                student_outputs = student(images, dummy_targets)
+                if isinstance(student_outputs, dict):
+                    student_outputs = student(images)
 
                 loss = distillation_loss(student_outputs, teacher_outputs)
 

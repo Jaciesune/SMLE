@@ -19,7 +19,7 @@ def main():
         user_role = login.accepted_role
         user_name = login.accepted_username
         main_window = MainWindow(user_role, user_name)
-        main_window.showNormal()
+        main_window.showFullScreen()
 
 
     sys.exit(app.exec_())

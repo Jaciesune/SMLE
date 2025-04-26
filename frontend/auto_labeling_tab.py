@@ -11,7 +11,7 @@ import uuid
 import zipfile
 import logging
 import sys
-from PIL import Image  # Dodajemy Pillow do obsługi RGBA
+from PIL import Image
 
 # Konfiguracja logowania
 logging.basicConfig(level=logging.DEBUG)
@@ -43,38 +43,105 @@ class ImageViewer(QtWidgets.QWidget):
         self.annotations = annotations if annotations is not None else []
         self.selected_mask_idx = -1
         self.scale = 1.0
-        self.min_scale = 0.1
+        self.min_scale = 0.1  # Będzie dynamicznie ustawiane w adjust_initial_scale
         self.max_scale = 5.0
         self.drawing = False
         self.editing = False
         self.current_polygon = []
         self.editing_point_idx = -1
-        self.setMinimumSize(600, 400)
+        self.offset_x = 0
+        self.offset_y = 0
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
+
+        # Początkowe dopasowanie skali do rozmiaru kontenera
+        self.adjust_initial_scale()
+
+    def adjust_initial_scale(self):
+        """Dopasowuje początkową skalę, aby obraz wypełniał dostępny obszar."""
+        if self.image is None or not self.auto_labeling_tab.image_viewer_container:
+            return
+
+        # Pobieramy rozmiar widocznego obszaru QScrollArea
+        container = self.auto_labeling_tab.image_viewer_container
+        viewport_size = container.viewport().size()
+        container_width = viewport_size.width()
+        container_height = viewport_size.height()
+
+        # Obliczamy proporcje obrazu i kontenera
+        image_aspect = self.original_width / self.original_height
+        container_aspect = container_width / container_height
+
+        # Dopasowujemy skalę w zależności od proporcji
+        if image_aspect > container_aspect:
+            # Obraz jest szerszy niż kontener - dopasowujemy szerokość
+            self.scale = container_width / self.original_width
+        else:
+            # Obraz jest wyższy niż kontener - dopasowujemy wysokość
+            self.scale = container_height / self.original_height
+
+        # Ustawiamy minimalną skalę, aby nie można było oddalić bardziej
+        self.min_scale = self.scale
+
+        # Aktualizujemy rozmiar widżetu
+        self.update_size()
+
+    def update_size(self):
+        """Aktualizuje rozmiar widżetu na podstawie bieżącej skali."""
+        if self.image is None:
+            return
+        scaled_width = int(self.original_width * self.scale)
+        scaled_height = int(self.original_height * self.scale)
+        # Zapewniamy minimalny rozmiar, aby uniknąć błędów
+        scaled_width = max(1, scaled_width)
+        scaled_height = max(1, scaled_height)
+        self.setFixedSize(scaled_width, scaled_height)
 
     def resizeEvent(self, event):
         if self.image is not None:
-            window_width = self.width()
-            window_height = self.height()
-            image_aspect = self.original_width / self.original_height
-            window_aspect = window_width / window_height
-
-            if window_aspect > image_aspect:
-                base_scale = window_height / self.original_height
-            else:
-                base_scale = window_width / self.original_width
+            self.adjust_initial_scale()  # Dopasowujemy skalę przy zmianie rozmiaru okna
             self.update()
 
     def wheelEvent(self, event):
         if self.image is None:
             return
-        zoom_factor = 1.1
-        if event.angleDelta().y() > 0:
-            new_scale = self.scale * zoom_factor
+
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+        if modifiers & QtCore.Qt.AltModifier:
+            # Przewijanie lewo/prawo z Alt + scroll
+            delta = event.angleDelta().y()
+            self.offset_x += delta / 2
+            self.offset_x = min(0, max(-(self.original_width * self.scale - self.width()), self.offset_x))
+            self.update()
         else:
-            new_scale = self.scale / zoom_factor
-        self.scale = max(self.min_scale, min(self.max_scale, new_scale))
-        self.update()
+            # Zoom lub przewijanie góra/dół
+            if modifiers & QtCore.Qt.ControlModifier:
+                # Zoom
+                zoom_factor = 1.1
+                old_scale = self.scale
+                if event.angleDelta().y() > 0:
+                    new_scale = self.scale * zoom_factor
+                else:
+                    new_scale = self.scale / zoom_factor
+                # Ograniczamy skalę do min_scale i max_scale
+                self.scale = max(self.min_scale, min(self.max_scale, new_scale))
+
+                # Dostosowanie offsetu przy zmianie skali
+                mouse_x = event.x() - self.offset_x
+                mouse_y = event.y() - self.offset_y
+                self.offset_x -= mouse_x * (self.scale / old_scale - 1)
+                self.offset_y -= mouse_y * (self.scale / old_scale - 1)
+
+                self.offset_x = min(0, max(-(self.original_width * self.scale - self.width()), self.offset_x))
+                self.offset_y = min(0, max(-(self.original_height * self.scale - self.height()), self.offset_y))
+
+                # Aktualizacja rozmiaru widżetu po zmianie skali
+                self.update_size()
+            else:
+                # Przewijanie góra/dół
+                delta = event.angleDelta().y()
+                self.offset_y += delta / 2
+                self.offset_y = min(0, max(-(self.original_height * self.scale - self.height()), self.offset_y))
+            self.update()
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
@@ -88,8 +155,11 @@ class ImageViewer(QtWidgets.QWidget):
 
         scaled_image = cv2.resize(self.image, (scaled_width, scaled_height))
         qimage = QtGui.QImage(scaled_image.data, scaled_image.shape[1], scaled_image.shape[0], scaled_image.strides[0], QtGui.QImage.Format_RGB888)
-        painter.drawImage(0, 0, qimage)
 
+        # Rysowanie obrazu z offsetem
+        painter.drawImage(int(self.offset_x), int(self.offset_y), qimage)
+
+        # Rysowanie masek
         for idx, shape in enumerate(self.annotations):
             if shape.get("shape_type") != "mask":
                 continue
@@ -124,14 +194,15 @@ class ImageViewer(QtWidgets.QWidget):
             pen = QtGui.QPen(QtGui.QColor(*color[:3]), 2)
             painter.setPen(pen)
             for contour in contours:
-                qpoints = [QtCore.QPoint(pt[0][0], pt[0][1]) for pt in contour]
+                qpoints = [QtCore.QPoint(pt[0][0] + int(self.offset_x), pt[0][1] + int(self.offset_y)) for pt in contour]
                 polygon = QtGui.QPolygon(qpoints)
                 painter.drawPolygon(polygon)
 
+        # Rysowanie bieżącego wielokąta podczas rysowania
         if self.drawing and self.current_polygon:
             pen = QtGui.QPen(QtGui.QColor(0, 0, 255), 2)
             painter.setPen(pen)
-            qpoints = [QtCore.QPoint(int(pt[0] * self.scale), int(pt[1] * self.scale)) for pt in self.current_polygon]
+            qpoints = [QtCore.QPoint(int(pt[0] * self.scale + self.offset_x), int(pt[1] * self.scale + self.offset_y)) for pt in self.current_polygon]
             for i in range(len(qpoints) - 1):
                 painter.drawLine(qpoints[i], qpoints[i + 1])
             for pt in qpoints:
@@ -141,8 +212,8 @@ class ImageViewer(QtWidgets.QWidget):
         if self.image is None:
             return
         if event.button() == QtCore.Qt.LeftButton:
-            x = event.x() / self.scale
-            y = event.y() / self.scale
+            x = (event.x() - self.offset_x) / self.scale
+            y = (event.y() - self.offset_y) / self.scale
 
             selected_idx = -1
             for idx, shape in enumerate(self.annotations):
@@ -223,8 +294,12 @@ class ImageViewer(QtWidgets.QWidget):
                     "mask": mask_base64
                 }
                 self.annotations.append(new_shape)
+                self.auto_labeling_tab.add_to_history(new_shape)  # Dodajemy do historii
                 self.auto_labeling_tab.update_mask_list()
                 self.auto_labeling_tab.add_label_to_list(label)
+
+                # Automatyczne zapisywanie adnotacji po dodaniu maski
+                self.auto_labeling_tab.save_annotations(silent=True)
 
             self.drawing = False
             self.current_polygon = []
@@ -235,6 +310,17 @@ class ImageViewer(QtWidgets.QWidget):
             self.auto_labeling_tab.delete_mask()
         elif event.modifiers() == QtCore.Qt.ControlModifier and event.key() == QtCore.Qt.Key_S:
             self.auto_labeling_tab.save_annotations()
+        elif event.key() == QtCore.Qt.Key_Escape and self.drawing:
+            self.drawing = False
+            self.current_polygon = []
+            self.update()
+        elif event.modifiers() == QtCore.Qt.ControlModifier and event.key() == QtCore.Qt.Key_Z:
+            self.auto_labeling_tab.undo_mask()
+        # Nowe skróty klawiaturowe: strzałki lewo/prawo do przełączania obrazów
+        elif event.key() == QtCore.Qt.Key_Left:
+            self.auto_labeling_tab.prev_image()
+        elif event.key() == QtCore.Qt.Key_Right:
+            self.auto_labeling_tab.next_image()
 
 class AutoLabelingTab(QtWidgets.QWidget):
     def __init__(self, user_role):
@@ -249,6 +335,7 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.current_image_idx = 0
         self.annotations = []
         self.labels = ["obiekt"]
+        self.history = []  # Lista do przechowywania historii dodanych masek
         self.init_ui()
 
     def init_ui(self):
@@ -280,7 +367,7 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.model_version_combo = QtWidgets.QComboBox()
         mode_layout.addWidget(self.model_version_combo)
 
-        # Dodajemy pole do wpisywania etykiety dla modelu
+        # Pole do wpisywania etykiety dla modelu
         self.custom_label_label = QtWidgets.QLabel("Etykieta dla modelu:")
         mode_layout.addWidget(self.custom_label_label)
         self.custom_label_input = QtWidgets.QLineEdit()
@@ -300,11 +387,13 @@ class AutoLabelingTab(QtWidgets.QWidget):
 
         self.main_layout = QtWidgets.QHBoxLayout()
 
-        self.image_viewer_container = QtWidgets.QWidget()
-        self.image_viewer_layout = QtWidgets.QVBoxLayout()
-        self.image_viewer_container.setLayout(self.image_viewer_layout)
+        # Kontener dla ImageViewer z paskami przewijania
+        self.image_viewer_container = QtWidgets.QScrollArea()
+        self.image_viewer_container.setWidgetResizable(False)
         self.image_viewer = ImageViewer(auto_labeling_tab=self)
-        self.image_viewer_layout.insertWidget(0, self.image_viewer)
+        self.image_viewer_container.setWidget(self.image_viewer)
+        self.image_viewer_container.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.image_viewer_container.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         self.main_layout.addWidget(self.image_viewer_container, stretch=4)
 
         self.right_panel = QtWidgets.QWidget()
@@ -331,6 +420,10 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.delete_mask_btn = QtWidgets.QPushButton("Usuń wybraną maskę")
         self.delete_mask_btn.clicked.connect(self.delete_mask)
         self.mask_list_layout.addWidget(self.delete_mask_btn)
+        self.undo_mask_btn = QtWidgets.QPushButton("Cofnij dodanie maski (Ctrl+Z)")
+        self.undo_mask_btn.clicked.connect(self.undo_mask)
+        self.undo_mask_btn.setEnabled(False)  # Początkowo wyłączony
+        self.mask_list_layout.addWidget(self.undo_mask_btn)
         self.change_label_btn = QtWidgets.QPushButton("Zmień etykietę")
         self.change_label_btn.clicked.connect(self.change_label)
         self.mask_list_layout.addWidget(self.change_label_btn)
@@ -341,6 +434,12 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.download_btn.clicked.connect(self.download_results)
         self.download_btn.setEnabled(False)
         self.mask_list_layout.addWidget(self.download_btn)
+
+        # Nowy przycisk do wyświetlania skrótów klawiaturowych
+        self.shortcuts_btn = QtWidgets.QPushButton("Pokaż skróty klawiaturowe")
+        self.shortcuts_btn.clicked.connect(self.show_shortcuts)
+        self.mask_list_layout.addWidget(self.shortcuts_btn)
+
         self.mask_list_widget.setLayout(self.mask_list_layout)
         self.right_layout.addWidget(self.mask_list_widget)
 
@@ -477,7 +576,7 @@ class AutoLabelingTab(QtWidgets.QWidget):
                 data = {
                     'job_name': self.job_name,
                     'model_version': model_version,
-                    'custom_label': custom_label  # Przekazujemy etykietę użytkownika
+                    'custom_label': custom_label
                 }
                 logger.debug(f"Wysyłam żądanie do /auto_label z job_name={self.job_name}, custom_label={custom_label}")
                 response = requests.post(
@@ -503,7 +602,6 @@ class AutoLabelingTab(QtWidgets.QWidget):
                     self.top_widget.setVisible(False)
                     return
 
-                # Zmień katalog zapisu na backend/data
                 data_dir = os.path.join(os.getcwd(), "backend", "data")
                 os.makedirs(data_dir, exist_ok=True)
 
@@ -593,18 +691,40 @@ class AutoLabelingTab(QtWidgets.QWidget):
             return
 
         if hasattr(self, 'image_viewer') and self.image_viewer is not None:
-            self.image_viewer_layout.removeWidget(self.image_viewer)
-            self.image_viewer.deleteLater()
             self.image_viewer = None
 
         try:
             self.image_viewer = ImageViewer(image_path, self.annotations, auto_labeling_tab=self)
+            self.image_viewer_container.setWidget(self.image_viewer)
+
+            # Resetowanie przybliżenia i offsetów
+            self.image_viewer.scale = 1.0
+            self.image_viewer.offset_x = 0
+            self.image_viewer.offset_y = 0
+            self.image_viewer.adjust_initial_scale()  # Dopasowanie skali po wczytaniu obrazu
+
+            # Ustawienie fokusu na nowym widżecie ImageViewer
+            self.image_viewer.setFocus(QtCore.Qt.OtherFocusReason)
         except Exception as e:
             logger.error(f"Błąd wczytywania obrazu {image_path}: {e}")
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd wczytywania obrazu: {e}")
             return
 
-        self.image_viewer_layout.insertWidget(0, self.image_viewer)
+        # Ustawianie domyślnej etykiety
+        custom_label = self.custom_label_input.text().strip()
+        if self.annotations:  # Jeśli są wczytane maski
+            default_label = self.annotations[0]["label"]
+        elif custom_label:  # Jeśli użytkownik podał etykietę dla modelu
+            default_label = custom_label
+        else:  # Domyślna etykieta
+            default_label = "obiekt"
+
+        # Ustawiamy etykietę w polu label_input
+        if default_label not in self.labels:
+            self.labels.append(default_label)
+            self.label_input.addItem(default_label)
+        self.label_input.setCurrentText(default_label)
+
         self.update_mask_list()
         self.image_list.setCurrentRow(self.current_image_idx)
 
@@ -645,6 +765,25 @@ class AutoLabelingTab(QtWidgets.QWidget):
             self.image_viewer.selected_mask_idx = -1
             self.update_mask_list()
             self.image_viewer.update()
+            # Automatyczne zapisywanie adnotacji po usunięciu maski
+            self.save_annotations(silent=True)
+
+    def add_to_history(self, shape):
+        self.history.append(shape)
+        self.undo_mask_btn.setEnabled(True)
+
+    def undo_mask(self):
+        if self.history:
+            last_shape = self.history.pop()
+            if last_shape in self.annotations:
+                self.annotations.remove(last_shape)
+            self.image_viewer.selected_mask_idx = -1
+            self.update_mask_list()
+            self.image_viewer.update()
+            # Automatyczne zapisywanie adnotacji po cofnięciu
+            self.save_annotations(silent=True)
+        if not self.history:
+            self.undo_mask_btn.setEnabled(False)
 
     def change_label(self):
         if self.image_viewer.selected_mask_idx >= 0:
@@ -653,6 +792,8 @@ class AutoLabelingTab(QtWidgets.QWidget):
                 self.annotations[self.image_viewer.selected_mask_idx]["label"] = new_label
                 self.add_label_to_list(new_label)
                 self.update_mask_list()
+                # Automatyczne zapisywanie adnotacji po zmianie etykiety
+                self.save_annotations(silent=True)
 
     def get_current_label(self):
         return self.label_input.currentText().strip()
@@ -662,7 +803,7 @@ class AutoLabelingTab(QtWidgets.QWidget):
             self.labels.append(label)
             self.label_input.addItem(label)
 
-    def save_annotations(self):
+    def save_annotations(self, silent=False):
         if not self.annotation_files:
             return
         annotation_path = self.annotation_files[self.current_image_idx]
@@ -678,18 +819,33 @@ class AutoLabelingTab(QtWidgets.QWidget):
         try:
             with open(annotation_path, 'w', encoding='utf-8') as f:
                 json.dump(json_data, f, indent=2)
-            QtWidgets.QMessageBox.information(self, "Sukces", "Adnotacje zapisane pomyślnie!")
+            if not silent:  # Wyświetlamy powiadomienie tylko przy ręcznym zapisie
+                QtWidgets.QMessageBox.information(self, "Sukces", "Adnotacje zapisane pomyślnie!")
             self.update_image_list()
         except Exception as e:
             logger.error(f"Błąd zapisu adnotacji {annotation_path}: {e}")
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd zapisu adnotacji: {e}")
+
+    def show_shortcuts(self):
+        """Wyświetla okno dialogowe z listą skrótów klawiaturowych."""
+        shortcuts_text = (
+            "Lista skrótów klawiaturowych:\n\n"
+            "Strzałka w lewo: Poprzedni obraz\n"
+            "Strzałka w prawo: Następny obraz\n"
+            "Ctrl + S: Zapisz adnotacje\n"
+            "Ctrl + Z: Cofnij dodanie maski\n"
+            "Delete: Usuń wybraną maskę\n"
+            "Esc: Anuluj rysowanie maski\n"
+            "Ctrl + kółko myszy: Przybliż/oddal obraz\n"
+            "Alt + kółko myszy: Przewiń obraz w poziomie"
+        )
+        QtWidgets.QMessageBox.information(self, "Skróty klawiaturowe", shortcuts_text)
 
     def download_results(self):
         if not self.image_paths or not self.annotation_files:
             QtWidgets.QMessageBox.warning(self, "Błąd", "Brak wyników do pobrania!")
             return
 
-        # Zmień katalog zapisu na backend/data
         data_dir = os.path.join(os.getcwd(), "backend", "data")
         os.makedirs(data_dir, exist_ok=True)
 

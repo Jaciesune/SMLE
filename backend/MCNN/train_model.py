@@ -206,9 +206,10 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=0.00075)
     parser.add_argument('--model_name', default=None)
     parser.add_argument('--model_checkpoint', default=None)
-    parser.add_argument('--batch_size', type=int, default=3)
+    parser.add_argument('--batch_size', type=int, default=2)
     parser.add_argument('--coco_train_path', required=True)
     parser.add_argument('--coco_gt_path', required=True)
+    parser.add_argument('--val_dir', required=True)  # Dodano, aby uniknąć błędu
     parser.add_argument('--num_augmentations', type=int, default=1, help="Liczba augmentacji (na razie nieużywana)")
     args = parser.parse_args()
 

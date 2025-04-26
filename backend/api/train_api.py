@@ -104,6 +104,7 @@ class TrainAPI:
         script_name = self.train_scripts[algorithm]
 
         train_dir = None
+        val_dir = None  # Dodajemy zmienną dla val_dir
         host_train_path = None
         host_val_path = None
         num_augmentations = "0"
@@ -111,6 +112,7 @@ class TrainAPI:
         model_name = ""
         username = ""
 
+        # Parsowanie argumentów
         for i in range(0, len(args), 2):
             if args[i] == "--train_dir":
                 train_dir = args[i + 1]
@@ -131,6 +133,7 @@ class TrainAPI:
             yield f"Błąd: Niepoprawna ścieżka do danych treningowych."
             return
 
+        # Kopiowanie danych treningowych
         try:
             host_train_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1]
             host_train_dir.mkdir(parents=True, exist_ok=True)
@@ -147,6 +150,7 @@ class TrainAPI:
             yield f"Błąd kopiowania danych treningowych: {e}"
             return
 
+        # Kopiowanie danych walidacyjnych i ustawienie val_dir
         if host_val_path:
             try:
                 host_val_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1].replace("train", "val")
@@ -158,10 +162,15 @@ class TrainAPI:
                         shutil.copy(src_path, dst_path)
                     elif os.path.isdir(src_path):
                         shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+                # Ustawiamy val_dir na ścieżkę w kontenerze
+                val_dir = "/app/backend/data/" + str(host_val_dir.relative_to(self.base_path / "data"))
                 yield f"Skopiowano dane walidacyjne do {host_val_dir}"
             except Exception as e:
                 yield f"Błąd kopiowania danych walidacyjnych: {e}"
                 return
+        else:
+            # Jeśli host_val_path nie jest podane, ustawiamy domyślną ścieżkę
+            val_dir = "/app/backend/data/val"
 
         def remove_arg_pair(args_list, key):
             args = list(args_list)
@@ -170,10 +179,14 @@ class TrainAPI:
                 del args[idx:idx+2]
             return args
 
-        # Dodajemy --val_dir do listy argumentów do usunięcia
+        # Filtrujemy niepotrzebne argumenty
         filtered_args = list(args)
-        for arg_name in ["--host_train_path", "--host_val_path", "--username", "--val_dir"]:
+        for arg_name in ["--host_train_path", "--host_val_path", "--username"]:
             filtered_args = remove_arg_pair(filtered_args, arg_name)
+
+        # Dodajemy --val_dir do argumentów, jeśli val_dir zostało ustawione
+        if val_dir:
+            filtered_args.extend(["--val_dir", val_dir])
 
         try:
             if algorithm == "Mask R-CNN":
@@ -189,6 +202,7 @@ class TrainAPI:
             command = ["docker", "exec", "-e", "PYTHONUNBUFFERED=1", self.container_name, "python", script_path]
             command.extend(filtered_args)
             yield f"Uruchamiam trening z {num_augmentations} augmentacjami na obraz..."
+            yield f"Komenda: {' '.join(command)}"  # Logowanie komendy dla debugowania
 
             process = subprocess.Popen(
                 command,

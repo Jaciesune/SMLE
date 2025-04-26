@@ -22,6 +22,8 @@ async def create_dataset(
     files: list[UploadFile] = File(...)
 ):
     logger.debug("Rozpoczynam tworzenie datasetu dla job_name=%s, %d plików", job_name, len(files))
+    # Logowanie nazw przesłanych plików
+    logger.debug("Przesłane pliki: %s", [file.filename for file in files])
     zip_path = f"/app/backend/data/Dataset_creation/{job_name}_results.zip"
 
     try:

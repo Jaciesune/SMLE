@@ -18,6 +18,8 @@ class DatasetAPI:
     def __init__(self):
         self.train_ratio = 0.7
         self.output_base_dir = "/app/backend/data/Dataset_creation"
+        # Lista dozwolonych rozszerzeń dla obrazów
+        self.allowed_image_extensions = {".jpg", ".jpeg", ".png", ".bmp"}
 
     def decode_mask(self, base64_str):
         """Dekoduje maskę zapisaną w Base64 do postaci NumPy."""
@@ -119,19 +121,31 @@ class DatasetAPI:
             os.makedirs(input_dir, exist_ok=True)
             os.makedirs(output_dir, exist_ok=True)
 
-            # Zapisz przesłane pliki
+            # Zapisz przesłane pliki z podziałem na obrazy i JSON
             json_files = []
+            image_files = []
             for file in input_files:
                 file_path = os.path.join(input_dir, file.filename)
-                with open(file_path, "wb") as f:
-                    shutil.copyfileobj(file.file, f)
-                if file.filename.endswith(".json"):
+                # Sprawdź rozszerzenie pliku
+                _, ext = os.path.splitext(file.filename.lower())
+                if ext in self.allowed_image_extensions:
+                    with open(file_path, "wb") as f:
+                        shutil.copyfileobj(file.file, f)
+                    image_files.append(file.filename)
+                elif ext == ".json":
+                    with open(file_path, "wb") as f:
+                        shutil.copyfileobj(file.file, f)
                     json_files.append(file.filename)
+                else:
+                    logger.warning("Pomijam plik o nieobsługiwanym rozszerzeniu: %s", file.filename)
 
             if not json_files:
                 raise ValueError("Brak plików .json w przesłanych danych.")
 
-            # Podziel na train i val
+            if not image_files:
+                raise ValueError("Brak plików obrazów (.jpg, .jpeg, .png, .bmp) w przesłanych danych.")
+
+            # Podziel pliki JSON na train i val
             train_files, val_files = train_test_split(json_files, train_size=self.train_ratio, random_state=42)
 
             datasets = {
@@ -150,8 +164,13 @@ class DatasetAPI:
                     try:
                         labelme_data = self.load_labelme_json(json_path)
                         image_name = labelme_data["imagePath"]
-                        source_image_path = os.path.join(input_dir, image_name)
+                        # Sprawdź, czy imagePath wskazuje na plik z dozwolonym rozszerzeniem
+                        _, ext = os.path.splitext(image_name.lower())
+                        if ext not in self.allowed_image_extensions:
+                            logger.warning("Plik %s nie jest obrazem (rozszerzenie %s), pomijam.", image_name, ext)
+                            continue
 
+                        source_image_path = os.path.join(input_dir, image_name)
                         if not os.path.exists(source_image_path):
                             logger.warning("Brak obrazu %s, pomijam.", source_image_path)
                             continue
@@ -170,11 +189,17 @@ class DatasetAPI:
                     logger.warning("Brak danych dla %s, pomijam COCO JSON.", dataset)
 
             # Spakuj wyniki
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
                 for root, _, files in os.walk(output_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
                         arcname = os.path.relpath(file_path, output_dir)
+                        # Upewnij się, że w folderze images są tylko obrazy
+                        if "/images/" in arcname:
+                            _, ext = os.path.splitext(file.lower())
+                            if ext not in self.allowed_image_extensions:
+                                logger.warning("Pomijam plik %s w folderze images - nie jest to obraz.", file)
+                                continue
                         zipf.write(file_path, arcname)
                         logger.debug("Dodano do zip: %s", arcname)
 

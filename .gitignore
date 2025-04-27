@@ -68,3 +68,4 @@ Thumbs.db
 
 *__pycache__*
 test
+/SMLE app/SMLE/node_modules

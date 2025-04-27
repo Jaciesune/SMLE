@@ -82,3 +82,5 @@ backend/Inne/Auto_Labeling/images_debug
 backend/FasterRCNN/data
 
 node_modules
+
+distilled_models

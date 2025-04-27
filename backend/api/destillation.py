@@ -14,7 +14,7 @@ from torchvision.models.detection import MaskRCNN, maskrcnn_resnet50_fpn_v2
 
 # Ścieżki do danych i modeli
 MODELS_DIR = "backend/Mask_RCNN/models"
-DISTILLED_DIR = "backend/Mask_RCNN/distilled_models"
+DISTILLED_DIR = "backend/distilled_models"
 TRAIN_IMAGES_DIR = "backend/data/train/images/"
 TRAIN_ANNOTATIONS_PATH = "backend/data/train/annotations/instances_train.json"
 

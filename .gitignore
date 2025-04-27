@@ -80,5 +80,6 @@ backend/Inne/Auto_Labeling/images_before
 backend/Inne/Auto_Labeling/images_debug
 
 backend/FasterRCNN/data
+backend/Mask_RCNN/data
 
 node_modules

@@ -63,25 +63,54 @@ def get_augmentation_pipeline(image_height, image_width):
     crop_width = min(512, image_width)
     
     return A.Compose([
-        A.HorizontalFlip(p=0.5),  # Odbicie w pionie
-        A.RandomBrightnessContrast(p=0.3),  # Losowa zmiana jasności i kontrastu
-        A.Rotate(limit=30, p=0.5),  # Obrót o maksymalnie 30 stopni
-        A.RandomCrop(height=crop_height, width=crop_width, p=0.3),  # Losowy przycięcie
-        A.GaussNoise(p=0.2),  # Szum Gaussa
-        
-        # Dodatkowe transformacje
-        A.Blur(blur_limit=(3, 7), p=0.2),  # Rozmazanie
-        A.MedianBlur(blur_limit=5, p=0.1),  # Rozmazanie medianowe
-        A.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True, p=0.2),  # Szum mnożący
-        A.ChannelShuffle(p=0.1),  # Losowa permutacja kanałów
-        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.3),  # Zmiana kolorów
-        A.ISONoise(p=0.1),  # Szum ISO
+        A.HorizontalFlip(p=0.5),
+        A.RandomBrightnessContrast(p=0.3),
+        A.Rotate(limit=30, p=0.5),
+        A.RandomCrop(height=crop_height, width=crop_width, p=0.3),
+        A.GaussNoise(p=0.2),
+        A.Blur(blur_limit=(3, 7), p=0.2),
+        A.MedianBlur(blur_limit=5, p=0.1),
+        A.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True, p=0.2),
+        A.ChannelShuffle(p=0.1),
+        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.3),
+        A.ISONoise(p=0.1),
+        A.Perspective(scale=(0.05, 0.1), keep_size=True, p=0.5),
+        A.RandomResizedCrop(
+            size=(crop_height, crop_width),
+            scale=(0.7, 1.0),
+            ratio=(0.75, 1.33),
+            p=0.5
+        ),
+        A.Affine(
+            scale=(0.7, 1.3),
+            translate_percent=(-0.2, 0.2),
+            rotate=(-45, 45),
+            shear=(-10, 10),
+            p=0.5
+        ),
+        A.MotionBlur(blur_limit=(3, 15), p=0.2),
+        A.Defocus(radius=(3, 10), alias_blur=(0.1, 0.5), p=0.2),
+        A.RandomShadow(
+            shadow_roi=(0, 0.5, 1, 1),
+            num_shadows_limit=(1, 3),
+            shadow_dimension=5,
+            p=0.3
+        ),
+        A.RandomSunFlare(
+            flare_roi=(0, 0, 1, 0.5),
+            angle_limit=(-30, 30),
+            num_flare_circles_lower=1,
+            num_flare_circles_upper=3,
+            src_radius=150,
+            p=0.2
+        ),
+        A.Resize(height=image_height, width=image_width),
     ],
     bbox_params=A.BboxParams(
         format='coco', 
         label_fields=['category_ids'], 
-        min_area=3,           # Minimalna powierzchnia bboxa
-        min_visibility=0.1     # Minimalna widoczność bboxa
+        min_area=3,
+        min_visibility=0.1
     ),
     additional_targets={'mask': 'mask'})
 
@@ -92,6 +121,7 @@ def augment_and_save(image_path, annotations, output_dir, num_augmentations, cat
         print(f"Nie można wczytać obrazu: {image_path}")
         return
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    orig_height, orig_width = image.shape[:2]
     
     # Przygotuj dane do augmentacji
     bboxes = [ann['bbox'] for ann in annotations]
@@ -103,11 +133,18 @@ def augment_and_save(image_path, annotations, output_dir, num_augmentations, cat
     combined_mask = combine_masks_to_image_size(masks, bboxes, image.shape)
     
     # Przygotuj dane do augmentacji
-    valid_bboxes = [bbox for bbox, mask in zip(bboxes, masks) if mask is not None]
-    valid_category_ids = [cat_id for cat_id, mask in zip(category_ids, masks) if mask is not None]
+    # Zachowaj wszystkie bboxy i kategorie, nawet jeśli maska jest None
+    valid_bboxes = bboxes
+    valid_category_ids = category_ids
+    # Jeśli nie ma żadnej maski, utwórz pustą maskę
+    if not any(mask is not None for mask in masks):
+        combined_mask = np.zeros((orig_height, orig_width), dtype=np.uint8)
+    
+    # Logowanie dla debugowania
+    # print(f"Oryginalne bboxy dla {os.path.basename(image_path)}: {valid_bboxes}")
     
     # Pipeline augmentacji
-    aug_pipeline = get_augmentation_pipeline(image.shape[0], image.shape[1])
+    aug_pipeline = get_augmentation_pipeline(orig_height, orig_width)
     
     # Oryginalna nazwa pliku
     base_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -136,7 +173,10 @@ def augment_and_save(image_path, annotations, output_dir, num_augmentations, cat
         aug_mask = augmented['mask']
         aug_category_ids = augmented['category_ids']
         
-        # Filtruj bboxy i maski wychodzące poza obraz
+        # Logowanie augmentowanych bboxów
+        print(f"Augmentowane bboxy dla {base_name}_aug_{i}: {aug_bboxes}")
+        
+        # Filtruj bboxy
         filtered_bboxes = []
         filtered_category_ids = []
         filtered_mask = np.zeros_like(aug_mask)
@@ -146,24 +186,25 @@ def augment_and_save(image_path, annotations, output_dir, num_augmentations, cat
         for bbox, cat_id in zip(aug_bboxes, aug_category_ids):
             x, y, w, h = map(int, bbox)
             
-            # Sprawdź czy bbox jest w granicach obrazu
-            if (x >= width or y >= height or 
-                x + w <= 0 or y + h <= 0):
-                continue
-                
             # Przytnij współrzędne do granic obrazu
             x = max(0, min(x, width - 1))
             y = max(0, min(y, height - 1))
-            w = min(w, width - x)
-            h = min(h, height - y)
+            x_end = max(0, min(x + w, width - 1))
+            y_end = max(0, min(y + h, height - 1))
             
+            # Oblicz nowe wymiary bboxa
+            w = x_end - x
+            h = y_end - y
+            
+            # Zachowaj bbox tylko jeśli ma dodatnią szerokość i wysokość
             if w > 0 and h > 0:
                 filtered_bboxes.append([x, y, w, h])
                 filtered_category_ids.append(cat_id)
+            else:
+                print(f"Odrzucono bbox w {base_name}_aug_{i}: x={x}, y={y}, w={w}, h={h}")
         
         # Aktualizuj maskę tylko dla widocznych obszarów
         if len(filtered_bboxes) > 0:
-            # Przytnij maskę do granic obrazu
             filtered_mask[:height, :width] = aug_mask[:height, :width]
         
         # Wizualizacja augmentowanego obrazu
@@ -179,7 +220,7 @@ def augment_and_save(image_path, annotations, output_dir, num_augmentations, cat
 
 def create_augmented_dataset(dataset_dir, output_dir, num_augmentations):
     images_dir = os.path.join(dataset_dir, "train", "images")
-    annotation_path = os.path.join(dataset_dir, "train", "annotations", "coco.json")
+    annotation_path = os.path.join(dataset_dir, "train", "annotations", "instances_train.json")
     
     if not os.path.exists(images_dir) or not os.path.exists(annotation_path):
         raise FileNotFoundError(f"Nie znaleziono katalogu {images_dir} lub pliku {annotation_path}")
@@ -204,7 +245,7 @@ def create_augmented_dataset(dataset_dir, output_dir, num_augmentations):
             print(f"Brak adnotacji dla {image_file}, pomijam.")
 
 if __name__ == "__main__":
-    dataset_dir = "../data"
+    dataset_dir = "../../data"
     output_dir = "../data/test/data_augmented"
     num_augmentations = 20
     

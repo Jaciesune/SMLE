@@ -5,28 +5,47 @@ from train_tab import TrainTab
 from models_tab import ModelsTab
 from users_tab import UsersTab
 
+from auto_labeling_tab import AutoLabelingTab
+from dataset_creation_tab import DatasetCreationTab
+
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, user_role):
+    def __init__(self, user_role, user_name):
         super().__init__()
         self.user_role = user_role
+        self.username = user_name
         self.setWindowTitle("System Maszynowego Liczenia Elementów")
         self.setGeometry(100, 100, 1600, 900)
         self.init_ui()
         self.create_toolbar()
+
+    def on_tab_changed(self, index):  
+        tab_text = self.tabs.tabText(index)
+        if tab_text == "Modele":
+            self.models_tab.load_models()
+        elif tab_text == "Historia":
+            self.archive_tab.load_archive_data()
+        elif tab_text == "Użytkownicy":
+            self.users_tab.load_users()
 
     def init_ui(self):
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
 
         # Tworzymy odpowiednie zakładki
-        self.count_tab = CountTab()
-        self.train_tab = TrainTab()
+        self.count_tab = CountTab(self.username)
+        self.train_tab = TrainTab(self.username)
         self.models_tab = ModelsTab()
         self.archive_tab = ArchiveTab()
+        self.auto_labeling_tab = AutoLabelingTab(self.user_role)
+        self.dataset_creation_tab = DatasetCreationTab(self.user_role)
 
         self.tabs.addTab(self.count_tab, "Zliczanie")
         self.tabs.addTab(self.train_tab, "Trening")
         self.tabs.addTab(self.models_tab, "Modele")
+        self.tabs.addTab(self.auto_labeling_tab, "Automatyczne oznaczanie zdjęć")
+        self.tabs.addTab(self.dataset_creation_tab, "Tworzenie zbioru danych")
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+
 
         if self.user_role == "admin":
             # Jeśli rola to admin, dodajemy te karty

@@ -1,59 +1,41 @@
-# 🔄 Pliki środowiska wirtualnego
-venv/
-ENV/
-env/
-SMLE_ENV_3_12/
-dml_venv/
-dml_venv_39/
-env_frcnn/
-*.venv
-
-# 📜 Pliki Pythona - skompilowane i tymczasowe
-__pycache__/
+# Ignorowanie skompilowanych plików Pythona
+__pycache__
 *.pyc
 *.pyo
 *.pyd
 
-# 🗂️ Pliki i foldery Git
-.git/
+# Ignorowanie plików i katalogów Git
+.git
 .gitignore
 
-# 📁 Pliki tymczasowe i logi
+# Ignorowanie plików konfiguracyjnych Dockera
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Ignorowanie dokumentacji i innych niepotrzebnych plików
+*.md
+*.txt
+LICENSE
+
+# Ignorowanie lokalnych środowisk wirtualnych
+venv/
+.env
+*.env
+
+# Ignorowanie logów i tymczasowych plików
 *.log
-*.tmp
-*.bak
-*.swp
 temp/
 tmp/
 
-# 📦 Pliki i foldery związane z budowaniem i pakowaniem
-dist/
-build/
-*.egg-info/
-*.egg
+# Ignorowanie notebooków Jupyter i innych plików deweloperskich
+*.ipynb
+tests/
+experiments/
 
-# 🖥️ Pliki specyficzne dla IDE i edytorów
-.idea/  # IntelliJ IDEA
-.vscode/  # Visual Studio Code
-*.sublime-project
-*.sublime-workspace
-
-# 📜 Pliki konfiguracyjne i lokalne
-.env
-*.local
-docker-compose.override.yml
-
-# 🗃️ Pliki danych i bazy danych
-*.sql
-*.sqlite3
-*.db
-
-# 📂 Foldery z danymi i modelami (jeśli nie chcesz ich kopiować do obrazu)
-data/
-models/
-logs/
-
-# 📜 Inne niepotrzebne pliki
-.DS_Store  # macOS
-Thumbs.db  # Windows
-*.md  # Pliki Markdown (np. README.md), jeśli nie są potrzebne w obrazie
+# Ignorowanie innych potencjalnych niepotrzebnych plików
+*.bak
+*.swp
+*.swo
+.vscode/
+train_user*

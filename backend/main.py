@@ -1,14 +1,31 @@
+import sys
+import os
+
+from models_tab import get_db_connection, router as models_router
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
 import time
 import mysql.connector
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware  # Dodaj import
 from pydantic import BaseModel
 from login import verify_credentials
 from users_tab import get_users, create_user
-from api.detection_api import DetectionAPI
 
-# Funkcja do czekania na bazę danych
-def wait_for_db():
-    while True:
+from api.detection_api import DetectionAPI
+from api.auto_label_api import AutoLabelAPI
+from api.auto_label_routes import router as auto_label_router
+from api.dataset_routes import router as dataset_router
+from api.detection_routes import router as detection_router
+
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+def wait_for_db(max_attempts=12, wait_seconds=5):
+    attempts = 0
+    while attempts < max_attempts:
         try:
             conn = mysql.connector.connect(
                 host="mysql-db",
@@ -18,85 +35,136 @@ def wait_for_db():
                 database="smle-database"
             )
             conn.close()
-            print("✅ Baza danych jest dostępna! ✅")
-            break
+            logger.info("✅ Baza danych jest dostępna! ✅")
+            return True
         except mysql.connector.Error as err:
-            print("⏳ Oczekiwanie na bazę danych. ⏳", err)
-            time.sleep(5)
+            attempts += 1
+            logger.error("⏳ Oczekiwanie na bazę danych, próba %d/%d: %s", attempts, max_attempts, err)
+            time.sleep(wait_seconds)
+    logger.error("❌ Nie udało się połączyć z bazą danych po %d próbach.", max_attempts)
+    return False
 
-# Czekamy na dostępność bazy danych przed startem
-wait_for_db()
+if not wait_for_db():
+    raise RuntimeError("Nie można uruchomić aplikacji bez połączenia z bazą danych.")
 
-# Inicjalizacja FastAPI
 app = FastAPI()
 
-# Inicjalizacja DetectionAPI
-detection_api = DetectionAPI()
+# Dodaj middleware CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Zezwól na wszystkie pochodzenia (dla testów)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Tworzymy model Pydantic do walidacji danych logowania
+detection_api = DetectionAPI()
+auto_label_api = AutoLabelAPI()
+
+# Rejestracja routerów
+app.include_router(auto_label_router)
+app.include_router(dataset_router)
+app.include_router(detection_router)
+app.include_router(models_router)
+
 class LoginRequest(BaseModel):
     username: str
     password: str
 
-# Model Pydantic do żądania detekcji
 class DetectionRequest(BaseModel):
     image_path: str
     algorithm: str
     model_version: str
 
-# Model Pydantic do żądania treningu
 class TrainingRequest(BaseModel):
-    dataset_dir: str
+    train_dir: str
     epochs: int
-    batch_size: int
     lr: float
-    num_workers: int = 10
-    patience: int = 8
-    coco_gt_path: str = "/app/data/val/annotations/coco.json"
+    model_name: str
+    coco_train_path: str
+    coco_gt_path: str = "/app/backend/data/val/annotations/instances_val.json"
+    host_train_path: str
+    host_val_path: str = None
     num_augmentations: int = 8
     resume: str = None
+    batch_size: int = 4
+    num_workers: int = 10
+    patience: int = 8
 
-# Endpoint logowania
 @app.post("/login")
 def login(request: LoginRequest):
     auth_response = verify_credentials(request.username, request.password)
     if auth_response:
-        return {"role": auth_response["role"]}
+        # Zwracamy pełne dane, w tym username i role
+        return {"role": auth_response["role"], "username": auth_response["username"]}
     else:
         raise HTTPException(status_code=401, detail="Nieprawidłowe dane logowania")
 
-# Endpoint do detekcji
-@app.post("/detect")
-def detect(request: DetectionRequest):
-    result = detection_api.analyze_with_model(
-        request.image_path, request.algorithm, request.model_version
-    )
-    if "Błąd" in result:
-        raise HTTPException(status_code=500, detail=result)
-    return {"result_path": result}
+@app.get("/models")
+def get_models():
+    """Endpoint do pobierania listy modeli z bazy danych"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # Zapytanie SQL, aby pobrać dane o modelach
+        cursor.execute("SELECT id, name, algorithm, version, accuracy, creation_date, training_date, status FROM model")
+        models = cursor.fetchall()  # Pobieramy wszystkie modele
+    except mysql.connector.Error as err:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Błąd zapytania: {err}")
+    
+    cursor.close()
+    conn.close()
+    
+    return models
 
-# Endpoint do treningu
+@app.get("/archives")
+def get_models():
+    """Endpoint do pobierania listy archive z bazy danych"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # Zapytanie SQL, aby pobrać dane o modelach
+        cursor.execute("SELECT id, action, user_id, model_id, date  FROM archive")
+        models = cursor.fetchall()  # Pobieramy wszystkie modele
+    except mysql.connector.Error as err:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Błąd zapytania: {err}")
+    
+    cursor.close()
+    conn.close()
+    
+    return models
+
+
 @app.post("/train")
 def train(request: TrainingRequest):
     train_args = [
-        "--dataset_dir", request.dataset_dir,
+        "--train_dir", request.train_dir,
         "--epochs", str(request.epochs),
-        "--batch_size", str(request.batch_size),
         "--lr", str(request.lr),
+        "--model_name", request.model_name,
+        "--coco_train_path", request.coco_train_path,
+        "--coco_gt_path", request.coco_gt_path,
+        "--host_train_path", request.host_train_path,
+        "--num_augmentations", str(request.num_augmentations),
+        "--batch_size", str(request.batch_size),
         "--num_workers", str(request.num_workers),
         "--patience", str(request.patience),
-        "--coco_gt_path", request.coco_gt_path,
-        "--num_augmentations", str(request.num_augmentations),
     ]
+    if request.host_val_path:
+        train_args.extend(["--host_val_path", request.host_val_path])
     if request.resume:
         train_args.extend(["--resume", request.resume])
 
-    result = detection_api.train_model(train_args)
-    if "Błąd" in result:
-        raise HTTPException(status_code=500, detail=result)
-    return {"message": "Trening zakończony", "output": result}
+    try:
+        result = detection_api.train_model(train_args)
+        return {"message": "Trening zakończony", "output": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Inne endpointy
 app.add_api_route("/users", get_users, methods=["GET"])
 app.add_api_route("/users", create_user, methods=["POST"])
 

@@ -1,0 +1,35 @@
+Program do autolabelingu wykorzystujący Mask_RCNN
+Do _MASK_RCNN_models dajemy cały model, _all.pth (z końcówką _checkpoint nie zadziała)
+Wpisujemy go do auto_label.py że chcemy użyć,
+
+Do folderu _images_before dajemy zdjęcia które ma przerobić,
+Gotowe prerobione zdjęcia trafiają do folderu images_annotations, wraz z odpowiadającym im .jsonem
+Do folderu images_debug idą zdjęcia z nałożonymi maskami i boxami w celach poglądowych
+
+python auto_label.py
+
+
+W labelme otwieramy katalog images_annotations
+
+
+!!!!!!!! UWAGA !!!!!!!!!!!!!!!
+
+KAŻDORAZOWO W LABELME WYŁĄCZAMY w file, "SAVE WITH IMAGE DATA"
+POWODUJE TO ZNACZĄCE OBCIĄŻENIE PROCESORA I NIEPOTRZEBNIE ZWIĘKSZA WIELKOŚC JSONA
+I JAK ZAZNACZAMY TO ZAWSZE WYBIERAMY AI-MASK (EDIT -> CREATE AI-MASK)
+
+!!!!!!!! UWAGA !!!!!!!!!!!!!!!
+
+
+Uruchamianie labelme:
+	conda create -n labelme_env python=3.10
+	conda activate labelme_env
+	pip install labelme
+	labelme
+
+	python -m venv labelme_env
+	.\labelme_env\Scripts\activate
+	pip install labelme
+	labelme
+
+

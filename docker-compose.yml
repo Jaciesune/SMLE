@@ -2,36 +2,27 @@ services:
   backend:
     build:
       context: .  # Ścieżka do katalogu z Dockerfile
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile  
     container_name: backend-app
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy  # Czeka na zdrowy stan MySQL
     environment:
       DATABASE_URL: mysql+asyncmy://user:password@mysql:3306/smle-database
     ports:
-      - "8000:8000"
+      - "8000:8000"  # Port dla FastAPI lub innego serwera backendowego
     volumes:
-      - ./backend:/app/backend
-    command: ["python", "/app/backend/main.py"]
-
-  maskrcnn:
-    build:
-      context: .
-      dockerfile: Dockerfile.maskrcnn
-    container_name: maskrcnn
-    volumes:
-      - ./backend/Mask_RCNN:/app/
-      - ./backend/MCNN:/app/MCNN
-      - ./backend/FasterRCNN:/app/FasterRCNN
+      - ./backend:/app/backend  # Montowanie katalogu backendu
+    tty: true
+    shm_size: 5g  # Ustawienie rozmiaru pamięci współdzielonej
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
-    # Kontener działa w trybie "na żądanie", nie uruchamiamy żadnego skryptu automatycznie
-    command: ["tail", "-f", "/dev/null"]  # Utrzymuje kontener w stanie uruchomionym
+              capabilities: [gpu]  # Obsługa GPU
+    command: ["python", "/app/backend/main.py"]  # Uruchamianie backendu
 
   mysql:
     image: mysql:latest
@@ -44,7 +35,8 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - ./smle_database_dump.sql:/docker-entrypoint-initdb.d/smle_database_dump.sql
+      - ./smle_database_dump.sql:/docker-entrypoint-initdb.d/smle_database_dump.sql  # Inicjalizacja bazy
+      - mysql_data:/var/lib/mysql  # Trwałe przechowywanie danych MySQL
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -53,4 +45,4 @@ services:
       timeout: 10s
 
 volumes:
-  mysql_data:
+  mysql_data:  # Definicja wolumenu dla MySQL

@@ -27,13 +27,20 @@ logger.addHandler(console_handler)
 
 # Transformacje
 data_transforms = A.Compose([
-    A.Resize(1024, 1024),
+    A.RandomRotate90(p=0.5),
+    A.Rotate(limit=15, p=0.5),
+    A.RandomResizedCrop(size=(1024, 1024), scale=(0.8, 1.0), ratio=(0.9, 1.1), p=0.5),
     A.HorizontalFlip(p=0.5),
     A.RandomBrightnessContrast(p=0.3),
     A.GaussNoise(p=0.2),
     A.RandomGamma(p=0.3),
+    
+    # 💥 ZAWSZE na końcu:
+    A.Resize(height=1024, width=1024),
     ToTensorV2(),
 ])
+
+
 
 def clear_memory():
     torch.cuda.empty_cache()
@@ -206,7 +213,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=0.00075)
     parser.add_argument('--model_name', default=None)
     parser.add_argument('--model_checkpoint', default=None)
-    parser.add_argument('--batch_size', type=int, default=2)
+    parser.add_argument('--batch_size', type=int, default=3)
     parser.add_argument('--coco_train_path', required=True)
     parser.add_argument('--coco_gt_path', required=True)
     parser.add_argument('--val_dir', required=True)  # Dodano, aby uniknąć błędu

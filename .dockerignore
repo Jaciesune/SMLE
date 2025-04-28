@@ -39,4 +39,5 @@ experiments/
 *.swp
 *.swo
 .vscode/
-train_user*
+
+SMLE APP/

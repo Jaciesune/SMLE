@@ -13,7 +13,7 @@ from functools import partial
 import psutil
 
 # Konfiguracja logowania
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 class RuryDataset(Dataset):
@@ -34,7 +34,15 @@ class RuryDataset(Dataset):
         self.augment = augment
         self.num_augmentations = num_augmentations if augment else 1
         self.image_dir = os.path.join(root, "images")  # Zakładamy, że obrazy są w podkatalogu "images"
-        self.num_processes = num_processes
+        
+        # Dostosowanie num_processes na podstawie obciążenia CPU
+        cpu_count = os.cpu_count()
+        cpu_usage = psutil.cpu_percent(interval=1)
+        if cpu_usage > 80:  # Jeśli obciążenie CPU jest wysokie
+            self.num_processes = min(num_processes, max(1, cpu_count // 2))
+            logger.warning("Wysokie obciążenie CPU (%.1f%%), zmniejszam num_processes do %d", cpu_usage, self.num_processes)
+        else:
+            self.num_processes = min(num_processes, cpu_count)
 
         # Ustalanie ścieżki do pliku adnotacji
         if annotation_path is None:
@@ -51,7 +59,7 @@ class RuryDataset(Dataset):
 
         self.image_info = {img['id']: img for img in self.annotations['images']}
 
-        # 3a: Walidacja adnotacji – sprawdzanie poprawności category_id
+        # Walidacja adnotacji – sprawdzanie poprawności category_id
         category_ids = {cat['id'] for cat in self.annotations['categories']}
         invalid_anns = [ann for ann in self.annotations['annotations'] if ann['category_id'] not in category_ids]
         if invalid_anns:
@@ -81,11 +89,11 @@ class RuryDataset(Dataset):
         logger.info("Załadowano %d obrazów z adnotacjami w %s", len(self.image_ids), self.image_dir)
 
         if not self.image_ids:
-            raise ValueError(f"Brak obrazów z adnotacjami i bboxami w {self.image_dir}")
+            raise ValueError(f"Brak obrazów z adnotacjami i bboxami w %s", self.image_dir)
 
         self.base_transform = T.Compose([T.ToTensor()])
 
-        # 1c: Dodanie augmentacji CoarseDropout (Cutout)
+        # Pipeline augmentacji (zgodny z albumentations<2.0.5)
         self.augment_transform = A.Compose([
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
@@ -121,14 +129,25 @@ class RuryDataset(Dataset):
             ),
             A.RandomSunFlare(
                 flare_roi=(0, 0, 1, 0.5),
-                num_flare_circles=(1, 3),  # Poprawny parametr
+                num_flare_circles_range=(1, 3),
                 src_radius=150,
                 p=0.2
             ),
-            A.RandomFog(fog_coef=(0.1, 0.3), p=0.1),
+            A.RandomFog(
+                fog_coef_range=(0.1, 0.3),
+                p=0.1
+            ),
             A.RandomRain(brightness_coefficient=0.9, drop_length=20, p=0.1),
-            A.RandomSnow(snow_point=(0.1, 0.3), p=0.1),
-            A.CoarseDropout(num_holes_limit=8, hole_height=64, hole_width=64, p=0.3),  # Cutout
+            A.RandomSnow(
+                snow_point_range=(0.1, 0.3),
+                p=0.1
+            ),
+            A.CoarseDropout(
+                num_holes_range=(5, 10),
+                hole_height_range=(32, 64),
+                hole_width_range=(32, 64),
+                p=0.3
+            ),
             A.Resize(height=image_size[1], width=image_size[0]),
         ], bbox_params=A.BboxParams(
             format='coco',
@@ -137,15 +156,14 @@ class RuryDataset(Dataset):
             min_visibility=0.3
         ), additional_targets={'masks': 'masks'})
 
-        # 1a: Inicjalizacja cache dla masek
+        # Inicjalizacja cache dla masek
         self.mask_cache = {}
 
     def __len__(self):
         return len(self.image_ids) * self.num_augmentations
 
     def decode_rle(self, segmentation, bbox, target_size):
-        """Dekoduje RLE do maski binarnej i pozycjonuje ją w granicach bboxa"""
-        # 1a: Cache'owanie zdekodowanych masek
+        """Dekoduje RLE do maski binarnej i pozycjonuje ją w granicach bboxa."""
         rle_key = str(segmentation["counts"]) + str(segmentation["size"])
         if rle_key in self.mask_cache:
             return self.mask_cache[rle_key]
@@ -214,6 +232,11 @@ class RuryDataset(Dataset):
             aug_boxes = augmented['bboxes']
             aug_masks = augmented['masks']
             aug_labels = augmented['category_ids']
+
+            # Walidacja po augmentacji
+            if np.any(image < 0) or np.any(image > 255) or np.any(np.isnan(image)):
+                logger.warning("Niepoprawne wartości w obrazie po augmentacji: %s", image_path)
+                return None
 
             height, width = image.shape[:2]
             filtered_boxes = []
@@ -292,16 +315,15 @@ class RuryDataset(Dataset):
         }
 
         if torch.isnan(image).any() or torch.isinf(image).any():
-            raise ValueError(f"NaN/Inf w obrazie: {image_info['file_name']}")
+            raise ValueError(f"NaN/Inf w obrazie: %s", image_info['file_name'])
         if torch.isnan(boxes).any() or torch.isinf(boxes).any():
-            raise ValueError(f"NaN/Inf w bboxach: {image_info['file_name']}")
+            raise ValueError(f"NaN/Inf w bboxach: %s", image_info['file_name'])
         if torch.isnan(masks).any() or torch.isinf(masks).any():
-            raise ValueError(f"NaN/Inf w maskach: {image_info['file_name']}")
+            raise ValueError(f"NaN/Inf w maskach: %s", image_info['file_name'])
 
         return image, target
 
     def __getitem__(self, idx):
-        # 1b: Dodanie limitu prób
         max_attempts = len(self.image_ids)
         attempts = 0
         while attempts < max_attempts:
@@ -310,19 +332,78 @@ class RuryDataset(Dataset):
                 return result
             idx = ((idx // self.num_augmentations + 1) % len(self.image_ids)) * self.num_augmentations + (idx % self.num_augmentations)
             attempts += 1
-        raise ValueError(f"Nie udało się znaleźć poprawnego obrazu po {max_attempts} próbach w zbiorze danych: {self.image_dir}")
+        raise ValueError(f"Nie udało się znaleźć poprawnego obrazu po %d próbach w zbiorze danych: %s", max_attempts, self.image_dir)
 
 def custom_collate_fn(batch):
     return tuple(zip(*batch))
 
-def get_data_loaders(train_dir, val_dir, batch_size=1, num_workers=4, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):
+def estimate_batch_size(image_size=(1024, 1024), max_batch_size=8, min_batch_size=1):
+    """
+    Estymuje batch_size na podstawie dostępnych zasobów systemowych i pamięci GPU.
+
+    Args:
+        image_size (tuple): Rozmiar obrazów (wysokość, szerokość).
+        max_batch_size (int): Maksymalny batch_size.
+        min_batch_size (int): Minimalny batch_size.
+
+    Returns:
+        int: Zalecany batch_size.
+    """
+    # Oblicz przybliżone zużycie pamięci na jeden obraz (RGB, 1024x1024, float32)
+    image_memory = image_size[0] * image_size[1] * 3 * 4  # 3 kanały, 4 bajty na float32
+    # Dodaj pamięć na maski i bboxy (przybliżenie)
+    additional_memory_per_image = 1024 * 1024 * 1 * 4  # 1 kanał maski, float32
+    total_memory_per_image = image_memory + additional_memory_per_image  # w bajtach
+
+    # Dostępna pamięć RAM
+    available_memory = psutil.virtual_memory().available  # w bajtach
+    cpu_count = os.cpu_count()
+
+    # Przyjmij, że możemy wykorzystać maksymalnie 70% dostępnej pamięci RAM na batch
+    usable_memory = available_memory * 0.7
+    max_images_by_memory = int(usable_memory // total_memory_per_image)
+
+    # Uwzględnij liczbę rdzeni CPU
+    max_images_by_cpu = cpu_count
+
+    # Sprawdź dostępną pamięć GPU, jeśli używamy CUDA
+    max_images_by_gpu = max_batch_size
+    if torch.cuda.is_available():
+        try:
+            # Pobierz dostępną pamięć GPU
+            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory  # w bajtach
+            gpu_memory_reserved = torch.cuda.memory_reserved(0)
+            gpu_memory_allocated = torch.cuda.memory_allocated(0)
+            gpu_memory_free = gpu_memory_total - gpu_memory_reserved - gpu_memory_allocated
+
+            # Przyjmij, że możemy wykorzystać maksymalnie 60% wolnej pamięci GPU
+            usable_gpu_memory = gpu_memory_free * 0.6
+            # Szacunkowe zużycie pamięci na GPU (obraz + maski + model Mask R-CNN)
+            memory_per_image_gpu = total_memory_per_image * 3  # Uwzględnia model Mask R-CNN
+            max_images_by_gpu = int(usable_gpu_memory // memory_per_image_gpu)
+
+            logger.info("Dostępna pamięć GPU: %.2f GB, szacowane zużycie na obraz: %.2f MB",
+                        gpu_memory_free / (1024 ** 3), memory_per_image_gpu / (1024 ** 2))
+        except Exception as e:
+            logger.warning("Nie można sprawdzić pamięci GPU: %s. Używam konserwatywnego batch_size.", str(e))
+            max_images_by_gpu = 1
+
+    # Oblicz maksymalny batch_size
+    max_possible_batch_size = min(max_images_by_memory, max_images_by_cpu, max_images_by_gpu, max_batch_size)
+    batch_size = max(min_batch_size, min(max_possible_batch_size, max_batch_size))
+
+    logger.info("Estymowany batch_size: %d (pamięć RAM: %.2f GB dostępna, pamięć GPU: %.2f GB, CPU: %d rdzeni)",
+                batch_size, available_memory / (1024 ** 3), gpu_memory_free / (1024 ** 3) if torch.cuda.is_available() else 0, cpu_count)
+    return batch_size
+
+def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=4, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):
     """
     Tworzy DataLoader'y dla danych treningowych i walidacyjnych.
 
     Args:
         train_dir (str): Ścieżka do katalogu z danymi treningowymi (np. ../../data/train).
         val_dir (str): Ścieżka do katalogu z danymi walidacyjnymi (np. ../../data/val).
-        batch_size (int): Rozmiar partii (batch size). Domyślnie 1.
+        batch_size (int, optional): Rozmiar partii (batch size). Jeśli None, estymowany automatycznie.
         num_workers (int): Liczba wątków dla DataLoadera. Domyślnie 4.
         num_augmentations (int): Liczba augmentacji na obraz. Domyślnie 1.
         coco_train_path (str): Ścieżka do pliku COCO z adnotacjami treningowymi.
@@ -332,16 +413,41 @@ def get_data_loaders(train_dir, val_dir, batch_size=1, num_workers=4, num_augmen
     Returns:
         tuple: (train_loader, val_loader) - DataLoader'y dla danych treningowych i walidacyjnych.
     """
-    # 1d: Automatyczne dostosowanie num_workers
+    # Automatyczne dostosowanie batch_size, jeśli nie podano
+    if batch_size is None:
+        batch_size = estimate_batch_size(image_size=(1024, 1024), max_batch_size=8, min_batch_size=1)
+
+    # Automatyczne dostosowanie num_workers
     available_memory = psutil.virtual_memory().available / (1024 ** 3)  # Dostępna pamięć w GB
     cpu_count = os.cpu_count()
+    cpu_usage = psutil.cpu_percent(interval=1)
+    
     if available_memory < 4:  # Jeśli mniej niż 4GB wolnej pamięci
         num_workers = min(num_workers, max(1, cpu_count // 2))
         logger.warning("Mało pamięci systemowej (%.2f GB), zmniejszam num_workers do %d", available_memory, num_workers)
+    elif cpu_usage > 80:  # Jeśli obciążenie CPU jest wysokie
+        num_workers = min(num_workers, max(1, cpu_count // 2))
+        logger.warning("Wysokie obciążenie CPU (%.1f%%), zmniejszam num_workers do %d", cpu_usage, num_workers)
     else:
         num_workers = min(num_workers, cpu_count)
-    
-    logger.info("Używam %d wątków w DataLoader", num_workers)
+
+    # Dynamiczne zarządzanie pin_memory
+    use_pin_memory = torch.cuda.is_available()
+    if use_pin_memory:
+        try:
+            gpu_memory_free = torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_reserved(0) - torch.cuda.memory_allocated(0)
+            if gpu_memory_free < 1.5 * 1024 ** 3:  # Próg 1.5 GB
+                use_pin_memory = False
+                logger.warning("Za mało pamięci GPU (%.2f GB), wyłączam pin_memory", gpu_memory_free / (1024 ** 3))
+        except Exception as e:
+            logger.warning("Nie można sprawdzić pamięci GPU: %s. Wyłączam pin_memory.", str(e))
+            use_pin_memory = False
+
+    logger.info("Używam batch_size=%d, %d wątków w DataLoader, pin_memory=%s", batch_size, num_workers, use_pin_memory)
+
+    # Zwolnij pamięć GPU przed utworzeniem DataLoaderów
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     # Ustal domyślne ścieżki do adnotacji, jeśli nie podano
     if coco_train_path is None:
@@ -377,7 +483,7 @@ def get_data_loaders(train_dir, val_dir, batch_size=1, num_workers=4, num_augmen
         shuffle=True,
         num_workers=num_workers,
         collate_fn=custom_collate_fn,
-        pin_memory=False,  # Przyspiesza transfer danych na GPU
+        pin_memory=False,   # use_pin_memory
         prefetch_factor=2 if num_workers > 0 else None
     )
 
@@ -388,7 +494,7 @@ def get_data_loaders(train_dir, val_dir, batch_size=1, num_workers=4, num_augmen
         shuffle=False,
         num_workers=num_workers,
         collate_fn=custom_collate_fn,
-        pin_memory=False,
+        pin_memory=False,   # use_pin_memory
         prefetch_factor=2 if num_workers > 0 else None
     )
 

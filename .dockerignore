@@ -19,9 +19,10 @@ docker-compose.yml
 LICENSE
 
 # Ignorowanie lokalnych środowisk wirtualnych
-venv/
 .env
 *.env
+.venv/
+*venv
 
 # Ignorowanie logów i tymczasowych plików
 *.log

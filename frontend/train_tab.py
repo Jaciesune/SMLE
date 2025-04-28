@@ -39,7 +39,7 @@ class TrainingThread(QtCore.QThread):
         self._running = False
         self._stopped_by_user = True
         self.train_api.stop()
-        self.wait(2000)
+        self.wait()  # Czekamy na pełne zakończenie wątku
 
 class TrainTab(QtWidgets.QWidget):
     def __init__(self, username):
@@ -221,7 +221,7 @@ class TrainTab(QtWidgets.QWidget):
         ]
         if val_path:
             args.extend(["--host_val_path", val_path])
-            args.extend(["--val_dir", container_val_path.as_posix()])  # Dodajemy --val_dir
+            args.extend(["--val_dir", container_val_path.as_posix()])
 
         if model_version != "Nowy model":
             logger.info(f"Wybrano model do doszkolenia: {model_version}")
@@ -275,6 +275,7 @@ class TrainTab(QtWidgets.QWidget):
 
     def stop_training(self):
         if self.training_thread and self.training_thread.isRunning():
+            logger.info("Rozpoczynanie zatrzymywania treningu...")
             self.training_thread.stop()
             completed = max(0, self.completed_epochs - self.initial_epoch + 1)
             self.log_text.appendPlainText(f"Zatrzymywanie treningu... Ukończono {completed} z {self.user_epochs} epok (od epoki {self.initial_epoch} do {self.completed_epochs}).")
@@ -282,13 +283,14 @@ class TrainTab(QtWidgets.QWidget):
             self.stop_btn.setEnabled(False)
             self.progress_bar.setVisible(False)
             self.train_btn.setEnabled(True)
-            logger.info("Żądanie zatrzymania treningu.")
+            logger.info("Zatrzymywanie treningu zakończone.")
         else:
             self.log_text.appendPlainText("Brak aktywnego treningu do zatrzymania.")
             self.train_btn.setEnabled(True)
             self.stop_btn.setEnabled(False)
             self.progress_bar.setVisible(False)
             self.training_thread = None
+            logger.info("Próba zatrzymania treningu, ale brak aktywnego wątku.")
 
     def update_log(self, log_line):
         logger.debug(f"Otrzymano log: {log_line}")

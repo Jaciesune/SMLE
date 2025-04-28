@@ -1,8 +1,9 @@
-# backend/api/test_distilled.py
-
 import os
 import torch
 import torchvision
+import torchvision.transforms.functional as F
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from torch.utils.data import DataLoader
 from torchvision.datasets import CocoDetection
 from torchvision.transforms import functional as TF
@@ -12,9 +13,12 @@ from torchvision.models.detection.backbone_utils import BackboneWithFPN
 from torchvision.models import resnet18
 
 # Ścieżki
+VISUALS_DIR = "backend/val_distilled_visuals"
 DISTILLED_DIR = "backend/distilled_models"
-TEST_IMAGES_DIR = "backend/data/test/images/"
-TEST_ANNOTATIONS_PATH = "backend/data/test/annotations/instances_test.json"
+TEST_IMAGES_DIR = "backend/data/val/images/"
+TEST_ANNOTATIONS_PATH = "backend/data/val/annotations/instances_val.json"
+
+os.makedirs(VISUALS_DIR, exist_ok=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -49,11 +53,30 @@ def evaluate_model(model, dataloader):
     total_detections = 0
 
     with torch.no_grad():
-        for images, _ in tqdm(dataloader, desc="Testowanie"):
+        for idx, (images, _) in enumerate(tqdm(dataloader, desc="Testowanie")):
             images = list(img.to(device) for img in images)
             outputs = model(images)
-            for output in outputs:
+
+            for i, output in enumerate(outputs):
+                img = images[i].cpu()
+                img = F.to_pil_image(img)
+
+                fig, ax = plt.subplots(1)
+                ax.imshow(img)
+
+                boxes = output["boxes"].cpu().numpy()
+                for box in boxes:
+                    x_min, y_min, width, height = box
+                    rect = patches.Rectangle((x_min, y_min), width, height, linewidth=1, edgecolor='r', facecolor='none')
+                    ax.add_patch(rect)
+
+                save_path = os.path.join(VISUALS_DIR, f"test_image_{total_images+i}.png")
+                plt.axis('off')
+                plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
+                plt.close(fig)
+
                 total_detections += len(output["boxes"])
+
             total_images += len(images)
 
     print(f"\nŚrednia liczba wykryć na obraz: {total_detections / total_images:.2f}")

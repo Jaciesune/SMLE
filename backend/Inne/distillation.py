@@ -12,7 +12,7 @@ from tqdm import tqdm
 from torchvision.models.detection.backbone_utils import BackboneWithFPN
 from torchvision.models.detection import MaskRCNN, maskrcnn_resnet50_fpn_v2
 
-# Ścieżki do danych i modeli
+# Ścieżki
 MODELS_DIR = "backend/Mask_RCNN/models"
 DISTILLED_DIR = "backend/distilled_models"
 TRAIN_IMAGES_DIR = "backend/data/train/images/"
@@ -33,7 +33,6 @@ def load_teacher_model(model_path):
     )
 
     checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
-    
     if "model_state_dict" in checkpoint:
         checkpoint = checkpoint["model_state_dict"]
 
@@ -61,26 +60,13 @@ class CocoTrainDataset(CocoDetection):
     def __getitem__(self, idx):
         img, target = super().__getitem__(idx)
         img = TF.to_tensor(img)
-        target = self.prepare_target(target)
         return img, target
-
-    def prepare_target(self, target):
-        boxes, labels = [], []
-        for obj in target:
-            boxes.append(obj["bbox"])
-            labels.append(obj["category_id"])
-
-        boxes = torch.tensor(boxes, dtype=torch.float32) if boxes else torch.zeros((0, 4), dtype=torch.float32)
-        labels = torch.tensor(labels, dtype=torch.int64) if labels else torch.zeros((0,), dtype=torch.int64)
-
-        return {"boxes": boxes, "labels": labels}
 
 def collate_fn(batch):
     return tuple(zip(*batch))
 
 def distillation_loss(student_outputs, teacher_outputs):
     losses = []
-
     for s, t in zip(student_outputs, teacher_outputs):
         num_boxes = min(s["boxes"].shape[0], t["boxes"].shape[0])
 
@@ -97,7 +83,7 @@ def distillation_loss(student_outputs, teacher_outputs):
             losses.append(F.l1_loss(s["masks"][:mask_num], t["masks"][:mask_num]))
 
     if losses:
-        return sum(losses)
+        return sum(losses) / len(losses)
     else:
         return torch.tensor(0.0, device=device, requires_grad=True)
 
@@ -105,28 +91,18 @@ def distill_model(teacher, student, dataloader, epochs=10):
     optimizer = torch.optim.SGD(student.parameters(), lr=0.001, momentum=0.9)
 
     for epoch in range(epochs):
-        student.eval()
-        running_loss = 0.0
         print(f"Epoch {epoch+1}/{epochs}")
+        running_loss = 0.0
 
-        for images, _ in tqdm(dataloader):
+        for images, _ in tqdm(dataloader, desc=f"Destylacja Epoch {epoch+1}"):
             images = list(img.to(device) for img in images)
 
             with torch.no_grad():
                 teacher_outputs = teacher(images)
 
-            dummy_targets = []
-            for img in images:
-                dummy_targets.append({
-                    "boxes": torch.zeros((0, 4), dtype=torch.float32, device=img.device),
-                    "labels": torch.zeros((0,), dtype=torch.int64, device=img.device),
-                    "masks": torch.zeros((0, img.shape[1], img.shape[2]), dtype=torch.uint8, device=img.device),
-                })
-
+            student.eval()
             with torch.set_grad_enabled(True):
-                student_outputs = student(images, dummy_targets)
-                if isinstance(student_outputs, dict):
-                    student_outputs = student(images)
+                student_outputs = student(images)
 
                 loss = distillation_loss(student_outputs, teacher_outputs)
 
@@ -136,7 +112,9 @@ def distill_model(teacher, student, dataloader, epochs=10):
 
             running_loss += loss.item()
 
-        print(f"Loss: {running_loss / len(dataloader)}")
+            torch.cuda.empty_cache()
+
+        print(f"Loss: {running_loss / len(dataloader):.4f}")
 
 def save_student_model(student, save_path):
     torch.save(student.state_dict(), save_path)
@@ -157,9 +135,7 @@ def run_distillation(selected_model_name):
     distilled_model_name = selected_model_name.replace(".pth", "_distilled.pth")
     distilled_model_path = os.path.join(DISTILLED_DIR, distilled_model_name)
 
-    if not os.path.exists(DISTILLED_DIR):
-        os.makedirs(DISTILLED_DIR)
-
+    os.makedirs(DISTILLED_DIR, exist_ok=True)
     save_student_model(student, distilled_model_path)
     print(f"Destylat zapisany: {distilled_model_path}")
 

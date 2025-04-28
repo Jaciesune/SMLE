@@ -74,7 +74,7 @@ class TrainTab(QtWidgets.QWidget):
         layout.addRow("Ścieżka do danych treningowych:", dataset_layout)
 
         self.val_path_input = QtWidgets.QLineEdit()
-        self.val_path_btn = QtWidgets.QPushButton("Wybierz dane walidacyjne (opcjonalne)")
+        self.val_path_btn = QtWidgets.QPushButton("Wybierz dane walidacyjne")
         self.val_path_btn.clicked.connect(self.select_val_dataset)
         val_layout = QtWidgets.QHBoxLayout()
         val_layout.addWidget(self.val_path_input)

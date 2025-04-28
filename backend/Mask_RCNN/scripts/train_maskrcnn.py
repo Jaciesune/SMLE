@@ -15,8 +15,8 @@ from tqdm import tqdm
 
 # === KONFIGURACJA ===
 CONFIDENCE_THRESHOLD = 0.7
-NMS_THRESHOLD = 0.5
-DETECTION_PER_IMAGE = 500
+NMS_THRESHOLD = 1000        # Liczba propozycji przed i po NMS
+DETECTION_PER_IMAGE = 500   # Maksymalna liczba detekcji na obraz
 NUM_CLASSES = 2
 
 BASE_DIR = "/app/backend/Mask_RCNN"
@@ -28,8 +28,6 @@ LOGS_VAL_DIR = os.path.join(BASE_DIR, "logs/val")
 DEFAULT_TRAIN_DIR = "/app/train_data"
 DEFAULT_VAL_DIR = "/app/backend/data/val"
 
-DEFAULT_NUM_WORKERS = 1
-DEFAULT_BATCH_SIZE = 1
 DEFAULT_EPOCHS = 20
 DEFAULT_LR = 0.0005
 DEFAULT_PATIENCE = 8
@@ -45,9 +43,7 @@ MIN_LR = 1e-6
 def parse_args():
     parser = argparse.ArgumentParser(description="Trening Mask R-CNN (v2)")
     parser.add_argument("--train_dir", type=str, default=DEFAULT_TRAIN_DIR, help="Ścieżka do danych treningowych")
-    parser.add_argument("--val_dir", type=str, default=DEFAULT_VAL_DIR, help="Ścieżka do danych walidacyjnych")  # Dodajemy --val_dir
-    parser.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS, help="Liczba wątków dla DataLoadera")
-    parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE, help="Rozmiar batcha")
+    parser.add_argument("--val_dir", type=str, default=DEFAULT_VAL_DIR, help="Ścieżka do danych walidacyjnych")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help="Liczba epok do wykonania")
     parser.add_argument("--lr", type=float, default=DEFAULT_LR, help="Początkowa wartość learning rate")
     parser.add_argument("--patience", type=int, default=DEFAULT_PATIENCE, help="Liczba epok bez poprawy dla Early Stopping")
@@ -133,7 +129,7 @@ def train_model(args, is_api_call=False):
     os.makedirs(MODELS_DIR, exist_ok=True)
 
     train_dir = args.train_dir
-    val_dir = args.val_dir  # Używamy podanego --val_dir zamiast DEFAULT_VAL_DIR
+    val_dir = args.val_dir
 
     coco_train_path = args.coco_train_path if args.coco_train_path else os.path.join(train_dir, "annotations", "instances_train.json")
     coco_val_path = args.coco_gt_path if args.coco_gt_path else os.path.join(val_dir, "annotations", "instances_val.json")
@@ -147,8 +143,6 @@ def train_model(args, is_api_call=False):
     train_loader, val_loader = get_data_loaders(
         train_dir=train_dir,
         val_dir=val_dir,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
         num_augmentations=args.num_augmentations,
         coco_train_path=coco_train_path,
         coco_val_path=coco_val_path

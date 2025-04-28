@@ -60,10 +60,37 @@ class CocoTrainDataset(CocoDetection):
     def __getitem__(self, idx):
         img, target = super().__getitem__(idx)
         img = TF.to_tensor(img)
+        target = self.prepare_target(target)
         return img, target
 
+    def prepare_target(self, target):
+        boxes, labels, masks = [], [], []
+        for obj in target:
+            x, y, width, height = obj["bbox"]
+            x_min = x
+            y_min = y
+            x_max = x + width
+            y_max = y + height
+            boxes.append([x_min, y_min, x_max, y_max])
+            labels.append(obj["category_id"])
+            
+            # Tworzymy sztuczną maskę 10x10
+            masks.append(torch.zeros((10, 10), dtype=torch.uint8))
+
+        if boxes:
+            boxes = torch.tensor(boxes, dtype=torch.float32)
+            labels = torch.tensor(labels, dtype=torch.int64)
+            masks = torch.stack(masks)
+        else:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros((0,), dtype=torch.int64)
+            masks = torch.zeros((0, 10, 10), dtype=torch.uint8)
+
+        return {"boxes": boxes, "labels": labels, "masks": masks}
+
 def collate_fn(batch):
-    return tuple(zip(*batch))
+    images, targets = list(zip(*batch))
+    return list(images), list(targets)
 
 def distillation_loss(student_outputs, teacher_outputs):
     losses = []
@@ -94,21 +121,29 @@ def distill_model(teacher, student, dataloader, epochs=10):
         print(f"Epoch {epoch+1}/{epochs}")
         running_loss = 0.0
 
-        for images, _ in tqdm(dataloader, desc=f"Destylacja Epoch {epoch+1}"):
+        for images, targets in tqdm(dataloader, desc=f"Destylacja Epoch {epoch+1}"):
             images = list(img.to(device) for img in images)
+            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
             with torch.no_grad():
                 teacher_outputs = teacher(images)
 
-            student.eval()
+            student.train()
             with torch.set_grad_enabled(True):
+                detector_losses = student(images, targets)  # <-- tylko jedna zmienna!
+                loss_detection = sum(loss for loss in detector_losses.values())
+
+            student.eval()
+            with torch.no_grad():
                 student_outputs = student(images)
 
-                loss = distillation_loss(student_outputs, teacher_outputs)
+            loss_distill = distillation_loss(student_outputs, teacher_outputs)
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            loss = loss_detection + 0.5 * loss_distill  # 0.5 = waga destylacji
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
             running_loss += loss.item()
 

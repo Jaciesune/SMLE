@@ -66,8 +66,13 @@ def evaluate_model(model, dataloader):
 
                 boxes = output["boxes"].cpu().numpy()
                 for box in boxes:
-                    x_min, y_min, width, height = box
-                    rect = patches.Rectangle((x_min, y_min), width, height, linewidth=1, edgecolor='r', facecolor='none')
+                    x_min, y_min, x_max, y_max = box
+                    width = x_max - x_min
+                    height = y_max - y_min
+                    rect = patches.Rectangle(
+                        (x_min, y_min), width, height,
+                        linewidth=1, edgecolor='r', facecolor='none'
+                    )
                     ax.add_patch(rect)
 
                 save_path = os.path.join(VISUALS_DIR, f"test_image_{total_images+i}.png")

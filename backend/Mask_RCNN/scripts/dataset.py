@@ -355,7 +355,7 @@ class RuryDataset(Dataset):
 def custom_collate_fn(batch):
     return tuple(zip(*batch))
 
-def estimate_batch_size(image_size, max_batch_size=8, min_batch_size=1, use_amp=True, is_training=True):
+def estimate_batch_size(image_size, max_batch_size=16, min_batch_size=1, use_amp=True, is_training=True):
     """
     Estymuje batch size na podstawie dostępnej pamięci RAM i VRAM, uwzględniając pesymistyczną liczbę obiektów na obraz.
     

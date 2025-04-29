@@ -1,43 +1,67 @@
 import torch
+from torch.amp import autocast, GradScaler
 import cv2
 import numpy as np
 import os
 from pycocotools.coco import COCO
 from pycocotools import mask as coco_mask
 from pycocotools.cocoeval import COCOeval
+import gc
 
 # Funkcja do treningu jednej epoki
-def train_one_epoch(model, dataloader, optimizer, device, epoch):
+def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_steps=8):
     """
-    Trenuje model przez jedną epokę.
+    Trenuje model przez jedną epokę z użyciem mixed precision (AMP) i akumulacji gradientów.
     
     Args:
         model: Model PyTorch do treningu
         dataloader: DataLoader z danymi treningowymi
-        optimizer: Optymalizator (np. Adam)
+        optimizer: Optymalizator (np. SGD)
         device: Urządzenie (CPU/GPU)
         epoch: Numer bieżącej epoki
+        accumulation_steps: Liczba kroków akumulacji gradientów
     Returns:
         Średnia strata dla epoki
     """
+    scaler = GradScaler('cuda')
     model.train()
     całkowita_strata = 0
 
     print(f"\nEpoka {epoch}... (Batchy: {len(dataloader)})")
+    optimizer.zero_grad()
 
     for batch_idx, (obrazy, cele) in enumerate(dataloader):
+        # Zwolnienie pamięci GPU i synchronizacja
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
         obrazy = [img.to(device) for img in obrazy]
         nowe_cele = [{k: v.to(device) for k, v in t.items()} for t in cele]
 
-        słownik_strat = model(obrazy, nowe_cele)
-        strata = sum(strata for strata in słownik_strat.values())
+        with autocast('cuda'):
+            słownik_strat = model(obrazy, nowe_cele)
+            strata = sum(strata for strata in słownik_strat.values()) / accumulation_steps
 
+        scaler.scale(strata).backward()
+
+        if (batch_idx + 1) % accumulation_steps == 0:
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+
+        całkowita_strata += strata.item() * accumulation_steps
+        print(f"Batch {batch_idx+1}/{len(dataloader)} - Strata: {strata.item() * accumulation_steps:.4f}")
+
+        # Zwolnienie pamięci RAM po każdym batchu
+        del obrazy, nowe_cele, słownik_strat, strata
+        gc.collect()
+
+    # Ostatni krok, jeśli liczba batchy nie jest podzielna przez accumulation_steps
+    if (batch_idx + 1) % accumulation_steps != 0:
+        scaler.step(optimizer)
+        scaler.update()
         optimizer.zero_grad()
-        strata.backward()
-        optimizer.step()
-
-        całkowita_strata += strata.item()
-        print(f"Batch {batch_idx+1}/{len(dataloader)} - Strata: {strata.item():.4f}")
 
     return całkowita_strata / len(dataloader)
 
@@ -128,7 +152,7 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
     # Wczytanie danych ground truth
     coco_gt = COCO(ścieżka_coco_gt)
     coco_dt = []
-    nowy_rozmiar = (1024, 1024)  # Docelowy rozmiar
+    nowy_rozmiar = (1024, 1024)  # Docelowy rozmiar - może wymagać dostosowania, jeśli zmienisz image_size
 
     # Przeskalowanie adnotacji ground truth
     orig_sizes = {img["id"]: (img["height"], img["width"]) for img in coco_gt.loadImgs(coco_gt.getImgIds())}
@@ -202,14 +226,20 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
     print(f"Walidacja epoki {epoch}...")
 
     for idx, (obrazy, cele) in enumerate(dataloader):
+        # Zwolnienie pamięci GPU i synchronizacja
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
         obrazy = [img.to(device) for img in obrazy]
         nowe_cele = [{k: v.to(device) for k, v in t.items()} for t in cele]
 
         # Obliczenie straty w trybie treningowym
         model.train()
         with torch.no_grad():
-            słownik_strat = model(obrazy, nowe_cele)
-            strata_walidacyjna = sum(strata for strata in słownik_strat.values())
+            with autocast('cuda'):
+                słownik_strat = model(obrazy, nowe_cele)
+                strata_walidacyjna = sum(strata for strata in słownik_strat.values())
         całkowita_strata_walidacyjna += strata_walidacyjna.item()
 
         # Predykcje w trybie ewaluacji

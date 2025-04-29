@@ -56,7 +56,7 @@ class RuryDataset(Dataset):
 
         # Sprawdzenie, czy plik adnotacji istnieje
         if not os.path.exists(self.annotation_path):
-            raise FileNotFoundError(f"Nie znaleziono pliku adnotacji: %s", self.annotation_path)
+            raise FileNotFoundError(f"Nie znaleziono pliku adnotacji: {self.annotation_path}")
         with open(self.annotation_path, 'r') as f:
             self.annotations = json.load(f)
 
@@ -69,7 +69,7 @@ class RuryDataset(Dataset):
             logger.warning("Znaleziono adnotacje z niepoprawnymi category_id: %s", invalid_anns)
             self.annotations['annotations'] = [ann for ann in self.annotations['annotations'] if ann['category_id'] in category_ids]
 
-        # Statystyki liczby obiektów
+        # Statystyki liczby obiektów i sortowanie według liczby adnotacji
         anns_per_image = {}
         for ann in self.annotations['annotations']:
             img_id = ann['image_id']
@@ -99,6 +99,11 @@ class RuryDataset(Dataset):
                 logger.warning("Pomijam obraz bez bboxów: %s", image_path)
                 continue
             self.image_ids.append(img_id)
+
+        # Sortowanie image_ids według liczby adnotacji (od najmniejszej do największej)
+        self.image_ids.sort(key=lambda img_id: anns_per_image.get(img_id, 0))
+        logger.info("Posortowano obrazy według liczby adnotacji: pierwsza próbka ma %d adnotacji, ostatnia %d",
+                    anns_per_image.get(self.image_ids[0], 0), anns_per_image.get(self.image_ids[-1], 0))
 
         logger.info("Załadowano %d obrazów z adnotacjami w %s", len(self.image_ids), self.image_dir)
 
@@ -206,136 +211,134 @@ class RuryDataset(Dataset):
         image_info = self.image_info[image_id]
         image_path = os.path.join(self.image_dir, image_info['file_name'])
 
-        # Wczytaj obraz
-        image = cv2.imread(image_path)
-        if image is None:
-            logger.warning("Nie można wczytać obrazu: %s, pomijam...", image_path)
-            return None
+        try:
+            # Wczytaj obraz
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Nie można wczytać obrazu: {image_path}")
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            orig_height, orig_width = image.shape[:2]
 
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        orig_height, orig_width = image.shape[:2]
+            # Wczytaj adnotacje
+            anns = [a for a in self.annotations['annotations'] if a['image_id'] == image_id]
+            if not anns:
+                raise ValueError(f"Brak adnotacji dla obrazu: {image_path}")
 
-        # Wczytaj adnotacje
-        anns = [a for a in self.annotations['annotations'] if a['image_id'] == image_id]
-        if not anns:
-            logger.warning("Brak adnotacji dla obrazu: %s, pomijam...", image_path)
-            return None
+            boxes = [ann['bbox'] for ann in anns]
+            masks = [self.decode_rle(ann['segmentation'], ann['bbox'], (orig_height, orig_width)) 
+                     if 'segmentation' in ann else None for ann in anns]
+            labels = [ann['category_id'] for ann in anns]
 
-        boxes = [ann['bbox'] for ann in anns]
-        masks = [self.decode_rle(ann['segmentation'], ann['bbox'], (orig_height, orig_width)) 
-                 if 'segmentation' in ann else None for ann in anns]
-        labels = [ann['category_id'] for ann in anns]
+            # Augmentacja
+            if self.augment and aug_idx > 0:
+                valid_boxes = boxes
+                valid_labels = labels
+                valid_masks = masks
 
-        # Augmentacja
-        if self.augment and aug_idx > 0:
-            valid_boxes = boxes
-            valid_labels = labels
-            valid_masks = masks
+                if not any(mask is not None for mask in valid_masks):
+                    valid_masks = [np.zeros((orig_height, orig_width), dtype=np.uint8) for _ in range(len(valid_boxes))]
 
-            if not any(mask is not None for mask in valid_masks):
-                valid_masks = [np.zeros((orig_height, orig_width), dtype=np.uint8) for _ in range(len(valid_boxes))]
+                aug_data = {
+                    'image': image,
+                    'bboxes': valid_boxes,
+                    'category_ids': valid_labels,
+                    'masks': valid_masks
+                }
+                augmented = self.augment_transform(**aug_data)
+                image = augmented['image']
+                aug_boxes = augmented['bboxes']
+                aug_masks = augmented['masks']
+                aug_labels = augmented['category_ids']
 
-            aug_data = {
-                'image': image,
-                'bboxes': valid_boxes,
-                'category_ids': valid_labels,
-                'masks': valid_masks
-            }
-            augmented = self.augment_transform(**aug_data)
-            image = augmented['image']
-            aug_boxes = augmented['bboxes']
-            aug_masks = augmented['masks']
-            aug_labels = augmented['category_ids']
+                # Walidacja po augmentacji
+                if np.any(image < 0) or np.any(image > 255) or np.any(np.isnan(image)):
+                    raise ValueError(f"Niepoprawne wartości w obrazie po augmentacji: {image_path}")
 
-            # Walidacja po augmentacji
-            if np.any(image < 0) or np.any(image > 255) or np.any(np.isnan(image)):
-                logger.warning("Niepoprawne wartości w obrazie po augmentacji: %s", image_path)
-                return None
+                height, width = image.shape[:2]
+                filtered_boxes = []
+                filtered_labels = []
+                filtered_masks = []
 
-            height, width = image.shape[:2]
-            filtered_boxes = []
-            filtered_labels = []
-            filtered_masks = []
+                for bbox, label, mask in zip(aug_boxes, aug_labels, aug_masks):
+                    x, y, w, h = map(int, bbox)
+                    x = max(0, min(x, width - 1))
+                    y = max(0, min(y, height - 1))
+                    x_end = max(0, min(x + w, width - 1))
+                    y_end = max(0, min(y + h, height - 1))
+                    
+                    w = x_end - x
+                    h = y_end - y
+                    
+                    if w > 0 and h > 0:
+                        filtered_boxes.append([x, y, w, h])
+                        filtered_labels.append(label)
+                        filtered_masks.append(mask)
 
-            for bbox, label, mask in zip(aug_boxes, aug_labels, aug_masks):
-                x, y, w, h = map(int, bbox)
-                x = max(0, min(x, width - 1))
-                y = max(0, min(y, height - 1))
-                x_end = max(0, min(x + w, width - 1))
-                y_end = max(0, min(y + h, height - 1))
-                
-                w = x_end - x
-                h = y_end - y
-                
-                if w > 0 and h > 0:
-                    filtered_boxes.append([x, y, w, h])
-                    filtered_labels.append(label)
-                    filtered_masks.append(mask)
+                boxes = filtered_boxes
+                labels = filtered_labels
+                masks = filtered_masks
 
-            boxes = filtered_boxes
-            labels = filtered_labels
-            masks = filtered_masks
+                if len(boxes) == 0:
+                    raise ValueError(f"Obraz {image_path} (aug_idx={aug_idx}) nie ma bboxów po augmentacji")
+            else:
+                image = cv2.resize(image, self.image_size)
+                scale_x = self.image_size[0] / orig_width
+                scale_y = self.image_size[1] / orig_height
+                boxes = [[x * scale_x, y * scale_y, w * scale_x, h * scale_y] 
+                         for x, y, w, h in boxes]
+                masks = [cv2.resize(mask, self.image_size, interpolation=cv2.INTER_NEAREST) if mask is not None else None 
+                         for mask in masks]
 
             if len(boxes) == 0:
-                logger.warning(f"Obraz {image_path} (aug_idx={aug_idx}) nie ma bboxów po augmentacji, pomijam...")
-                return None
-        else:
-            image = cv2.resize(image, self.image_size)
-            scale_x = self.image_size[0] / orig_width
-            scale_y = self.image_size[1] / orig_height
-            boxes = [[x * scale_x, y * scale_y, w * scale_x, h * scale_y] 
-                     for x, y, w, h in boxes]
-            masks = [cv2.resize(mask, self.image_size, interpolation=cv2.INTER_NEAREST) if mask is not None else None 
-                     for mask in masks]
+                raise ValueError(f"Obraz {image_path} nie ma bboxów po skalowaniu")
 
-        if len(boxes) == 0:
-            logger.warning(f"Obraz {image_path} nie ma bboxów po skalowaniu, pomijam...")
+            image = self.base_transform(image)
+            boxes = torch.as_tensor(boxes, dtype=torch.float32)
+            labels = torch.as_tensor(labels, dtype=torch.int64)
+            
+            if masks and all(m is not None for m in masks):
+                masks = torch.stack([torch.as_tensor(m, dtype=torch.uint8) for m in masks], dim=0)
+            else:
+                masks = torch.zeros((0, self.image_size[1], self.image_size[0]), dtype=torch.uint8)
+
+            if len(boxes) > 0:
+                boxes = torch.stack([
+                    boxes[:, 0],
+                    boxes[:, 1],
+                    boxes[:, 0] + boxes[:, 2],
+                    boxes[:, 1] + boxes[:, 3]
+                ], dim=1)
+                invalid_boxes = (boxes[:, 2] <= boxes[:, 0]) | (boxes[:, 3] <= boxes[:, 1])
+                if invalid_boxes.any():
+                    logger.warning("Niepoprawne bboxy w %s: %s", image_info['file_name'], boxes[invalid_boxes])
+                    boxes = boxes[~invalid_boxes]
+                    labels = labels[~invalid_boxes]
+                    masks = masks[~invalid_boxes] if masks.shape[0] > 0 else masks
+
+            if len(boxes) == 0:
+                raise ValueError(f"Obraz {image_path} nie ma bboxów po finalnym filtrowaniu")
+
+            target = {
+                'boxes': boxes,
+                'labels': labels,
+                'masks': masks,
+                'image_id': torch.tensor([image_id]),
+                'area': (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0]) if len(boxes) > 0 else torch.tensor([]),
+                'iscrowd': torch.zeros((len(labels),), dtype=torch.int64)
+            }
+
+            if torch.isnan(image).any() or torch.isinf(image).any():
+                raise ValueError(f"NaN/Inf w obrazie: {image_info['file_name']}")
+            if torch.isnan(boxes).any() or torch.isinf(boxes).any():
+                raise ValueError(f"NaN/Inf w bboxach: {image_info['file_name']}")
+            if torch.isnan(masks).any() or torch.isinf(masks).any():
+                raise ValueError(f"NaN/Inf w maskach: {image_info['file_name']}")
+
+            return image, target
+
+        except Exception as e:
+            logger.error("Błąd podczas ładowania próbki idx=%d (image_id=%d): %s", idx, image_id, str(e))
             return None
-
-        image = self.base_transform(image)
-        boxes = torch.as_tensor(boxes, dtype=torch.float32)
-        labels = torch.as_tensor(labels, dtype=torch.int64)
-        
-        if masks and all(m is not None for m in masks):
-            masks = torch.stack([torch.as_tensor(m, dtype=torch.uint8) for m in masks], dim=0)
-        else:
-            masks = torch.zeros((0, self.image_size[1], self.image_size[0]), dtype=torch.uint8)
-
-        if len(boxes) > 0:
-            boxes = torch.stack([
-                boxes[:, 0],
-                boxes[:, 1],
-                boxes[:, 0] + boxes[:, 2],
-                boxes[:, 1] + boxes[:, 3]
-            ], dim=1)
-            invalid_boxes = (boxes[:, 2] <= boxes[:, 0]) | (boxes[:, 3] <= boxes[:, 1])
-            if invalid_boxes.any():
-                logger.warning("Niepoprawne bboxy w %s: %s", image_info['file_name'], boxes[invalid_boxes])
-                boxes = boxes[~invalid_boxes]
-                labels = labels[~invalid_boxes]
-                masks = masks[~invalid_boxes] if masks.shape[0] > 0 else masks
-
-        if len(boxes) == 0:
-            logger.warning(f"Obraz {image_path} nie ma bboxów po finalnym filtrowaniu, pomijam...")
-            return None
-
-        target = {
-            'boxes': boxes,
-            'labels': labels,
-            'masks': masks,
-            'image_id': torch.tensor([image_id]),
-            'area': (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0]) if len(boxes) > 0 else torch.tensor([]),
-            'iscrowd': torch.zeros((len(labels),), dtype=torch.int64)
-        }
-
-        if torch.isnan(image).any() or torch.isinf(image).any():
-            raise ValueError(f"NaN/Inf w obrazie: %s", image_info['file_name'])
-        if torch.isnan(boxes).any() or torch.isinf(boxes).any():
-            raise ValueError(f"NaN/Inf w bboxach: %s", image_info['file_name'])
-        if torch.isnan(masks).any() or torch.isinf(masks).any():
-            raise ValueError(f"NaN/Inf w maskach: %s", image_info['file_name'])
-
-        return image, target
 
     def __getitem__(self, idx):
         max_attempts = len(self.image_ids)
@@ -344,6 +347,7 @@ class RuryDataset(Dataset):
             result = self._load_item(idx)
             if result is not None:
                 return result
+            logger.warning("Próba %d/%d: Pomijam próbkę idx=%d po błędzie", attempts + 1, max_attempts, idx)
             idx = ((idx // self.num_augmentations + 1) % len(self.image_ids)) * self.num_augmentations + (idx % self.num_augmentations)
             attempts += 1
         raise ValueError(f"Nie udało się znaleźć poprawnego obrazu po %d próbach w zbiorze danych: %s", max_attempts, self.image_dir)
@@ -351,13 +355,12 @@ class RuryDataset(Dataset):
 def custom_collate_fn(batch):
     return tuple(zip(*batch))
 
-def estimate_batch_size(image_size, avg_objects, max_batch_size=10, min_batch_size=1, use_amp=True, is_training=True):
+def estimate_batch_size(image_size, max_batch_size=8, min_batch_size=1, use_amp=True, is_training=True):
     """
     Estymuje batch size na podstawie dostępnej pamięci RAM i VRAM, uwzględniając pesymistyczną liczbę obiektów na obraz.
     
     Args:
         image_size (tuple): Rozmiar obrazu (wysokość, szerokość) - wymagany parametr.
-        avg_objects (float): Średnia liczba obiektów na obraz (użyta tylko do logowania).
         max_batch_size (int): Maksymalny batch size.
         min_batch_size (int): Minimalny batch size.
         use_amp (bool): Czy używane jest mixed precision (torch.cuda.amp).
@@ -372,9 +375,9 @@ def estimate_batch_size(image_size, avg_objects, max_batch_size=10, min_batch_si
     # Pamięć na obrazy (RGB, float32)
     image_memory = image_size[0] * image_size[1] * 3 * 4  # np. 12 MB dla 1024x1024
     
-    # Pamięć na maski (używamy pesymistycznej wartości 171 obiektów, uint8)
-    pessimistic_objects = 171  # Maksymalna liczba obiektów z walidacji
-    masks_memory_per_image = pessimistic_objects * image_size[0] * image_size[1] * 1  # np. 171 MB dla 1024x1024
+    # Pamięć na maski (używamy pesymistycznej wartości 500 obiektów, uint8)
+    pessimistic_objects = 500  # Maksymalna liczba obiektów 
+    masks_memory_per_image = pessimistic_objects * image_size[0] * image_size[1] * 1  
     
     # Pamięć na aktywacje (dostosowana do rzeczywistego zużycia ~2.3 GB przy batch_size=1)
     activations_memory_per_image = 0.5 * 1024 ** 3  # 0.5 GB na aktywacje (zredukowano z 3 GB na podstawie rzeczywistych danych)
@@ -409,7 +412,7 @@ def estimate_batch_size(image_size, avg_objects, max_batch_size=10, min_batch_si
         try:
             gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
             gpu_memory_free = gpu_memory_total - torch.cuda.memory_reserved(0) - torch.cuda.memory_allocated(0)
-            usable_gpu_memory = gpu_memory_free * 0.8  # 80% wolnej pamięci
+            usable_gpu_memory = gpu_memory_free * 0.7  # 70% wolnej pamięci
             total_memory_per_image = memory_per_image_gpu + (model_memory + cuda_overhead) / max_batch_size
             max_images_by_gpu = int(usable_gpu_memory // total_memory_per_image)
             logger.info("Dostępna pamięć GPU: %.2f GB, szacowane zużycie na obraz: %.2f MB, model: %.2f GB",
@@ -447,22 +450,11 @@ def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=4, num_aug
     # Ustalanie image_size - tutaj zmieniasz rozmiar dla całego kodu
     image_size = (1024, 1024)  # Zmień tutaj, aby testować różne rozmiary
 
-    # Wstępne utworzenie datasetu treningowego, aby uzyskać średnią liczbę obiektów
-    temp_train_dataset = RuryDataset(
-        root=train_dir,
-        split="train",
-        image_size=image_size,
-        augment=False,  # Tymczasowo bez augmentacji
-        annotation_path=coco_train_path,
-        num_processes=num_processes
-    )
-    avg_objects = getattr(temp_train_dataset, 'avg_objects', 50)  # Domyślnie 50, jeśli nie udało się ustalić
 
     # Automatyczne dostosowanie batch_size, jeśli nie podano
     if batch_size is None:
         batch_size = estimate_batch_size(
             image_size=image_size,
-            avg_objects=avg_objects,  # Przekazujemy tylko do logowania
             max_batch_size=8,
             min_batch_size=1,
             use_amp=True,

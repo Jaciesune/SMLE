@@ -1,14 +1,15 @@
 import torch
-from torch.amp import autocast, GradScaler  # Zaktualizowano importy
+from torch.amp import autocast, GradScaler
 import cv2
 import numpy as np
 import os
 from pycocotools.coco import COCO
 from pycocotools import mask as coco_mask
 from pycocotools.cocoeval import COCOeval
+import gc
 
 # Funkcja do treningu jednej epoki
-def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_steps=4):
+def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_steps=8):
     """
     Trenuje model przez jedną epokę z użyciem mixed precision (AMP) i akumulacji gradientów.
     
@@ -22,7 +23,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_st
     Returns:
         Średnia strata dla epoki
     """
-    scaler = GradScaler('cuda')  # Zaktualizowano wywołanie GradScaler
+    scaler = GradScaler('cuda')
     model.train()
     całkowita_strata = 0
 
@@ -38,7 +39,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_st
         obrazy = [img.to(device) for img in obrazy]
         nowe_cele = [{k: v.to(device) for k, v in t.items()} for t in cele]
 
-        with autocast('cuda'):  # Zaktualizowano wywołanie autocast
+        with autocast('cuda'):
             słownik_strat = model(obrazy, nowe_cele)
             strata = sum(strata for strata in słownik_strat.values()) / accumulation_steps
 
@@ -51,6 +52,10 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_st
 
         całkowita_strata += strata.item() * accumulation_steps
         print(f"Batch {batch_idx+1}/{len(dataloader)} - Strata: {strata.item() * accumulation_steps:.4f}")
+
+        # Zwolnienie pamięci RAM po każdym batchu
+        del obrazy, nowe_cele, słownik_strat, strata
+        gc.collect()
 
     # Ostatni krok, jeśli liczba batchy nie jest podzielna przez accumulation_steps
     if (batch_idx + 1) % accumulation_steps != 0:
@@ -232,7 +237,7 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
         # Obliczenie straty w trybie treningowym
         model.train()
         with torch.no_grad():
-            with autocast('cuda'):  # Zaktualizowano wywołanie autocast
+            with autocast('cuda'):
                 słownik_strat = model(obrazy, nowe_cele)
                 strata_walidacyjna = sum(strata for strata in słownik_strat.values())
         całkowita_strata_walidacyjna += strata_walidacyjna.item()

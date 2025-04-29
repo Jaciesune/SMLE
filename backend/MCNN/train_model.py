@@ -25,8 +25,8 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-# Transformacje
-data_transforms = A.Compose([
+# Transformacje treningowe
+train_transforms = A.Compose([
     A.RandomRotate90(p=0.5),
     A.Rotate(limit=15, p=0.5),
     A.RandomResizedCrop(size=(1024, 1024), scale=(0.8, 1.0), ratio=(0.9, 1.1), p=0.5),
@@ -34,13 +34,15 @@ data_transforms = A.Compose([
     A.RandomBrightnessContrast(p=0.3),
     A.GaussNoise(p=0.2),
     A.RandomGamma(p=0.3),
-    
-    # 💥 ZAWSZE na końcu:
     A.Resize(height=1024, width=1024),
     ToTensorV2(),
 ])
 
-
+# Transformacje walidacyjne (brak augmentacji)
+val_transforms = A.Compose([
+    A.Resize(height=1024, width=1024),
+    ToTensorV2(),
+])
 
 def clear_memory():
     torch.cuda.empty_cache()
@@ -68,11 +70,12 @@ def generate_density_map(image_size, annotations):
     return density_map
 
 class ImageDataset(Dataset):
-    def __init__(self, image_folder, annotation_path, transform=None, density_size=(1024, 1024)):
+    def __init__(self, image_folder, annotation_path, transform=None, density_size=(1024, 1024), num_augmentations=1):
         self.image_folder = image_folder
         self.annotation_path = annotation_path
         self.transform = transform
         self.density_size = density_size
+        self.num_augmentations = num_augmentations
         self.images = [f for f in os.listdir(image_folder) if f.endswith(('.jpg', '.png'))]
 
         if not os.path.isfile(self.annotation_path):
@@ -88,10 +91,11 @@ class ImageDataset(Dataset):
             self.id_to_annotations.setdefault(image_id, []).append(ann)
 
     def __len__(self):
-        return len(self.images)
+        return len(self.images) * self.num_augmentations
 
     def __getitem__(self, idx):
-        file_name = self.images[idx]
+        base_idx = idx % len(self.images)
+        file_name = self.images[base_idx]
         img_path = os.path.join(self.image_folder, file_name)
         image = cv2.imread(img_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -117,16 +121,13 @@ def train_model(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Czy CUDA dostępna: {torch.cuda.is_available()}")
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    model_name = args.model_name or f"train_{timestamp}"
-    nazwa_modelu = f"{model_name}_{timestamp}"
-
+    nazwa_modelu = args.model_name
     os.makedirs(f"/app/backend/logs/train/{nazwa_modelu}", exist_ok=True)
     os.makedirs(f"/app/backend/logs/val/{nazwa_modelu}", exist_ok=True)
     os.makedirs("/app/backend/MCNN/models", exist_ok=True)
 
     train_dir = args.train_dir
-    val_dir = os.path.join(train_dir, "..", "val")
+    val_dir = args.val_dir
     coco_train_path = args.coco_train_path
     coco_val_path = args.coco_gt_path
 
@@ -139,8 +140,14 @@ def train_model(args):
         logger.info(f"Załadowano checkpoint: {args.model_checkpoint}")
     model.to(device)
 
-    train_dataset = ImageDataset(os.path.join(train_dir, "images"), coco_train_path, transform=data_transforms)
-    val_dataset = ImageDataset(os.path.join('/app/backend/data', 'val', 'images'), coco_val_path, transform=data_transforms)
+    train_dataset = ImageDataset(
+        os.path.join(train_dir, "images"), coco_train_path,
+        transform=train_transforms, num_augmentations=args.num_augmentations
+    )
+    val_dataset = ImageDataset(
+        os.path.join(val_dir, "images"), coco_val_path,
+        transform=val_transforms, num_augmentations=1
+    )
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size or 3, shuffle=True, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size or 3, shuffle=False, pin_memory=True)
@@ -195,7 +202,7 @@ def train_model(args):
 
             clear_memory()
 
-        model_path = f"/app/backend/MCNN/models/{nazwa_modelu}_final_checkpoint.pth"
+        model_path = f"/app/backend/MCNN/models/{nazwa_modelu}_checkpoint.pth"
         torch.save(model.state_dict(), model_path)
         logger.info(f"Model zapisany jako: {model_path}")
 
@@ -216,8 +223,8 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=3)
     parser.add_argument('--coco_train_path', required=True)
     parser.add_argument('--coco_gt_path', required=True)
-    parser.add_argument('--val_dir', required=True)  # Dodano, aby uniknąć błędu
-    parser.add_argument('--num_augmentations', type=int, default=1, help="Liczba augmentacji (na razie nieużywana)")
+    parser.add_argument('--val_dir', required=True)
+    parser.add_argument('--num_augmentations', type=int, default=1, help="Liczba augmentacji danych treningowych")
     args = parser.parse_args()
 
     logger.debug("Arguments received: %s", sys.argv)

@@ -135,7 +135,7 @@ def get_data_loaders(train_path, val_path, train_annotations, val_annotations, b
     if batch_size is None:
         batch_size = estimate_batch_size(
             image_size=image_size,
-            max_batch_size=8,
+            max_batch_size=16,
             min_batch_size=1,
             use_amp=True,
             is_training=True

@@ -1,7 +1,6 @@
 import os
 import io
 import sys
-import json
 import torch
 from torchvision import transforms
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
@@ -12,9 +11,27 @@ from torchvision.ops import nms
 sys.stdout.reconfigure(encoding='utf-8')
 
 def load_model(model_path, device, num_classes=2):
+    # Walidacja końcówki pliku modelu
+    if not model_path.endswith('_checkpoint.pth'):
+        print(f"Błąd: Ścieżka do modelu {model_path} nie kończy się na _checkpoint.pth.")
+        sys.exit(1)
+
+    if not os.path.isfile(model_path):
+        print(f"Błąd: Plik modelu {model_path} nie istnieje.")
+        sys.exit(1)
+
+    # Tworzenie instancji modelu Faster R-CNN
     model = fasterrcnn_resnet50_fpn(weights=None, weights_backbone=None, num_classes=num_classes)
-    state_dict = torch.load(model_path, map_location=device)
-    model.load_state_dict(state_dict)
+    
+    # Wczytywanie checkpointa z weights_only=False
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    
+    # Sprawdzanie, czy wczytano pełny checkpoint czy tylko state_dict
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
+    
     model.to(device)
     model.eval()
     return model
@@ -38,41 +55,17 @@ def draw_predictions(image, boxes, labels, scores, threshold):
             draw.text((box[0], max(0, box[1] - 15)), f"{label}: {score:.2f}", fill="red", font=font)
     return image
 
-def save_results(image_name, boxes, labels, scores, output_folder, threshold):
-    os.makedirs(output_folder, exist_ok=True)
-
-    results = []
-    for box, label, score in zip(boxes, labels, scores):
-        if score >= threshold:
-            x1, y1, x2, y2 = box.tolist()
-            results.append({
-                "image_id": image_name,
-                "category_id": int(label),
-                "bbox": [x1, y1, x2 - x1, y2 - y1],
-                "score": float(score)
-            })
-
-    json_path = os.path.join(output_folder, f"{image_name}_results.json")
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(results, f, indent=4)
-    print(f"[✓] Zapisano wykrycia do {json_path}")
-    return json_path
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_path", required=True, help="Sciezka do obrazu do testowania")
-    parser.add_argument("--model_path", required=True, help="Sciezka do wytrenowanego modelu (model_final.pth)")
+    parser.add_argument("--model_path", required=True, help="Sciezka do wytrenowanego modelu (np. model_checkpoint.pth)")
     parser.add_argument("--output_dir", default="test", help="Folder zapisu wynikow")
-    parser.add_argument("--num_classes", type=int, default=2, help="Liczba klas (łacznie z backgroundem)")
-    parser.add_argument("--threshold", type=float, default=0.25, help="Minimalny próg ufności dla predykcji")
+    parser.add_argument("--num_classes", type=int, default=2, help="Liczba klas (lacznie z backgroundem)")
+    parser.add_argument("--threshold", type=float, default=0.5, help="Minimalny próg ufności dla predykcji")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[✓] Uzywane urzadzenie: {device}")
-
-    if not os.path.isfile(args.model_path):
-        print(f"[✗] Nie znaleziono modelu: {args.model_path}")
-        return
 
     print(f"[✓] Ladowanie modelu z: {args.model_path}")
     model = load_model(args.model_path, device, num_classes=args.num_classes)
@@ -110,7 +103,6 @@ def main():
     annotated_image.save(save_path)
     print(f"[✓] Zapisano obraz z wykryciami do {save_path}")
 
-    save_results(image_name, boxes, labels, scores, args.output_dir, args.threshold)
     print(f"Detections: {(scores >= args.threshold).sum().item()}")
 
 if __name__ == "__main__":

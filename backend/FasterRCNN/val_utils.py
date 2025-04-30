@@ -6,7 +6,6 @@ import cv2
 import numpy as np
 from utils import filter_and_draw_boxes
 from pycocotools.coco import COCO
-import json
 from tqdm import tqdm
 from pycocotools.cocoeval import COCOeval
 from config import (
@@ -19,8 +18,11 @@ from config import (
 import logging
 
 # Konfiguracja logowania
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# Wyłączenie debugowania dla Pillow
+logging.getLogger('PIL').setLevel(logging.WARNING)
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -42,7 +44,7 @@ def validate_model(model, dataloader, device, epoch, model_name):
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
         with torch.no_grad():
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):  # Zaktualizowana składnia
                 outputs = model(images)
 
         for i, output in enumerate(outputs):
@@ -89,19 +91,12 @@ def validate_model(model, dataloader, device, epoch, model_name):
             pred_count += len(scores)
             image_ids.append(image_id)
 
-    # Zapis predykcji do pliku
-    result_file = f"val/{model_name}/epoch_{epoch}_predictions.json"
-    os.makedirs(os.path.dirname(result_file), exist_ok=True)
-    with open(result_file, 'w', encoding="utf-8") as f:
-        json.dump(predictions, f)
-    logger.info(f"Zapisano predykcje do: {result_file}, liczba predykcji: {len(predictions)}")
-
     if len(predictions) == 0:
         logger.warning("Brak predykcji - pomijam COCOeval.")
         return 1.0, 0, gt_count, 0.0, 0.0, 0.0, 0.0
 
     # Rysowanie wyników 
-    debug_dir = f"val/{model_name}/debug_preds"
+    debug_dir = f"/app/backend/FasterRCNN/logs/val/{model_name}/debug_preds"
     os.makedirs(debug_dir, exist_ok=True)
 
     for i, image in enumerate(images):
@@ -121,9 +116,10 @@ def validate_model(model, dataloader, device, epoch, model_name):
         cv2.imwrite(os.path.join(debug_dir, image_name), image_np)
         logger.debug(f"Zapisano obraz debugowania: {os.path.join(debug_dir, image_name)}")
 
-    # Ocena mAP
+    # Ocena mAP bez zapisywania do pliku JSON
     try:
-        coco_dt = coco_gt.loadRes(result_file)
+        # Bezpośrednie użycie predictions w COCOeval
+        coco_dt = coco_gt.loadRes(predictions)  # Przekazanie listy predykcji bezpośrednio
         coco_eval = COCOeval(coco_gt, coco_dt, iouType='bbox')
         coco_eval.evaluate()
         coco_eval.accumulate()

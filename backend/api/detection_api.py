@@ -15,8 +15,7 @@ class DetectionAPI:
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
             "FasterRCNN": self.base_path / "FasterRCNN" / "saved_models",
-            "MCNN": self.base_path / "MCNN" / "models",
-            "SSD - do zaimplementowania": self.base_path / "SSD" / "models"  # Do zaimplementowania
+            "MCNN": self.base_path / "MCNN" / "models"
         }
 
     def get_algorithms(self):

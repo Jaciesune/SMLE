@@ -7,6 +7,8 @@ from pycocotools.coco import COCO
 from PIL import Image
 import psutil
 import logging
+import albumentations as A
+import numpy as np
 
 # Konfiguracja logowania
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -84,31 +86,141 @@ def estimate_batch_size(image_size, max_batch_size=16, min_batch_size=1, use_amp
     return batch_size
 
 class CocoDataset(torch.utils.data.Dataset):
-    def __init__(self, image_dir, annotation_path, transforms=None):
+    def __init__(self, image_dir, annotation_path, image_size=(1024, 1024), augment=False, num_augmentations=1, transforms=None):
         self.image_dir = image_dir
         self.coco = COCO(annotation_path)
         self.image_ids = list(self.coco.imgs.keys())
-        self.transforms = transforms
+        self.image_size = image_size
+        self.augment = augment
+        self.num_augmentations = num_augmentations if augment else 1  # Liczba augmentacji tylko dla treningu
+        self.base_transform = transforms if transforms else T.Compose([T.ToTensor()])
+
+        # Pipeline augmentacji (zgodny z albumentations<2.0.5)
+        if self.augment:
+            self.augment_transform = A.Compose([
+                A.HorizontalFlip(p=0.5),
+                A.VerticalFlip(p=0.5),
+                A.Rotate(limit=30, p=0.5),
+                A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
+                A.HueSaturationValue(hue_shift_limit=15, sat_shift_limit=20, val_shift_limit=20, p=0.5),
+                A.GaussNoise(p=0.2),
+                A.Blur(blur_limit=(3, 5), p=0.2),
+                A.Affine(
+                    scale=(0.95, 1.05),
+                    translate_percent=(-0.05, 0.05),
+                    rotate=(-15, 15),
+                    shear=(-3, 3),
+                    p=0.3
+                ),
+                A.Resize(height=image_size[1], width=image_size[0]),
+            ], bbox_params=A.BboxParams(
+                format='coco',  # Format bboxów w adnotacjach COCO: [x, y, w, h]
+                label_fields=['category_ids'],
+                min_area=3,
+                min_visibility=0.3
+            ))
+        else:
+            self.augment_transform = A.Compose([
+                A.Resize(height=image_size[1], width=image_size[0]),
+            ], bbox_params=A.BboxParams(
+                format='coco',
+                label_fields=['category_ids'],
+                min_area=3,
+                min_visibility=0.3
+            ))
+
+    def __len__(self):
+        return len(self.image_ids) * self.num_augmentations
 
     def __getitem__(self, index):
-        image_id = self.image_ids[index]
+        # Obliczanie oryginalnego indeksu obrazu i indeksu augmentacji
+        orig_idx = index // self.num_augmentations
+        aug_idx = index % self.num_augmentations
+
+        image_id = self.image_ids[orig_idx]
         ann_ids = self.coco.getAnnIds(imgIds=image_id)
         anns = self.coco.loadAnns(ann_ids)
 
         img_info = self.coco.loadImgs(image_id)[0]
         path = img_info['file_name']
         image = Image.open(os.path.join(self.image_dir, path)).convert("RGB")
+        image_np = np.array(image)
 
         boxes = []
         labels = []
 
         for ann in anns:
             x, y, w, h = ann['bbox']
-            boxes.append([x, y, x + w, y + h])
+            boxes.append([x, y, w, h])  # Format COCO: [x, y, w, h]
             labels.append(ann['category_id'])
 
-        boxes = torch.as_tensor(boxes, dtype=torch.float32)
-        labels = torch.as_tensor(labels, dtype=torch.int64)
+        # Augmentacja, jeśli włączona i nie jest to pierwsza kopia (aug_idx > 0)
+        if self.augment and aug_idx > 0:
+            aug_data = {
+                'image': image_np,
+                'bboxes': boxes,
+                'category_ids': labels
+            }
+            try:
+                augmented = self.augment_transform(**aug_data)
+                image_np = augmented['image']
+                boxes = augmented['bboxes']
+                labels = augmented['category_ids']
+
+                # Walidacja po augmentacji
+                if not boxes:  # Jeśli po augmentacji nie ma bboxów
+                    logger.warning(f"Obraz {path} (index={index}, aug_idx={aug_idx}) nie ma bboxów po augmentacji, używam oryginalnego obrazu")
+                    image_np = np.array(image)  # Powrót do oryginalnego obrazu
+                    boxes = [[x, y, w, h] for x, y, w, h in [ann['bbox'] for ann in anns]]
+                    labels = [ann['category_id'] for ann in anns]
+                else:
+                    # Sprawdzenie poprawności obrazu po augmentacji
+                    if np.any(image_np < 0) or np.any(image_np > 255) or np.any(np.isnan(image_np)):
+                        raise ValueError(f"Niepoprawne wartości w obrazie po augmentacji: {path}")
+            except Exception as e:
+                logger.error(f"Błąd podczas augmentacji obrazu {path} (aug_idx={aug_idx}): {str(e)}")
+                image_np = np.array(image)  # Powrót do oryginalnego obrazu
+                boxes = [[x, y, w, h] for x, y, w, h in [ann['bbox'] for ann in anns]]
+                labels = [ann['category_id'] for ann in anns]
+        else:
+            # Bez augmentacji, tylko resize
+            aug_data = {
+                'image': image_np,
+                'bboxes': boxes,
+                'category_ids': labels
+            }
+            augmented = self.augment_transform(**aug_data)
+            image_np = augmented['image']
+            boxes = augmented['bboxes']
+            labels = augmented['category_ids']
+
+        # Konwersja bboxów z formatu COCO [x, y, w, h] do [x_min, y_min, x_max, y_max]
+        boxes = [[x, y, x + w, y + h] for x, y, w, h in boxes]
+
+        # Filtrowanie niepoprawnych bboxów
+        height, width = image_np.shape[:2]
+        filtered_boxes = []
+        filtered_labels = []
+
+        for bbox, label in zip(boxes, labels):
+            x_min, y_min, x_max, y_max = bbox
+            x_min = max(0, min(x_min, width - 1))
+            y_min = max(0, min(y_min, height - 1))
+            x_max = max(0, min(x_max, width - 1))
+            y_max = max(0, min(y_max, height - 1))
+
+            if x_max > x_min and y_max > y_min:
+                filtered_boxes.append([x_min, y_min, x_max, y_max])
+                filtered_labels.append(label)
+
+        if not filtered_boxes:
+            logger.warning(f"Obraz {path} (index={index}) nie ma poprawnych bboxów po filtracji, pomijam")
+            # Użyj pustych danych, aby nie przerywać treningu
+            filtered_boxes = [[0, 0, 1, 1]]  # Minimalny bbox
+            filtered_labels = [0]  # Etykieta tła
+
+        boxes = torch.as_tensor(filtered_boxes, dtype=torch.float32)
+        labels = torch.as_tensor(filtered_labels, dtype=torch.int64)
         image_id = torch.tensor([image_id])
 
         target = {
@@ -117,17 +229,16 @@ class CocoDataset(torch.utils.data.Dataset):
             "image_id": image_id
         }
 
-        if self.transforms:
-            image = self.transforms(image)
+        # Konwersja obrazu z numpy z powrotem na PIL i zastosowanie transformacji
+        image = Image.fromarray(image_np.astype(np.uint8))
+        image = self.base_transform(image)
 
         return image, target
 
     def __len__(self):
-        return len(self.image_ids)
+        return len(self.image_ids) * self.num_augmentations
 
-def get_data_loaders(train_path, val_path, train_annotations, val_annotations, batch_size=None, num_workers=4):
-    transforms = T.Compose([T.ToTensor()])
-    
+def get_data_loaders(train_path, val_path, train_annotations, val_annotations, batch_size=None, num_workers=4, num_augmentations=1):
     # Ustalanie image_size
     image_size = (1024, 1024)  # Zgodne z Mask R-CNN
 
@@ -177,8 +288,26 @@ def get_data_loaders(train_path, val_path, train_annotations, val_annotations, b
 
     logger.info("Używam batch_size=%d, %d wątków w DataLoader, pin_memory=%s", batch_size, num_workers, use_pin_memory)
 
-    train_dataset = CocoDataset(train_path, train_annotations, transforms=transforms)
-    val_dataset = CocoDataset(val_path, val_annotations, transforms=transforms)
+    # Definicja transformacji
+    transforms = T.Compose([T.ToTensor()])
+
+    # Tworzenie datasetów z różnymi ustawieniami augmentacji
+    train_dataset = CocoDataset(
+        train_path,
+        train_annotations,
+        image_size=image_size,
+        augment=True,  # Włącz augmentacje dla treningu
+        num_augmentations=num_augmentations,  # Przekazanie liczby augmentacji
+        transforms=transforms
+    )
+    val_dataset = CocoDataset(
+        val_path,
+        val_annotations,
+        image_size=image_size,
+        augment=False,  # Wyłącz augmentacje dla walidacji
+        num_augmentations=1,  # Brak augmentacji dla walidacji
+        transforms=transforms
+    )
 
     train_loader = DataLoader(
         train_dataset,

@@ -35,6 +35,7 @@ SCHEDULER_FACTOR = 0.5
 SCHEDULER_PATIENCE = 2
 MIN_LR = 1e-6
 DEFAULT_EPOCHS = 20  # Domyślna liczba epok, jak w Mask R-CNN
+DEFAULT_NUM_AUGMENTATIONS = 1  # Domyślna liczba augmentacji na obraz
 
 def main():
     # Parsowanie argumentów
@@ -49,6 +50,7 @@ def main():
     parser.add_argument("--coco_gt_path", type=str, help="Ścieżka do pliku COCO z adnotacjami walidacyjnymi")
     parser.add_argument("--val_dir", type=str, help="Ścieżka do danych walidacyjnych")
     parser.add_argument("--resume", type=str, default=None, help="Nazwa checkpointa do wczytania (bez ścieżki)")
+    parser.add_argument("--num_augmentations", type=int, default=DEFAULT_NUM_AUGMENTATIONS, help="Liczba augmentacji na obraz")
 
     args, _ = parser.parse_known_args()
 
@@ -87,7 +89,8 @@ def main():
         train_path=train_path,
         train_annotations=args.coco_train_path,
         val_path=val_path,
-        val_annotations=args.coco_gt_path
+        val_annotations=args.coco_gt_path,
+        num_augmentations=args.num_augmentations  # Przekazanie liczby augmentacji
     )
 
     # Inicjalizacja modelu, optymalizatora i scheduler'a

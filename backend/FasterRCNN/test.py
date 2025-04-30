@@ -10,6 +10,10 @@ from torchvision.ops import nms
 
 sys.stdout.reconfigure(encoding='utf-8')
 
+CONFIDENCE_THRESHOLD = 0.4  # Próg pewności dla detekcji
+NMS_THRESHOLD = 5000  # Liczba propozycji przed i po NMS
+DETECTIONS_PER_IMAGE = 500  # Maksymalna liczba detekcji na obraz
+
 def load_model(model_path, device, num_classes=2):
     # Walidacja końcówki pliku modelu
     if not model_path.endswith('_checkpoint.pth'):
@@ -31,6 +35,16 @@ def load_model(model_path, device, num_classes=2):
         model.load_state_dict(checkpoint['model_state_dict'])
     else:
         model.load_state_dict(checkpoint)
+
+        # Konfiguracja parametrów modelu
+    if isinstance(model.rpn.pre_nms_top_n, dict):
+        model.rpn.pre_nms_top_n["training"] = NMS_THRESHOLD
+        model.rpn.pre_nms_top_n["testing"] = NMS_THRESHOLD
+        model.rpn.post_nms_top_n["training"] = NMS_THRESHOLD
+        model.rpn.post_nms_top_n["testing"] = NMS_THRESHOLD
+    model.roi_heads.score_thresh = CONFIDENCE_THRESHOLD
+    model.roi_heads.detections_per_img = DETECTIONS_PER_IMAGE
+
     
     model.to(device)
     model.eval()

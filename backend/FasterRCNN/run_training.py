@@ -34,8 +34,9 @@ WEIGHT_DECAY = 0.0005
 SCHEDULER_FACTOR = 0.5
 SCHEDULER_PATIENCE = 2
 MIN_LR = 1e-6
-DEFAULT_EPOCHS = 20  # Domyślna liczba epok, jak w Mask R-CNN
-DEFAULT_NUM_AUGMENTATIONS = 1  # Domyślna liczba augmentacji na obraz
+DEFAULT_EPOCHS = 10  # Domyślna liczba epok, jak w Mask R-CNN
+DEFAULT_NUM_AUGMENTATIONS = 0  # Domyślna liczba augmentacji
+DEFAULT_PATIENCE = 8  # Domyślna wartość dla Early Stopping, zgodna z train_maskrcnn.py
 
 def main():
     # Parsowanie argumentów
@@ -51,6 +52,7 @@ def main():
     parser.add_argument("--val_dir", type=str, help="Ścieżka do danych walidacyjnych")
     parser.add_argument("--resume", type=str, default=None, help="Nazwa checkpointa do wczytania (bez ścieżki)")
     parser.add_argument("--num_augmentations", type=int, default=DEFAULT_NUM_AUGMENTATIONS, help="Liczba augmentacji na obraz")
+    parser.add_argument("--patience", type=int, default=DEFAULT_PATIENCE, help="Liczba epok bez poprawy dla Early Stopping")
 
     args, _ = parser.parse_known_args()
 
@@ -90,7 +92,7 @@ def main():
         train_annotations=args.coco_train_path,
         val_path=val_path,
         val_annotations=args.coco_gt_path,
-        num_augmentations=args.num_augmentations  # Przekazanie liczby augmentacji
+        num_augmentations=args.num_augmentations
     )
 
     # Inicjalizacja modelu, optymalizatora i scheduler'a
@@ -101,6 +103,7 @@ def main():
     # Inicjalizacja zmiennych treningowych
     best_val_loss = float("inf")
     best_epoch = 0
+    patience_counter = 0  # Licznik dla Early Stopping
     train_losses, val_losses, pred_counts, gt_counts = [], [], [], []
     map_5095_list, map_50_list, precision_list, recall_list = [], [], [], []
     start_epoch = 1
@@ -152,7 +155,7 @@ def main():
     # Ustalanie końcowej epoki
     end_epoch = start_epoch + epochs - 1
 
-    # Pętla treningowa
+    # Pętla treningowa z Early Stopping
     if start_epoch <= end_epoch:
         for epoch in range(start_epoch, end_epoch + 1):
             train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch)
@@ -179,10 +182,11 @@ def main():
             scheduler.step(val_loss)
             logger.info(f"Learning rate: {scheduler.get_last_lr()[0]:.6f}")
 
-            # Zapisywanie najlepszego modelu
+            # Early Stopping
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_epoch = epoch
+                patience_counter = 0  # Reset licznika przy poprawie
                 checkpoint = {
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
@@ -208,7 +212,13 @@ def main():
                             logger.info(f"Usunięto stary model: {path}")
                         except Exception as e:
                             logger.error(f"Błąd przy usuwaniu {path}: {e}")
-            
+            else:
+                patience_counter += 1
+                logger.info(f"Brak poprawy przez {patience_counter}/{args.patience} epok")
+                if patience_counter >= args.patience:
+                    logger.info("Early Stopping: Zakończono trening przedwcześnie.")
+                    break
+
             # Aktualizacja last_epoch po każdej epoce
             last_epoch = epoch
     else:
@@ -249,14 +259,14 @@ def main():
         plt.title(title)
         plt.legend()
         plt.grid(True)
-        plt.savefig(f"/app/backend/FasterRCNN/logs/test/{base_model_name}/{filename}")
+        plt.savefig(f"/app/backend/FasterRCNN/logs/val/{base_model_name}/{filename}")
         plt.close()
 
     save_plot(train_losses, val_losses, ["Strata treningowa", "Strata walidacyjna"], "Strata w czasie treningu", "loss_plot.png", "Strata")
     save_plot(pred_counts, gt_counts, ["Wykryte obiekty", "Obiekty GT"], "Porównanie predykcji i GT", "detections_plot.png", "Liczba obiektów")
     save_plot(map_50_list, map_5095_list, ["mAP@0.5", "mAP@0.5:0.95"], "Mean Average Precision", "map_plot.png", "mAP")
 
-    logger.info("Wykresy zapisane w folderze logs/test.")
+    logger.info("Wykresy zapisane w folderze logs/val.")
 
 if __name__ == "__main__":
     main()

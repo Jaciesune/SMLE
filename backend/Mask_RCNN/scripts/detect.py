@@ -13,7 +13,7 @@ RESULTS_PATH = "/app/backend/Mask_RCNN/data/detectes"
 os.makedirs(RESULTS_PATH, exist_ok=True)
 
 # Parametry wykrywania
-CONFIDENCE_THRESHOLD = 0.7  # Próg pewności dla detekcji
+CONFIDENCE_THRESHOLD = 0.5  # Próg pewności dla detekcji
 NMS_THRESHOLD = 1000  # Liczba propozycji przed i po NMS
 DETECTIONS_PER_IMAGE = 500  # Maksymalna liczba detekcji na obraz
 NUM_CLASSES = 2  # Liczba klas (tło + 1 klasa, dostosuj do swojego modelu)

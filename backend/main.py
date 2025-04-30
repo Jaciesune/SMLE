@@ -17,6 +17,7 @@ from api.auto_label_routes import router as auto_label_router
 from api.dataset_routes import router as dataset_router
 from api.detection_routes import router as detection_router
 import logging
+from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -155,7 +156,78 @@ def get_models():
         cursor.close()
         conn.close()
     return models
+@app.get("/compare_models")
+def compare_models():
+    history_file = "/app/backend/benchmark_history.json"
+    if not os.path.exists(history_file):
+        logger.debug("[DEBUG] Brak historii benchmarków")
+        return {"results": [], "best_model": None}
 
+    try:
+        with open(history_file, "r") as f:
+            history = json.load(f)
+    except Exception as e:
+        logger.error(f"[DEBUG] Błąd odczytu historii benchmarków: {e}")
+        raise HTTPException(status_code=500, detail=f"Błąd odczytu historii: {e}")
+
+    if not history:
+        logger.debug("[DEBUG] Historia benchmarków jest pusta")
+        return {"results": [], "best_model": None}
+
+    # Grupowanie wyników według folderu danych
+    results_by_dataset = {}
+    for result in history:
+        dataset = result["image_folder"]
+        if dataset not in results_by_dataset:
+            results_by_dataset[dataset] = []
+        results_by_dataset[dataset].append(result)
+
+    # Przygotowanie wyników porównania
+    comparison_results = []
+    best_model_info = None
+    overall_best_effectiveness = -1
+
+    for dataset, results in results_by_dataset.items():
+        dataset_results = []
+        best_effectiveness = -1
+        best_model_for_dataset = None
+
+        for result in results:
+            model_info = {
+                "model": f"{result['algorithm']} - v{result['version']}",
+                "model_name": result["model_name"],
+                "effectiveness": result["effectiveness"],
+                "mae": result["MAE"],
+                "timestamp": result["timestamp"]
+            }
+            dataset_results.append(model_info)
+
+            # Znajdź najlepszy model dla tego zbioru danych
+            if result["effectiveness"] > best_effectiveness:
+                best_effectiveness = result["effectiveness"]
+                best_model_for_dataset = {
+                    "dataset": dataset,
+                    "model": f"{result['algorithm']} - v{result['version']}",
+                    "model_name": result["model_name"],
+                    "effectiveness": result["effectiveness"]
+                }
+
+        # Dodaj wyniki dla tego zbioru danych
+        comparison_results.append({
+            "dataset": dataset,
+            "results": dataset_results,
+            "best_model": best_model_for_dataset
+        })
+
+        # Aktualizuj najlepszy model ogólny
+        if best_effectiveness > overall_best_effectiveness:
+            overall_best_effectiveness = best_effectiveness
+            best_model_info = best_model_for_dataset
+
+    return {
+        "results": comparison_results,
+        "best_model": best_model_info
+    }
 @app.get("/archives")
 def get_models():
     conn = get_db_connection()
@@ -288,7 +360,6 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
         "MCNN": "/app/backend/MCNN/models/",
         "FasterRCNN": "/app/backend/FasterRCNN/models/",
     }
-    # Używamy model_name do skonstruowania nazwy pliku modelu
     file_name = f"{request.model_name}_checkpoint.pth"
     model_path = os.path.join(model_paths.get(request.algorithm, ""), file_name)
     if not os.path.exists(model_path):
@@ -300,6 +371,7 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
     os.makedirs(container_images_path, exist_ok=True)
 
     metrics_list = []
+    ground_truth_counts = []  # Lista przechowująca liczby obiektów w ground truth
     for idx in range(len(dataset)):
         img_path, annotations = dataset[idx]
         logger.debug(f"[DEBUG] Przetwarzanie obrazu {idx+1}/{len(dataset)}: {img_path}")
@@ -312,7 +384,7 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
         try:
             # Uruchom detekcję przy użyciu metody analyze_with_model
             logger.debug(f"[DEBUG] Uruchamianie detekcji na obrazie {os.path.basename(img_path)}")
-            result, num_predicted = detection_api.analyze_with_model(container_image_path, request.algorithm, file_name)  # Używamy skonstruowanego file_name
+            result, num_predicted = detection_api.analyze_with_model(container_image_path, request.algorithm, file_name)
             if "Błąd" in result:
                 logger.error(f"[DEBUG] Błąd detekcji dla {img_path}: {result}")
                 raise HTTPException(status_code=500, detail=f"Błąd detekcji dla {img_path}: {result}")
@@ -320,6 +392,7 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
 
             # Policz obiekty z annotacji (format LabelMe)
             num_ground_truth = len(annotations)
+            ground_truth_counts.append(num_ground_truth)
             logger.debug(f"[DEBUG] Liczba rur w annotacji: {num_ground_truth} dla {img_path}")
 
             # Oblicz metrykę
@@ -335,16 +408,48 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
                 os.unlink(container_image_path)
 
     if metrics_list:
+        # Oblicz MAE
         mae = sum(metrics_list) / len(metrics_list)
-        results = {"MAE": mae, "algorithm": request.algorithm, "model_version": request.model_version}
-        logger.debug(f"[DEBUG] Wynik benchmarku: MAE={mae}")
+        # Oblicz średnią liczbę obiektów w ground truth
+        avg_ground_truth = sum(ground_truth_counts) / len(ground_truth_counts) if ground_truth_counts else 1
+        # Oblicz skuteczność w procentach
+        effectiveness = max(0, (1 - mae / avg_ground_truth)) * 100 if avg_ground_truth > 0 else 0
+        results = {
+            "MAE": mae,
+            "effectiveness": round(effectiveness, 2),  # Skuteczność w procentach, zaokrąglona do 2 miejsc
+            "algorithm": request.algorithm,
+            "model_version": request.model_version,
+            "model_name": request.model_name,
+            "image_folder": request.image_folder,
+            "timestamp": datetime.now().isoformat()
+        }
+        logger.debug(f"[DEBUG] Wynik benchmarku: MAE={mae}, Skuteczność={effectiveness}%")
+
+        # Zapisz wyniki do pliku benchmark_results.json (nadpisywanie pojedynczego wyniku)
         try:
             with open("/app/backend/benchmark_results.json", "w") as f:
                 json.dump(results, f)
-            logger.debug("[DEBUG] Wyniki zapisane do pliku")
+            logger.debug("[DEBUG] Wyniki zapisane do pliku benchmark_results.json")
         except Exception as e:
             logger.error(f"[DEBUG] Błąd zapisu wyników: {e}")
             raise HTTPException(status_code=500, detail=f"Błąd zapisu wyników: {e}")
+
+        # Zapisz wyniki do historii benchmarków (dopisywanie do listy)
+        try:
+            history_file = "/app/backend/benchmark_history.json"
+            if os.path.exists(history_file):
+                with open(history_file, "r") as f:
+                    history = json.load(f)
+            else:
+                history = []
+            history.append(results)
+            with open(history_file, "w") as f:
+                json.dump(history, f)
+            logger.debug("[DEBUG] Wyniki dodane do historii benchmarków")
+        except Exception as e:
+            logger.error(f"[DEBUG] Błąd zapisu historii benchmarków: {e}")
+            raise HTTPException(status_code=500, detail=f"Błąd zapisu historii: {e}")
+
         return results
     else:
         logger.error("[DEBUG] Brak przetworzonych par obraz-annotacja")

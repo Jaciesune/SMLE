@@ -1,1 +1,1 @@
-{"MAE": 12.10344827586207, "algorithm": "Mask R-CNN", "model_version": "1.0"}
+{"MAE": 2.8, "effectiveness": 65.0, "algorithm": "Mask R-CNN", "model_version": "1.0", "model_name": "mask trzy epoki", "image_folder": "/app/backend/data/test/images", "timestamp": "2025-04-29T19:51:30.667983"}

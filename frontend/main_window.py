@@ -1,4 +1,7 @@
+import json
+import subprocess
 from PyQt5 import QtWidgets
+from fastapi import logger
 from archive_tab import ArchiveTab
 from count_tab import CountTab
 from train_tab import TrainTab
@@ -52,7 +55,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.addTab(self.auto_labeling_tab, "Automatyczne oznaczanie zdjęć")
         self.tabs.addTab(self.dataset_creation_tab, "Tworzenie zbioru danych")
         
-        # Dodajemy zakładkę Benchmark
+        # Tworzymy zakładkę Benchmark
         self.benchmark_tab = QtWidgets.QWidget()
         self.tabs.addTab(self.benchmark_tab, "Benchmark")
         self.setup_benchmark_tab()
@@ -76,48 +79,53 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addAction(exit_action)
 
     def setup_benchmark_tab(self):
-        print("[DEBUG] Konfiguracja zakładki Benchmark")
-        layout = QVBoxLayout()
-        
-        # Etykieta wyników
-        self.benchmark_results_label = QLabel("Wyniki benchmarku: Niedostępne")
-        layout.addWidget(self.benchmark_results_label)
+        layout = QtWidgets.QVBoxLayout()
 
-        if self.user_role == "admin":
-            print("[DEBUG] Użytkownik jest adminem, dodaję elementy interfejsu dla admina")
-            # Wybór modelu
-            self.model_combo = QComboBox()
-            layout.addWidget(QLabel("Wybierz model:"))
-            layout.addWidget(self.model_combo)
-            self.load_models_for_benchmark()
-            
-            # Etykieta wybranego folderu
-            self.selected_folder_label = QLabel("Wybrany folder: Brak")
-            layout.addWidget(self.selected_folder_label)
-            
-            # Przycisk wyboru folderu
-            self.select_folder_btn = QPushButton("Wybierz folder z danymi")
-            self.select_folder_btn.clicked.connect(self.select_folder)
-            layout.addWidget(self.select_folder_btn)
-            
-            # Przycisk uruchamiania benchmarku
-            self.run_benchmark_btn = QPushButton("Uruchom Benchmark")
-            self.run_benchmark_btn.clicked.connect(self.run_benchmark)
-            layout.addWidget(self.run_benchmark_btn)
-        else:
-            print("[DEBUG] Użytkownik nie jest adminem, pomijam elementy interfejsu dla admina")
+        # Wybór folderu
+        folder_layout = QtWidgets.QHBoxLayout()
+        self.folder_label = QtWidgets.QLabel("Brak wybranego folderu")
+        folder_button = QtWidgets.QPushButton("Wybierz folder")
+        folder_button.clicked.connect(self.select_folder)
+        folder_layout.addWidget(self.folder_label)
+        folder_layout.addWidget(folder_button)
+        layout.addLayout(folder_layout)
 
+        # Wybór modelu
+        model_layout = QtWidgets.QHBoxLayout()
+        model_label = QtWidgets.QLabel("Wybierz model:")
+        self.model_combo = QtWidgets.QComboBox()
+        self.load_models_for_benchmark()
+        model_layout.addWidget(model_label)
+        model_layout.addWidget(self.model_combo)
+        layout.addLayout(model_layout)
+
+        # Przycisk do uruchomienia benchmarku
+        run_button = QtWidgets.QPushButton("Uruchom Benchmark")
+        run_button.clicked.connect(self.run_benchmark)
+        layout.addWidget(run_button)
+
+        # Przycisk do porównania modeli
+        compare_button = QtWidgets.QPushButton("Porównaj modele")
+        compare_button.clicked.connect(self.compare_models)
+        layout.addWidget(compare_button)
+
+        # Wyniki benchmarku
+        self.benchmark_results = QtWidgets.QTextEdit()
+        self.benchmark_results.setReadOnly(True)
+        layout.addWidget(self.benchmark_results)
+
+        # Ustawienie layoutu dla zakładki
         self.benchmark_tab.setLayout(layout)
 
     def select_folder(self):
         folder_path = QtWidgets.QFileDialog.getExistingDirectory(self, "Wybierz folder z obrazami i annotacjami")
         if folder_path:
             self.selected_folder = folder_path
-            self.selected_folder_label.setText(f"Wybrany folder: {self.selected_folder}")
+            self.folder_label.setText(f"Wybrany folder: {self.selected_folder}")
             print(f"[DEBUG] Wybrano folder: {self.selected_folder}")
         else:
             self.selected_folder = None
-            self.selected_folder_label.setText("Wybrany folder: Brak")
+            self.folder_label.setText("Wybrany folder: Brak")
             print("[DEBUG] Nie wybrano folderu")
 
     def load_models_for_benchmark(self):
@@ -142,6 +150,43 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             print(f"[DEBUG] Wyjątek podczas ładowania modeli: {e}")
             QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd podczas ładowania modeli: {e}")
+
+    def analyze_with_model(self, image_path, algorithm, model_file):
+        logger.debug(f"[DEBUG] Rozpoczynanie analizy: image_path={image_path}, algorithm={algorithm}, model_file={model_file}")
+        try:
+            if algorithm == "Mask R-CNN":
+                script_path = "/app/backend/Mask_RCNN/scripts/detect.py"
+                cmd = ["python", script_path, "--image", image_path, "--model", model_file]
+            elif algorithm == "MCNN":
+                script_path = "/app/backend/MCNN/scripts/detect.py"
+                cmd = ["python", script_path, "--image", image_path, "--model", model_file]
+            elif algorithm == "FasterRCNN":
+                script_path = "/app/backend/FasterRCNN/scripts/detect.py"
+                cmd = ["python", script_path, "--image", image_path, "--model", model_file]
+            else:
+                logger.error(f"[DEBUG] Nieobsługiwany algorytm: {algorithm}")
+                return f"Błąd: Nieobsługiwany algorytm: {algorithm}", 0
+
+            logger.debug(f"[DEBUG] Wykonywanie komendy: {cmd}")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            logger.debug(f"[DEBUG] Wynik komendy: stdout={result.stdout}, stderr={result.stderr}")
+
+            if result.returncode != 0:
+                logger.error(f"[DEBUG] Błąd detekcji: {result.stderr}")
+                return f"Błąd: {result.stderr}", 0
+
+            # Przyjmijmy, że skrypt zwraca liczbę wykrytych obiektów w stdout
+            try:
+                num_predicted = int(result.stdout.strip())
+            except ValueError:
+                logger.error(f"[DEBUG] Nieprawidłowy format wyniku: {result.stdout}")
+                return f"Błąd: Nieprawidłowy format wyniku: {result.stdout}", 0
+
+            logger.debug(f"[DEBUG] Liczba wykrytych obiektów: {num_predicted}")
+            return "Sukces", num_predicted
+        except Exception as e:
+            logger.error(f"[DEBUG] Wyjątek w analyze_with_model: {str(e)}")
+            return f"Błąd: {str(e)}", 0
 
     def run_benchmark(self):
         if self.user_role != "admin":
@@ -227,21 +272,86 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd: {e}")
 
     def update_benchmark_results(self):
-        print("[DEBUG] Aktualizacja wyników benchmarku")
         try:
             headers = {"X-User-Role": self.user_role}
             response = requests.get("http://localhost:8000/get_benchmark_results", headers=headers)
-            print(f"[DEBUG] Odpowiedź serwera (get_benchmark_results): status={response.status_code}, treść={response.text}")
-            if response.status_code == 200:
-                results = response.json()
-                print(f"[DEBUG] Wyniki benchmarku: {results}")
-                self.benchmark_results_label.setText(
-                    f"Wyniki benchmarku: MAE = {results.get('MAE', 'N/A')} "
-                    f"(Model: {results.get('algorithm', 'N/A')} v{results.get('model_version', 'N/A')})"
-                )
-            else:
-                print(f"[DEBUG] Brak wyników benchmarku: {response.status_code} - {response.text}")
-                self.benchmark_results_label.setText("Wyniki benchmarku: Niedostępne")
+            print(f"[DEBUG] Odpowiedź z /get_benchmark_results: status={response.status_code}, treść={response.text}")
+            if response.status_code != 200:
+                self.benchmark_results.setText("Brak wyników benchmarku lub błąd: " + response.text)
+                return
+
+            results = response.json()
+            result_text = "Wyniki benchmarku:\n"
+            result_text += f"Algorytm: {results.get('algorithm', 'Brak danych')}\n"
+            result_text += f"Wersja modelu: {results.get('model_version', 'Brak danych')}\n"
+            result_text += f"Nazwa modelu: {results.get('model_name', 'Brak danych')}\n"
+            result_text += f"MAE: {results.get('MAE', 'Brak danych')}\n"
+            result_text += f"Skuteczność: {results.get('effectiveness', 'Brak danych')}%\n"
+            self.benchmark_results.setText(result_text)
         except Exception as e:
-            print(f"[DEBUG] Wyjątek podczas aktualizacji wyników: {e}")
-            self.benchmark_results_label.setText(f"Wyniki benchmarku: Błąd - {e}")
+            print(f"[DEBUG] Błąd podczas aktualizacji wyników benchmarku: {e}")
+            self.benchmark_results.setText("Brak wyników benchmarku.")
+
+    def compare_models(self):
+        try:
+            response = requests.get("http://localhost:8000/compare_models")
+            print(f"[DEBUG] Odpowiedź z /compare_models: status={response.status_code}, treść={response.text}")
+            if response.status_code != 200:
+                QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd podczas pobierania porównania modeli: {response.text}")
+                return
+
+            comparison_data = response.json()
+            results = comparison_data.get("results", [])
+            best_model_info = comparison_data.get("best_model", None)
+
+            if not results:
+                QtWidgets.QMessageBox.information(self, "Informacja", "Brak wyników benchmarków do porównania.")
+                return
+
+            # Tworzenie tekstu do wyświetlenia
+            comparison_text = "Porównanie modeli:\n\n"
+            for dataset_result in results:
+                dataset = dataset_result["dataset"]
+                comparison_text += f"Zbiór danych: {dataset}\n"
+                for model_result in dataset_result["results"]:
+                    comparison_text += (
+                        f"  Model: {model_result['model']}, "
+                        f"Skuteczność: {model_result['effectiveness']}%, "
+                        f"MAE: {model_result['mae']}, "
+                        f"Czas: {model_result['timestamp']}\n"
+                    )
+                best_model = dataset_result["best_model"]
+                comparison_text += (
+                    f"  Najlepszy model dla tego zbioru: {best_model['model']}, "
+                    f"Skuteczność: {best_model['effectiveness']}%\n\n"
+                )
+
+            if best_model_info:
+                comparison_text += (
+                    f"Najlepszy model ogólny:\n"
+                    f"Zbiór danych: {best_model_info['dataset']}\n"
+                    f"Model: {best_model_info['model']}\n"
+                    f"Skuteczność: {best_model_info['effectiveness']}%\n"
+                )
+
+            # Wyświetl wyniki w oknie dialogowym
+            dialog = QtWidgets.QDialog(self)
+            dialog.setWindowTitle("Porównanie modeli")
+            layout = QtWidgets.QVBoxLayout(dialog)
+
+            text_edit = QtWidgets.QTextEdit()
+            text_edit.setReadOnly(True)
+            text_edit.setText(comparison_text)
+            layout.addWidget(text_edit)
+
+            close_button = QtWidgets.QPushButton("Zamknij")
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+
+            dialog.setLayout(layout)
+            dialog.resize(600, 400)
+            dialog.exec_()
+
+        except Exception as e:
+            print(f"[DEBUG] Wyjątek podczas porównania modeli: {e}")
+            QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd podczas porównania modeli: {e}")

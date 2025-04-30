@@ -96,65 +96,69 @@ class DetectionAPI:
             return f"Nieoczekiwany błąd: {e}"
         
     def analyze_with_model(self, image_path, algorithm, version):
-        """Przeprowadza detekcję na obrazie przy użyciu wybranego modelu."""
-        model_path = self.get_model_path(algorithm, version)
-        if not model_path:
-            return f"Błąd: Model {version} dla {algorithm} nie istnieje.", 0
+            model_path = self.get_model_path(algorithm, version)
+            if not model_path:
+                return f"Błąd: Model {version} dla {algorithm} nie istnieje.", 0
 
-        if not os.path.exists(image_path):
-            return f"Błąd: Obraz {image_path} nie istnieje.", 0
+            if not os.path.exists(image_path):
+                return f"Błąd: Obraz {image_path} nie istnieje.", 0
 
-        # Mapowanie ścieżek dla każdego algorytmu
-        if algorithm == "Mask R-CNN":
-            host_detectes_path = self.base_path / "Mask_RCNN" / "data" / "detectes"
-            container_base_path = "/app/backend/Mask_RCNN"
-            script_name = "detect.py"
-        elif algorithm == "MCNN":
-            host_detectes_path = self.base_path / "MCNN" / "data" / "detectes"
-            container_base_path = "/app/backend/MCNN"
-            script_name = "test_model.py"
-        elif algorithm == "FasterRCNN":
-            host_detectes_path = self.base_path / "FasterRCNN" / "data" / "detectes"
-            container_base_path = "/app/backend/FasterRCNN"
-            script_name = "test.py"
-        else:
-            return f"Błąd: Algorytm {algorithm} nie jest obsługiwany.", 0
+            # Mapowanie ścieżek dla każdego algorytmu
+            if algorithm == "Mask R-CNN":
+                host_detectes_path = self.base_path / "Mask_RCNN" / "data" / "detectes"
+                container_base_path = "/app/backend/Mask_RCNN"
+                script_name = "detect.py"
+            elif algorithm == "MCNN":
+                host_detectes_path = self.base_path / "MCNN" / "data" / "detectes"
+                container_base_path = "/app/backend/MCNN"
+                script_name = "test_model.py"
+            elif algorithm == "FasterRCNN":
+                host_detectes_path = self.base_path / "FasterRCNN" / "data" / "detectes"
+                container_base_path = "/app/backend/FasterRCNN"
+                script_name = "test.py"
+            else:
+                return f"Błąd: Algorytm {algorithm} nie jest obsługiwany.", 0
 
-        # Tworzenie folderu na wyniki
-        host_detectes_path.mkdir(parents=True, exist_ok=True)
+            # Tworzenie folderu na wyniki w kontenerze
+            container_detectes_path = f"{container_base_path}/data/detectes"
+            # Nie tworzymy folderu na hoście, tylko w kontenerze (skrypt działa w kontenerze)
+            os.makedirs(container_detectes_path, exist_ok=True)
 
-        # Ścieżki w kontenerze
-        image_name = os.path.basename(image_path)
-        container_image_path = f"{container_base_path}/data/test/images/{image_name}"
-        container_model_path = f"{container_base_path}/{'models' if algorithm != 'FasterRCNN' else 'saved_models'}/{version}"
+            # Ścieżki w kontenerze
+            image_name = os.path.basename(image_path)
+            container_image_path = f"{container_base_path}/data/test/images/{image_name}"
+            container_model_path = f"{container_base_path}/{'models' if algorithm != 'FasterRCNN' else 'saved_models'}/{version}"
 
-        # Uruchomienie detekcji
-        if algorithm == "FasterRCNN":
-            result = self.run_script(
-                script_name,
-                algorithm,
-                "--image_path", container_image_path,
-                "--model_path", container_model_path,
-                "--output_dir", f"{container_base_path}/data/detectes",
-                "--threshold", "0.25",
-                "--num_classes", "2"
-            )
-        else:
-            result = self.run_script(script_name, algorithm, container_image_path, container_model_path)
+            # Uruchomienie detekcji
+            if algorithm == "FasterRCNN":
+                result = self.run_script(
+                    script_name,
+                    algorithm,
+                    "--image_path", container_image_path,
+                    "--model_path", container_model_path,
+                    "--output_dir", container_detectes_path,
+                    "--threshold", "0.25",
+                    "--num_classes", "2"
+                )
+            else:
+                result = self.run_script(script_name, algorithm, container_image_path, container_model_path)
 
-        if "Błąd" in result:
-            logger.error("Błąd w wyniku detekcji: %s", result)
-            return result, 0
+            if "Błąd" in result:
+                logger.error("Błąd w wyniku detekcji: %s", result)
+                return result, 0
 
-        # Przetwarzanie wyniku
-        result_image_name = os.path.splitext(image_name)[0] + "_detected.jpg"
-        result_path = host_detectes_path / result_image_name
-        if not result_path.exists():
-            return f"Błąd: Wynik detekcji nie został zapisany w {result_path}.", 0
+            # Sprawdzenie wyniku w kontenerze
+            result_image_name = os.path.splitext(image_name)[0] + "_detected.jpg"
+            container_result_path = os.path.join(container_detectes_path, result_image_name)
+            if not os.path.exists(container_result_path):
+                return f"Błąd: Wynik detekcji nie został zapisany w {container_result_path}.", 0
 
-        detections_count = 0
-        match = re.search(r"Detections: (\d+)", result)
-        if match:
-            detections_count = int(match.group(1))
+            # Mapowanie ścieżki z kontenera na hosta (do zwrócenia)
+            result_path = host_detectes_path / result_image_name
 
-        return str(result_path), detections_count
+            detections_count = 0
+            match = re.search(r"Detections: (\d+)", result)
+            if match:
+                detections_count = int(match.group(1))
+
+            return str(result_path), detections_count

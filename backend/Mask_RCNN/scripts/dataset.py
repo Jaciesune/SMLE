@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as T
+import torchvision.transforms.v2 as T
 import albumentations as A
 from pycocotools import mask as mask_utils
 import logging
@@ -36,12 +36,12 @@ class RuryDataset(Dataset):
         self.image_size = image_size
         self.augment = augment
         self.num_augmentations = num_augmentations if augment else 1
-        self.image_dir = os.path.join(root, "images")  # Zakładamy, że obrazy są w podkatalogu "images"
-        
+        self.image_dir = os.path.join(root, "images")
+
         # Dostosowanie num_processes na podstawie obciążenia CPU
         cpu_count = os.cpu_count()
         cpu_usage = psutil.cpu_percent(interval=1)
-        if cpu_usage > 80:  # Jeśli obciążenie CPU jest wysokie
+        if cpu_usage > 80:
             self.num_processes = min(num_processes, max(1, cpu_count // 2))
             logger.warning("Wysokie obciążenie CPU (%.1f%%), zmniejszam num_processes do %d", cpu_usage, self.num_processes)
         else:
@@ -54,7 +54,6 @@ class RuryDataset(Dataset):
         else:
             self.annotation_path = annotation_path
 
-        # Sprawdzenie, czy plik adnotacji istnieje
         if not os.path.exists(self.annotation_path):
             raise FileNotFoundError(f"Nie znaleziono pliku adnotacji: {self.annotation_path}")
         with open(self.annotation_path, 'r') as f:
@@ -76,31 +75,26 @@ class RuryDataset(Dataset):
             anns_per_image[img_id] = anns_per_image.get(img_id, 0) + 1
         if anns_per_image:
             avg_objects = sum(anns_per_image.values()) / len(anns_per_image)
-            max_objects = max(anns_per_image.values())
-            self.avg_objects = avg_objects  # Zapisujemy średnią liczbę obiektów
-            logger.info("Średnia liczba obiektów na obraz: %.2f, maksymalna: %d", avg_objects, max_objects)
+            self.max_objects = max(anns_per_image.values())  # Przechowujemy max_objects
+            logger.info("Średnia liczba obiektów na obraz: %.2f, maksymalna: %d", avg_objects, self.max_objects)
 
         # Filtruj obrazy: tylko te, które istnieją i mają adnotacje z bboxami
         self.image_ids = []
         for img_id in self.image_info.keys():
             image_path = os.path.join(self.image_dir, self.image_info[img_id]['file_name'])
-            # Sprawdź, czy obraz istnieje
             if not os.path.exists(image_path):
                 logger.warning("Pomijam obraz, plik nie istnieje: %s", image_path)
                 continue
-            # Sprawdź, czy obraz ma adnotacje z bboxami
             anns = [a for a in self.annotations['annotations'] if a['image_id'] == img_id]
             if not anns:
                 logger.warning("Pomijam obraz bez adnotacji: %s", image_path)
                 continue
-            # Sprawdź, czy istnieją bboxy
             has_bboxes = any('bbox' in ann and len(ann['bbox']) == 4 for ann in anns)
             if not has_bboxes:
                 logger.warning("Pomijam obraz bez bboxów: %s", image_path)
                 continue
             self.image_ids.append(img_id)
 
-        # Sortowanie image_ids według liczby adnotacji (od najmniejszej do największej)
         self.image_ids.sort(key=lambda img_id: anns_per_image.get(img_id, 0))
         logger.info("Posortowano obrazy według liczby adnotacji: pierwsza próbka ma %d adnotacji, ostatnia %d",
                     anns_per_image.get(self.image_ids[0], 0), anns_per_image.get(self.image_ids[-1], 0))
@@ -110,9 +104,13 @@ class RuryDataset(Dataset):
         if not self.image_ids:
             raise ValueError(f"Brak obrazów z adnotacjami i bboxami w %s", self.image_dir)
 
-        self.base_transform = T.Compose([T.ToTensor()])
+        # Transformacje z torchvision.transforms.v2
+        self.base_transform = T.Compose([
+            T.ToImage(),
+            T.ToDtype(torch.float32, scale=True),
+        ])
 
-        # Pipeline augmentacji (zgodny z albumentations<2.0.5)
+        # Pipeline augmentacji (albumentations)
         self.augment_transform = A.Compose([
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
@@ -175,7 +173,6 @@ class RuryDataset(Dataset):
             min_visibility=0.3
         ), additional_targets={'masks': 'masks'})
 
-        # Inicjalizacja cache dla masek
         self.mask_cache = {}
 
     def __len__(self):
@@ -201,7 +198,7 @@ class RuryDataset(Dataset):
             mask = full_mask
 
         self.mask_cache[rle_key] = mask
-        return mask
+        return self.mask_cache[rle_key]
 
     def _load_item(self, idx):
         orig_idx = idx // self.num_augmentations
@@ -212,24 +209,21 @@ class RuryDataset(Dataset):
         image_path = os.path.join(self.image_dir, image_info['file_name'])
 
         try:
-            # Wczytaj obraz
             image = cv2.imread(image_path)
             if image is None:
                 raise ValueError(f"Nie można wczytać obrazu: {image_path}")
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             orig_height, orig_width = image.shape[:2]
 
-            # Wczytaj adnotacje
             anns = [a for a in self.annotations['annotations'] if a['image_id'] == image_id]
             if not anns:
                 raise ValueError(f"Brak adnotacji dla obrazu: {image_path}")
 
             boxes = [ann['bbox'] for ann in anns]
-            masks = [self.decode_rle(ann['segmentation'], ann['bbox'], (orig_height, orig_width)) 
+            masks = [self.decode_rle(ann['segmentation'], ann['bbox'], (orig_height, orig_width))
                      if 'segmentation' in ann else None for ann in anns]
             labels = [ann['category_id'] for ann in anns]
 
-            # Augmentacja
             if self.augment and aug_idx > 0:
                 valid_boxes = boxes
                 valid_labels = labels
@@ -247,10 +241,9 @@ class RuryDataset(Dataset):
                 augmented = self.augment_transform(**aug_data)
                 image = augmented['image']
                 aug_boxes = augmented['bboxes']
-                aug_masks = augmented['masks']
                 aug_labels = augmented['category_ids']
+                aug_masks = augmented['masks']
 
-                # Walidacja po augmentacji
                 if np.any(image < 0) or np.any(image > 255) or np.any(np.isnan(image)):
                     raise ValueError(f"Niepoprawne wartości w obrazie po augmentacji: {image_path}")
 
@@ -265,10 +258,10 @@ class RuryDataset(Dataset):
                     y = max(0, min(y, height - 1))
                     x_end = max(0, min(x + w, width - 1))
                     y_end = max(0, min(y + h, height - 1))
-                    
+
                     w = x_end - x
                     h = y_end - y
-                    
+
                     if w > 0 and h > 0:
                         filtered_boxes.append([x, y, w, h])
                         filtered_labels.append(label)
@@ -284,9 +277,9 @@ class RuryDataset(Dataset):
                 image = cv2.resize(image, self.image_size)
                 scale_x = self.image_size[0] / orig_width
                 scale_y = self.image_size[1] / orig_height
-                boxes = [[x * scale_x, y * scale_y, w * scale_x, h * scale_y] 
+                boxes = [[x * scale_x, y * scale_y, w * scale_x, h * scale_y]
                          for x, y, w, h in boxes]
-                masks = [cv2.resize(mask, self.image_size, interpolation=cv2.INTER_NEAREST) if mask is not None else None 
+                masks = [cv2.resize(mask, self.image_size, interpolation=cv2.INTER_NEAREST) if mask is not None else None
                          for mask in masks]
 
             if len(boxes) == 0:
@@ -295,7 +288,7 @@ class RuryDataset(Dataset):
             image = self.base_transform(image)
             boxes = torch.as_tensor(boxes, dtype=torch.float32)
             labels = torch.as_tensor(labels, dtype=torch.int64)
-            
+
             if masks and all(m is not None for m in masks):
                 masks = torch.stack([torch.as_tensor(m, dtype=torch.uint8) for m in masks], dim=0)
             else:
@@ -355,79 +348,62 @@ class RuryDataset(Dataset):
 def custom_collate_fn(batch):
     return tuple(zip(*batch))
 
-def estimate_batch_size(image_size, max_batch_size=16, min_batch_size=1, use_amp=True, is_training=True):
+def estimate_batch_size(image_size, max_objects, max_batch_size=16, min_batch_size=1, use_amp=True, is_training=True):
     """
-    Estymuje batch size na podstawie dostępnej pamięci RAM i VRAM, uwzględniając pesymistyczną liczbę obiektów na obraz.
-    
+    Estymuje batch size na podstawie dostępnej pamięci RAM i VRAM, uwzględniając maksymalną liczbę obiektów na obraz.
+
     Args:
         image_size (tuple): Rozmiar obrazu (wysokość, szerokość) - wymagany parametr.
+        max_objects (int): Maksymalna liczba obiektów na obraz w zbiorze danych.
         max_batch_size (int): Maksymalny batch size.
         min_batch_size (int): Minimalny batch size.
         use_amp (bool): Czy używane jest mixed precision (torch.cuda.amp).
         is_training (bool): Czy estymacja dotyczy treningu (True) czy inferencji (False).
-    
+
     Returns:
         int: Estymowany batch size.
     """
     if image_size is None:
         raise ValueError("image_size musi być podane jako argument w estimate_batch_size")
 
-    # Pamięć na obrazy (RGB, float32)
-    image_memory = image_size[0] * image_size[1] * 3 * 4  # np. 12 MB dla 1024x1024
-    
-    # Pamięć na maski (używamy pesymistycznej wartości 500 obiektów, uint8)
-    pessimistic_objects = 500  # Maksymalna liczba obiektów 
-    masks_memory_per_image = pessimistic_objects * image_size[0] * image_size[1] * 1  
-    
-    # Pamięć na aktywacje (dostosowana do rzeczywistego zużycia ~2.3 GB przy batch_size=1)
-    activations_memory_per_image = 0.5 * 1024 ** 3  # 0.5 GB na aktywacje (zredukowano z 3 GB na podstawie rzeczywistych danych)
-    
-    # Pamięć na model (wagi Mask R-CNN, ~40-50M parametrów)
-    model_memory = 0.6 * 1024 ** 3  # 0.6 GB na wagi
-    
-    # Overhead CUDA/PyTorch
-    cuda_overhead = 1.0 * 1024 ** 3  # 1 GB
-    
-    # Mnożnik dla mixed precision
+    image_memory = image_size[0] * image_size[1] * 3 * 4  # Obraz RGB (float32)
+    masks_memory_per_image = max_objects * image_size[0] * image_size[1] * 1  # Maski (uint8)
+    activations_memory_per_image = 0.5 * 1024 ** 3  # Aktywacje
+    model_memory = 0.6 * 1024 ** 3  # Model
+    cuda_overhead = 1.0 * 1024 ** 3  # Overhead CUDA
     amp_factor = 0.6 if use_amp else 1.0
-    
-    # Całkowita pamięć na obraz dla GPU
     memory_per_image_gpu = (image_memory + masks_memory_per_image + activations_memory_per_image) * amp_factor
-    
-    # Dodatkowa pamięć na gradienty i optymalizator w treningu
+
     if is_training:
-        model_memory *= 3  # Wagi + gradienty + optymalizator (np. SGD) = 1.8 GB
-        memory_per_image_gpu *= 1.5  # Gradienty dla aktywacji
-    
-    # Dostępna pamięć systemowa
+        model_memory *= 3  # Gradienty i optymalizator
+        memory_per_image_gpu *= 1.5  # Dodatkowe zużycie podczas treningu
+
     available_memory = psutil.virtual_memory().available
     cpu_count = os.cpu_count()
     usable_memory = available_memory * 0.7
     max_images_by_memory = int(usable_memory // (image_memory + masks_memory_per_image))
     max_images_by_cpu = cpu_count
 
-    # Dostępna pamięć GPU
     max_images_by_gpu = max_batch_size
     if torch.cuda.is_available():
         try:
             gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
             gpu_memory_free = gpu_memory_total - torch.cuda.memory_reserved(0) - torch.cuda.memory_allocated(0)
-            usable_gpu_memory = gpu_memory_free * 0.7  # 70% wolnej pamięci
+            usable_gpu_memory = gpu_memory_free * 0.7
             total_memory_per_image = memory_per_image_gpu + (model_memory + cuda_overhead) / max_batch_size
             max_images_by_gpu = int(usable_gpu_memory // total_memory_per_image)
-            logger.info("Dostępna pamięć GPU: %.2f GB, szacowane zużycie na obraz: %.2f MB, model: %.2f GB",
-                        gpu_memory_free / (1024 ** 3), total_memory_per_image / (1024 ** 2), model_memory / (1024 ** 3))
+            logger.info("Dostępna pamięć GPU: %.2f GB, szacowane zużycie na obraz: %.2f MB, model: %.2f GB, max obiektów: %d",
+                        gpu_memory_free / (1024 ** 3), total_memory_per_image / (1024 ** 2), model_memory / (1024 ** 3), max_objects)
         except Exception as e:
             logger.warning("Nie można sprawdzić pamięci GPU: %s. Używam konserwatywnego batch_size.", str(e))
             max_images_by_gpu = 1
 
-    # Ostateczny batch size
     max_possible_batch_size = min(max_images_by_memory, max_images_by_cpu, max_images_by_gpu, max_batch_size)
     batch_size = max(min_batch_size, min(max_possible_batch_size, max_batch_size))
 
-    logger.info("Estymowany batch_size: %d (pamięć RAM: %.2f GB, pamięć GPU: %.2f GB, CPU: %d rdzeni, AMP: %s, training: %s)",
+    logger.info("Estymowany batch_size: %d (pamięć RAM: %.2f GB, pamięć GPU: %.2f GB, CPU: %d rdzeni, AMP: %s, training: %s, max obiektów: %d)",
                 batch_size, available_memory / (1024 ** 3), gpu_memory_free / (1024 ** 3) if torch.cuda.is_available() else 0,
-                cpu_count, use_amp, is_training)
+                cpu_count, use_amp, is_training, max_objects)
     return batch_size
 
 def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=4, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):
@@ -447,92 +423,86 @@ def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=4, num_aug
     Returns:
         tuple: (train_loader, val_loader) - DataLoader'y dla danych treningowych i walidacyjnych.
     """
-    # Ustalanie image_size - tutaj zmieniasz rozmiar dla całego kodu
-    image_size = (1024, 1024)  # Zmień tutaj, aby testować różne rozmiary
+    image_size = (1024, 1024)
 
-
-    # Automatyczne dostosowanie batch_size, jeśli nie podano
-    if batch_size is None:
-        batch_size = estimate_batch_size(
-            image_size=image_size,
-            max_batch_size=8,
-            min_batch_size=1,
-            use_amp=True,
-            is_training=True
-        )
-
-    # Automatyczne dostosowanie num_workers
-    available_memory = psutil.virtual_memory().available / (1024 ** 3)  # Dostępna pamięć w GB
-    cpu_count = os.cpu_count()
-    cpu_usage = psutil.cpu_percent(interval=1)
-    
-    if available_memory < 4:  # Jeśli mniej niż 4GB wolnej pamięci
-        num_workers = min(num_workers, max(1, cpu_count // 2))
-        logger.warning("Mało pamięci systemowej (%.2f GB), zmniejszam num_workers do %d", available_memory, num_workers)
-    elif cpu_usage > 80:  # Jeśli obciążenie CPU jest wysokie
-        num_workers = min(num_workers, max(1, cpu_count // 2))
-        logger.warning("Wysokie obciążenie CPU (%.1f%%), zmniejszam num_workers do %d", cpu_usage, num_workers)
-    else:
-        num_workers = min(num_workers, cpu_count)
-
-    # Dynamiczne zarządzanie pin_memory
-    use_pin_memory = False
-    if torch.cuda.is_available():
-        try:
-            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
-            gpu_memory_free = gpu_memory_total - torch.cuda.memory_reserved(0) - torch.cuda.memory_allocated(0)
-            # Włącz pin_memory tylko, jeśli dostępna pamięć GPU > 1 GB po uwzględnieniu modelu
-            model_memory = 1.8 * 1024 ** 3  # 1.8 GB (model + gradienty)
-            cuda_overhead = 1.0 * 1024 ** 3  # 1 GB
-            pessimistic_objects = 171  # Maksymalna liczba obiektów z walidacji
-            memory_per_image = (image_size[0] * image_size[1] * 3 * 4 +  # Obraz RGB
-                                pessimistic_objects * image_size[0] * image_size[1] * 1 +  # Maski
-                                0.5 * 1024 ** 3 * 0.6 * 1.5)  # Aktywacje z AMP (zredukowano)
-            estimated_memory_usage = model_memory + cuda_overhead + memory_per_image * batch_size
-            if gpu_memory_free - estimated_memory_usage > 1.0 * 1024 ** 3:  # >1 GB wolnej pamięci
-                use_pin_memory = True
-                logger.info("Włączam pin_memory, dostępna pamięć GPU: %.2f GB, szacowane zużycie: %.2f GB",
-                            gpu_memory_free / (1024 ** 3), estimated_memory_usage / (1024 ** 3))
-            else:
-                logger.warning("Za mało pamięci GPU (%.2f GB wolnej, szacowane zużycie: %.2f GB), wyłączam pin_memory",
-                               gpu_memory_free / (1024 ** 3), estimated_memory_usage / (1024 ** 3))
-        except Exception as e:
-            logger.warning("Nie można sprawdzić pamięci GPU: %s. Wyłączam pin_memory.", str(e))
-
-    logger.info("Używam batch_size=%d, %d wątków w DataLoader, pin_memory=%s", batch_size, num_workers, use_pin_memory)
-
-    # Zwolnij pamięć GPU przed utworzeniem DataLoaderów
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    # Ustal domyślne ścieżki do adnotacji, jeśli nie podano
+    # Tworzenie datasetów, aby uzyskać max_objects
     if coco_train_path is None:
         coco_train_path = os.path.join(train_dir, "annotations", "instances_train.json")
     if coco_val_path is None:
         coco_val_path = os.path.join(val_dir, "annotations", "instances_val.json")
 
-    # Tworzenie datasetu treningowego
     train_dataset = RuryDataset(
         root=train_dir,
         split="train",
-        image_size=image_size,  # Używamy zmiennej image_size
+        image_size=image_size,
         augment=True,
         num_augmentations=num_augmentations,
         annotation_path=coco_train_path,
         num_processes=num_processes
     )
 
-    # Tworzenie datasetu walidacyjnego
     val_dataset = RuryDataset(
         root=val_dir,
         split="val",
-        image_size=image_size,  # Używamy tej samej zmiennej image_size
+        image_size=image_size,
         augment=False,
         annotation_path=coco_val_path,
         num_processes=num_processes
     )
 
-    # Tworzenie DataLoadera dla danych treningowych
+    # Użycie większej wartości max_objects z obu datasetów
+    max_objects = max(getattr(train_dataset, 'max_objects', 400), getattr(val_dataset, 'max_objects', 400))
+
+    if batch_size is None:
+        batch_size = estimate_batch_size(
+            image_size=image_size,
+            max_objects=max_objects,  # Przekazujemy max_objects
+            max_batch_size=8,
+            min_batch_size=1,
+            use_amp=True,
+            is_training=True
+        )
+
+    available_memory = psutil.virtual_memory().available / (1024 ** 3)
+    cpu_count = os.cpu_count()
+    cpu_usage = psutil.cpu_percent(interval=1)
+
+    if available_memory < 4:
+        num_workers = min(num_workers, max(1, cpu_count // 2))
+        logger.warning("Mało pamięci systemowej (%.2f GB), zmniejszam num_workers do %d", available_memory, num_workers)
+    elif cpu_usage > 70:
+        num_workers = min(num_workers, max(1, cpu_count // 2))
+        logger.warning("Wysokie obciążenie CPU (%.1f%%), zmniejszam num_workers do %d", cpu_usage, num_workers)
+    else:
+        num_workers = min(num_workers, cpu_count)
+
+    use_pin_memory = False
+    if torch.cuda.is_available():
+        try:
+            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
+            gpu_memory_free = gpu_memory_total - torch.cuda.memory_reserved(0) - torch.cuda.memory_allocated(0)
+            model_memory = 1.8 * 1024 ** 3
+            cuda_overhead = 1.0 * 1024 ** 3
+            memory_per_image = (image_size[0] * image_size[1] * 3 * 4 +
+                                max_objects * image_size[0] * image_size[1] * 1 +
+                                0.5 * 1024 ** 3 * 0.6 * 1.5)
+            estimated_memory_usage = model_memory + cuda_overhead + memory_per_image * batch_size
+            if gpu_memory_free - estimated_memory_usage > 2.0 * 1024 ** 3 and available_memory > 8:
+                use_pin_memory = True
+                logger.info("Włączam pin_memory, dostępna pamięć GPU: %.2f GB, szacowane zużycie: %.2f GB, RAM: %.2f GB",
+                            gpu_memory_free / (1024 ** 3), estimated_memory_usage / (1024 ** 3), available_memory)
+            else:
+                logger.warning("Za mało pamięci GPU (%.2f GB wolnej, szacowane zużycie: %.2f GB) lub RAM (%.2f GB), wyłączam pin_memory",
+                               gpu_memory_free / (1024 ** 3), estimated_memory_usage / (1024 ** 3), available_memory)
+        except Exception as e:
+            logger.warning("Nie można sprawdzić pamięci GPU: %s. Wyłączam pin_memory.", str(e))
+
+    logger.info("Używam batch_size=%d, %d wątków w DataLoader, pin_memory=%s, max obiektów: %d",
+                batch_size, num_workers, use_pin_memory, max_objects)
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -543,7 +513,6 @@ def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=4, num_aug
         prefetch_factor=2 if num_workers > 0 else None
     )
 
-    # Tworzenie DataLoadera dla danych walidacyjnych
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,

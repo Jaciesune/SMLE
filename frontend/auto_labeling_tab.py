@@ -52,8 +52,9 @@ class ImageViewer(QtWidgets.QWidget):
         self.drawing = False
         self.current_polygon = []
         self.is_panning = False
-        self.last_mouse_pos = None
+        self.last_global_pos = None
         self.mouse_pos = QtCore.QPoint(0, 0)
+        self.sensitivity = 1.0  # Czułość przesuwania
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.setMouseTracking(True)
         self.adjust_initial_scale()
@@ -76,7 +77,8 @@ class ImageViewer(QtWidgets.QWidget):
         else:
             self.scale = container_height / self.original_height
 
-        self.min_scale = self.scale * 0.5
+        # Ustaw min_scale tak, aby obraz nie był mniejszy niż viewport
+        self.min_scale = min(container_width / self.original_width, container_height / self.original_height)
         logger.debug("Początkowa skala: %s, min_scale: %s", self.scale, self.min_scale)
         self.update_viewer_size()
 
@@ -96,7 +98,15 @@ class ImageViewer(QtWidgets.QWidget):
         final_width = max(scaled_width, container_width)
         final_height = max(scaled_height, container_height)
         self.setFixedSize(final_width, final_height)
-        logger.debug("Zaktualizowano rozmiar widżetu: %sx%s, skala: %s", final_width, final_height, self.scale)
+
+        # Ustaw zakresy pasków przewijania
+        h_scroll = container.horizontalScrollBar()
+        v_scroll = container.verticalScrollBar()
+        h_scroll.setRange(0, max(0, scaled_width - container_width))
+        v_scroll.setRange(0, max(0, scaled_height - container_height))
+
+        logger.debug("Zaktualizowano rozmiar widżetu: %sx%s, skala: %s, h_range: %s, v_range: %s",
+                     final_width, final_height, self.scale, h_scroll.maximum(), v_scroll.maximum())
         self.update()
 
     def wheelEvent(self, event):
@@ -116,6 +126,19 @@ class ImageViewer(QtWidgets.QWidget):
             zoom_factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
             mouse_pos = event.pos()
 
+            # Sprawdź, czy obraz jest w pełni widoczny w viewport
+            viewport_size = container.viewport().size()
+            viewport_width = viewport_size.width()
+            viewport_height = viewport_size.height()
+            scaled_width = self.original_width * self.scale
+            scaled_height = self.original_height * self.scale
+
+            # Zablokuj pomniejszanie, jeśli obraz jest w pełni widoczny
+            if zoom_factor < 1.0 and scaled_width <= viewport_width and scaled_height <= viewport_height:
+                logger.debug("Pomniejszanie zablokowane: obraz w pełni widoczny")
+                return
+
+            # Oblicz pozycję myszy w przestrzeni obrazu
             viewport_x = mouse_pos.x() + h_scroll.value()
             viewport_y = mouse_pos.y() + v_scroll.value()
             image_x = viewport_x / self.scale
@@ -127,8 +150,25 @@ class ImageViewer(QtWidgets.QWidget):
 
             self.update_viewer_size()
 
+            # Oblicz nowe wymiary obrazu po zmianie skali
+            new_scaled_width = self.original_width * self.scale
+            new_scaled_height = self.original_height * self.scale
+
+            # Oblicz nowe wartości przewijania, aby zachować punkt pod kursorem i ograniczyć do granic obrazu
             new_viewport_x = (image_x * self.scale) - mouse_pos.x()
             new_viewport_y = (image_y * self.scale) - mouse_pos.y()
+
+            # Ogranicz przewijanie, aby obraz nie wychodził poza granice
+            max_h_scroll = max(0, new_scaled_width - viewport_width)
+            max_v_scroll = max(0, new_scaled_height - viewport_height)
+            new_viewport_x = max(0, min(new_viewport_x, max_h_scroll))
+            new_viewport_y = max(0, min(new_viewport_y, max_v_scroll))
+
+            # Jeśli obraz jest mniejszy niż viewport, wyśrodkuj go
+            if new_scaled_width <= viewport_width:
+                new_viewport_x = (viewport_width - new_scaled_width) // 2
+            if new_scaled_height <= viewport_height:
+                new_viewport_y = (viewport_height - new_scaled_height) // 2
 
             h_scroll.setValue(int(new_viewport_x))
             v_scroll.setValue(int(new_viewport_y))
@@ -141,10 +181,10 @@ class ImageViewer(QtWidgets.QWidget):
             scroll_step = 50
             if modifiers & QtCore.Qt.ShiftModifier:
                 new_h_value = h_scroll.value() - (delta // 120 * scroll_step)
-                h_scroll.setValue(new_h_value)
+                h_scroll.setValue(max(0, min(new_h_value, h_scroll.maximum())))
             else:
                 new_v_value = v_scroll.value() - (delta // 120 * scroll_step)
-                v_scroll.setValue(new_v_value)
+                v_scroll.setValue(max(0, min(new_v_value, v_scroll.maximum())))
 
             container.viewport().update()
             self.update()
@@ -226,8 +266,8 @@ class ImageViewer(QtWidgets.QWidget):
 
         if event.button() == QtCore.Qt.MidButton:
             self.is_panning = True
-            self.last_mouse_pos = event.pos()
-            self.setCursor(QtCore.Qt.OpenHandCursor)
+            self.last_global_pos = event.globalPos()
+            self.setCursor(QtCore.Qt.ClosedHandCursor)
             return
 
         if event.button() == QtCore.Qt.LeftButton:
@@ -293,19 +333,31 @@ class ImageViewer(QtWidgets.QWidget):
         self.auto_labeling_tab.update_status_bar()
 
         if self.is_panning:
-            new_pos = event.pos()
-            delta_x = new_pos.x() - self.last_mouse_pos.x()
-            delta_y = new_pos.y() - self.last_mouse_pos.y()
+            new_global_pos = event.globalPos()
+            if self.last_global_pos is None:
+                self.last_global_pos = new_global_pos
+                return
+
+            # Oblicz przesunięcie na podstawie globalnych współrzędnych, odwracając kierunek
+            delta_x = (self.last_global_pos.x() - new_global_pos.x()) * self.sensitivity
+            delta_y = (self.last_global_pos.y() - new_global_pos.y()) * self.sensitivity
 
             container = self.auto_labeling_tab.image_viewer_container
             h_scroll = container.horizontalScrollBar()
             v_scroll = container.verticalScrollBar()
 
-            h_scroll.setValue(h_scroll.value() - delta_x)
-            v_scroll.setValue(v_scroll.value() - delta_y)
+            # Aktualizuj pozycję przewijania
+            new_h_value = h_scroll.value() + int(delta_x)
+            new_v_value = v_scroll.value() + int(delta_y)
 
-            self.last_mouse_pos = new_pos
-            container.viewport().update()
+            # Ogranicz wartości przewijania
+            h_scroll.setValue(max(0, min(new_h_value, h_scroll.maximum())))
+            v_scroll.setValue(max(0, min(new_v_value, v_scroll.maximum())))
+
+            # Zaktualizuj pozycję globalną
+            self.last_global_pos = new_global_pos
+
+            # Odśwież widok
             self.update()
             return
 
@@ -316,6 +368,7 @@ class ImageViewer(QtWidgets.QWidget):
         if event.button() == QtCore.Qt.MidButton:
             self.is_panning = False
             self.setCursor(QtCore.Qt.ArrowCursor)
+            self.last_global_pos = None
 
     def mouseDoubleClickEvent(self, event):
         if self.drawing and len(self.current_polygon) >= 3:
@@ -413,14 +466,16 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.api_url = "http://localhost:8000"
         self.job_name = None
         self.temp_dir = None
+        self.input_dir = None
         self.original_image_paths = []
         self.image_paths = []
         self.annotation_files = []
         self.current_image_idx = 0
         self.annotations = []
         self.labels = ["obiekt"]
+        self.default_label = "obiekt"  # Domyślna etykieta dla wszystkich obrazów
         self.history = []
-        self.edit_mode = False  # Domyślnie tryb oznaczania
+        self.edit_mode = False
         self.init_ui()
 
     def init_ui(self):
@@ -665,6 +720,7 @@ class AutoLabelingTab(QtWidgets.QWidget):
         if not input_dir:
             return
 
+        self.input_dir = input_dir
         mode = self.mode_combo.currentText()
 
         self.original_image_paths = glob.glob(os.path.join(input_dir, "*.jpg"))
@@ -674,7 +730,12 @@ class AutoLabelingTab(QtWidgets.QWidget):
 
         self.original_image_paths.sort()
         self.image_paths = self.original_image_paths.copy()
-        self.annotation_files = []  # Nie tworzymy pustych JSON-ów
+        self.annotation_files = []
+
+        for image_path in self.original_image_paths:
+            base_name = os.path.splitext(image_path)[0]
+            annotation_path = f"{base_name}.json"
+            self.annotation_files.append(annotation_path)
 
         if mode == "Automatyczne oznaczanie":
             model_version = self.model_version_combo.currentText()
@@ -755,7 +816,6 @@ class AutoLabelingTab(QtWidgets.QWidget):
                 after_dir = self.find_results_dir(self.temp_dir, self.job_name)
                 if not after_dir:
                     progress_dialog.close()
-                    logger.error(f"Katalog z wynikami auto-labelingu nie istnieje w {self.temp_dir}!")
                     QtWidgets.QMessageBox.warning(self, "Błąd", "Katalog z wynikami auto-labelingu nie istnieje!")
                     return
 
@@ -766,19 +826,16 @@ class AutoLabelingTab(QtWidgets.QWidget):
 
                 if not self.image_paths or not self.annotation_files:
                     progress_dialog.close()
-                    logger.error("Brak plików obrazów lub adnotacji w katalogu wyników!")
                     QtWidgets.QMessageBox.warning(self, "Błąd", "Brak wyników auto-labelingu (obrazów lub adnotacji)!")
                     return
 
                 if len(self.image_paths) != len(self.annotation_files):
                     progress_dialog.close()
-                    logger.error(f"Niezgodność liczby obrazów ({len(self.image_paths)}) i adnotacji ({len(self.annotation_files)})!")
                     QtWidgets.QMessageBox.warning(self, "Błąd", "Liczba obrazów i adnotacji nie jest zgodna!")
                     return
 
             except requests.exceptions.RequestException as e:
                 progress_dialog.close()
-                logger.error("Błąd podczas labelowania: %s", e)
                 QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd podczas labelowania: {e}")
                 return
             finally:
@@ -814,6 +871,14 @@ class AutoLabelingTab(QtWidgets.QWidget):
                 with open(annotation_path, 'r', encoding='utf-8') as f:
                     json_data = json.load(f)
                 self.annotations = json_data["shapes"]
+                # Znajdź pierwszą etykietę na obrazie i ustaw jako domyślną
+                if self.annotations:
+                    first_label = self.annotations[0]["label"]
+                    self.default_label = first_label
+                    logger.debug(f"Ustawiono domyślną etykietę dla obrazu {image_path}: {first_label}")
+                    # Ustaw wszystkie maski na tę samą etykietę
+                    for shape in self.annotations:
+                        shape["label"] = first_label
             except Exception as e:
                 logger.error(f"Błąd wczytywania adnotacji {annotation_path}: {e}")
                 QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd wczytywania adnotacji: {e}")
@@ -831,11 +896,19 @@ class AutoLabelingTab(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd wczytywania obrazu: {e}")
             return
 
+        # Ustaw domyślną etykietę w polu wyboru
         custom_label = self.custom_label_input.text().strip()
-        if custom_label and custom_label not in self.labels:
-            self.labels.append(custom_label)
-            self.label_input.addItem(custom_label)
-        self.label_input.setCurrentText(custom_label if custom_label else "obiekt")
+        if custom_label:
+            self.default_label = custom_label
+            self.label_input.setCurrentText(custom_label)
+            if custom_label not in self.labels:
+                self.labels.append(custom_label)
+                self.label_input.addItem(custom_label)
+        else:
+            self.label_input.setCurrentText(self.default_label)
+            if self.default_label not in self.labels:
+                self.labels.append(self.default_label)
+                self.label_input.addItem(self.default_label)
 
         self.update_mask_list()
         self.image_list.setCurrentRow(self.current_image_idx)
@@ -904,13 +977,19 @@ class AutoLabelingTab(QtWidgets.QWidget):
         if self.image_viewer.selected_mask_idx >= 0:
             new_label = self.get_current_label()
             if new_label:
-                self.annotations[self.image_viewer.selected_mask_idx]["label"] = new_label
+                # Zmiana etykiety na wszystkich maskach na obrazie
+                for shape in self.annotations:
+                    shape["label"] = new_label
+                self.default_label = new_label
                 self.add_label_to_list(new_label)
                 self.update_mask_list()
                 self.save_annotations(silent=True)
 
     def get_current_label(self):
-        return self.label_input.currentText().strip()
+        label = self.label_input.currentText().strip()
+        if not label:
+            label = self.default_label
+        return label
 
     def add_label_to_list(self, label):
         if label and label not in self.labels:
@@ -919,8 +998,23 @@ class AutoLabelingTab(QtWidgets.QWidget):
 
     def save_annotations(self, silent=False):
         if not self.image_paths:
+            logger.warning("Brak ścieżek do obrazów, pomijam zapis adnotacji")
             return
-        annotation_path = os.path.join(os.path.dirname(self.image_paths[self.current_image_idx]), f"{os.path.splitext(os.path.basename(self.image_paths[self.current_image_idx]))[0]}.json")
+
+        if self.mode_combo.currentText() == "Ręczne oznaczanie":
+            if not self.input_dir:
+                logger.error("Brak input_dir w trybie ręcznym")
+                QtWidgets.QMessageBox.warning(self, "Błąd", "Katalog wejściowy nie został wybrany!")
+                return
+            annotation_dir = self.input_dir
+        else:
+            annotation_dir = os.path.dirname(self.image_paths[self.current_image_idx])
+
+        annotation_path = os.path.join(
+            annotation_dir,
+            f"{os.path.splitext(os.path.basename(self.image_paths[self.current_image_idx]))[0]}.json"
+        )
+
         json_data = {
             "version": "5.8.1",
             "flags": {},
@@ -930,12 +1024,17 @@ class AutoLabelingTab(QtWidgets.QWidget):
             "imageHeight": self.image_viewer.original_height,
             "imageWidth": self.image_viewer.original_width
         }
+
         try:
             with open(annotation_path, 'w', encoding='utf-8') as f:
-                json.dump(json_data, f, indent=2)
+                json.dump(json_data, f, indent=2, ensure_ascii=False)
+            logger.debug(f"Adnotacje zapisane do: {annotation_path}")
             if not silent:
                 QtWidgets.QMessageBox.information(self, "Sukces", "Adnotacje zapisane pomyślnie!")
             self.update_image_list()
+        except PermissionError as e:
+            logger.error(f"Brak uprawnień do zapisu pliku {annotation_path}: {e}")
+            QtWidgets.QMessageBox.warning(self, "Błąd", f"Brak uprawnień do zapisu pliku: {e}")
         except Exception as e:
             logger.error(f"Błąd zapisu adnotacji {annotation_path}: {e}")
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd zapisu adnotacji: {e}")

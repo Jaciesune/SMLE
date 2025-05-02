@@ -7,20 +7,18 @@ import logging
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from backend.Inne.Auto_Labeling.auto_label import main as auto_label_main
 
-# Konfiguracja logowania
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class AutoLabelAPI:
     def __init__(self):
-        self.base_path = Path(__file__).resolve().parent.parent  # backend
+        self.base_path = Path(__file__).resolve().parent.parent
         self.algorithm = "Mask R-CNN"
         self.models_path = self.base_path / "Mask_RCNN" / "models"
         self.data_path = self.base_path / "data"
         logger.debug("Inicjalizacja AutoLabelAPI: base_path=%s, models_path=%s", self.base_path, self.models_path)
 
     def get_model_versions(self):
-        """Zwraca listę plików modeli dla algorytmu Mask R-CNN."""
         if not self.models_path.exists():
             logger.warning("Katalog modeli %s nie istnieje.", self.models_path)
             return []
@@ -29,7 +27,6 @@ class AutoLabelAPI:
         return model_versions
 
     def get_model_path(self, version):
-        """Zwraca ścieżkę do wybranego modelu Mask R-CNN."""
         model_path = self.models_path / version
         if not model_path.exists() or not model_path.is_file():
             logger.error("Model %s nie istnieje.", model_path)
@@ -38,10 +35,9 @@ class AutoLabelAPI:
             logger.error("Model %s nie kończy się na _checkpoint.pth.", model_path)
             return None
         logger.debug("Ścieżka modelu: %s", model_path)
-        return str(model_path)  # Ścieżka w kontenerze
+        return str(model_path)
 
     def auto_label(self, input_dir, job_name, version, input_dir_docker, output_dir_docker, debug_dir_docker, custom_label):
-        """Przeprowadza automatyczne labelowanie katalogu zdjęć."""
         logger.debug("Rozpoczynam auto_label: job_name=%s, model_version=%s, input_dir_docker=%s, custom_label=%s",
                      job_name, version, input_dir_docker, custom_label)
         model_path = self.get_model_path(version)
@@ -50,7 +46,6 @@ class AutoLabelAPI:
             logger.error(error_msg)
             return error_msg
 
-        # Sprawdź input_dir_docker zamiast input_dir
         logger.debug("Sprawdzam katalog wejściowy w kontenerze: %s", input_dir_docker)
         if not os.path.exists(input_dir_docker):
             error_msg = f"Błąd: Katalog wejściowy w kontenerze {input_dir_docker} nie istnieje."
@@ -73,7 +68,7 @@ class AutoLabelAPI:
                 "--output_dir", output_dir_docker,
                 "--debug_dir", debug_dir_docker if debug_dir_docker else "",
                 "--model_path", model_path,
-                "--custom_label", custom_label  # Przekazujemy etykietę użytkownika
+                "--custom_label", custom_label
             ]
             logger.debug("Argumenty przekazane do auto_label_main: %s", sys.argv)
             auto_label_main()

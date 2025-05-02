@@ -3,8 +3,10 @@ import os
 import torch
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
+import albumentations as A
 from pycocotools.coco import COCO
 from PIL import Image
+import numpy as np
 import psutil
 import logging
 
@@ -84,32 +86,116 @@ def estimate_batch_size(image_size, max_batch_size=16, min_batch_size=1, use_amp
     return batch_size
 
 class CocoDataset(torch.utils.data.Dataset):
-    def __init__(self, image_dir, annotation_path, transforms=None):
+    def __init__(self, image_dir, annotation_path, image_size=(1024, 1024), augment=False, num_augmentations=1):
         self.image_dir = image_dir
         self.coco = COCO(annotation_path)
         self.image_ids = list(self.coco.imgs.keys())
-        self.transforms = transforms
+        self.image_size = image_size
+        self.augment = augment
+        self.num_augmentations = num_augmentations if augment else 1
 
-    def __getitem__(self, index):
-        image_id = self.image_ids[index]
+        # Transformacja minimalna (dla walidacji lub bez augmentacji)
+        self.base_transform = T.Compose([T.ToTensor()])
+
+        # Pipeline augmentacji (zgodny z albumentations)
+        self.augment_transform = A.Compose([
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.Affine(
+                scale=(0.9, 1.1),
+                translate_percent=(-0.1, 0.1),
+                rotate=(-10, 10),
+                shear=(-5, 5),
+                p=0.5
+            ),
+            A.RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.1, p=0.5),
+            A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=20, p=0.5),
+            A.GaussNoise(p=0.3),
+            A.Blur(blur_limit=3, p=0.2),
+            A.Resize(height=image_size[1], width=image_size[0]),
+        ], bbox_params=A.BboxParams(
+            format='coco',
+            label_fields=['category_ids'],
+            min_area=3,
+            min_visibility=0.3
+        ))
+
+    def __len__(self):
+        return len(self.image_ids) * self.num_augmentations
+
+    def __getitem__(self, idx):
+        orig_idx = idx // self.num_augmentations
+        aug_idx = idx % self.num_augmentations
+        image_id = self.image_ids[orig_idx]
         ann_ids = self.coco.getAnnIds(imgIds=image_id)
         anns = self.coco.loadAnns(ann_ids)
 
         img_info = self.coco.loadImgs(image_id)[0]
         path = img_info['file_name']
         image = Image.open(os.path.join(self.image_dir, path)).convert("RGB")
+        image_np = np.array(image)
 
         boxes = []
         labels = []
 
         for ann in anns:
             x, y, w, h = ann['bbox']
-            boxes.append([x, y, x + w, y + h])
+            boxes.append([x, y, w, h])
             labels.append(ann['category_id'])
 
+        # Augmentacja
+        if self.augment and aug_idx > 0:
+            aug_data = {
+                'image': image_np,
+                'bboxes': boxes,
+                'category_ids': labels
+            }
+            augmented = self.augment_transform(**aug_data)
+            image_np = augmented['image']
+            boxes = augmented['bboxes']
+            labels = augmented['category_ids']
+
+            # Walidacja po augmentacji
+            if not boxes:
+                logger.warning(f"Obraz {path} (aug_idx={aug_idx}) nie ma bboxów po augmentacji")
+                boxes = [[0, 0, 1, 1]]  # Dummy bbox
+                labels = [0]  # Dummy label
+            else:
+                # Filtrowanie niepoprawnych bboxów
+                filtered_boxes = []
+                filtered_labels = []
+                height, width = image_np.shape[:2]
+                for bbox, label in zip(boxes, labels):
+                    x, y, w, h = map(int, bbox)
+                    x = max(0, min(x, width - 1))
+                    y = max(0, min(y, height - 1))
+                    x_end = max(0, min(x + w, width - 1))
+                    y_end = max(0, min(y + h, height - 1))
+                    w = x_end - x
+                    h = y_end - y
+                    if w > 0 and h > 0:
+                        filtered_boxes.append([x, y, w, h])
+                        filtered_labels.append(label)
+                boxes = filtered_boxes
+                labels = filtered_labels
+
+            image = Image.fromarray(image_np)
+        else:
+            image = image
+
+        image = self.base_transform(image)
         boxes = torch.as_tensor(boxes, dtype=torch.float32)
         labels = torch.as_tensor(labels, dtype=torch.int64)
         image_id = torch.tensor([image_id])
+
+        # Konwersja bboxów do formatu [x_min, y_min, x_max, y_max]
+        if len(boxes) > 0:
+            boxes = torch.stack([
+                boxes[:, 0],
+                boxes[:, 1],
+                boxes[:, 0] + boxes[:, 2],
+                boxes[:, 1] + boxes[:, 3]
+            ], dim=1)
 
         target = {
             "boxes": boxes,
@@ -117,17 +203,9 @@ class CocoDataset(torch.utils.data.Dataset):
             "image_id": image_id
         }
 
-        if self.transforms:
-            image = self.transforms(image)
-
         return image, target
 
-    def __len__(self):
-        return len(self.image_ids)
-
-def get_data_loaders(train_path, val_path, train_annotations, val_annotations, batch_size=None, num_workers=4):
-    transforms = T.Compose([T.ToTensor()])
-    
+def get_data_loaders(train_path, val_path, train_annotations, val_annotations, batch_size=None, num_workers=4, num_augmentations=0):
     # Ustalanie image_size
     image_size = (1024, 1024)  # Zgodne z Mask R-CNN
 
@@ -135,7 +213,7 @@ def get_data_loaders(train_path, val_path, train_annotations, val_annotations, b
     if batch_size is None:
         batch_size = estimate_batch_size(
             image_size=image_size,
-            max_batch_size=8,
+            max_batch_size=16,
             min_batch_size=1,
             use_amp=True,
             is_training=True
@@ -177,8 +255,20 @@ def get_data_loaders(train_path, val_path, train_annotations, val_annotations, b
 
     logger.info("Używam batch_size=%d, %d wątków w DataLoader, pin_memory=%s", batch_size, num_workers, use_pin_memory)
 
-    train_dataset = CocoDataset(train_path, train_annotations, transforms=transforms)
-    val_dataset = CocoDataset(val_path, val_annotations, transforms=transforms)
+    train_dataset = CocoDataset(
+        image_dir=train_path,
+        annotation_path=train_annotations,
+        image_size=image_size,
+        augment=True,
+        num_augmentations=num_augmentations
+    )
+    val_dataset = CocoDataset(
+        image_dir=val_path,
+        annotation_path=val_annotations,
+        image_size=image_size,
+        augment=False,
+        num_augmentations=1
+    )
 
     train_loader = DataLoader(
         train_dataset,

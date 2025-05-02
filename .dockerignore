@@ -8,10 +8,6 @@ __pycache__
 .git
 .gitignore
 
-# Ignorowanie plików konfiguracyjnych Dockera
-.dockerignore
-Dockerfile
-docker-compose.yml
 
 # Ignorowanie dokumentacji i innych niepotrzebnych plików
 *.md
@@ -40,4 +36,8 @@ experiments/
 *.swo
 .vscode/
 
+backend/frontend/*
 SMLE APP/
+SMLE APP/**
+SMLE APP/*
+*SMLE APP*

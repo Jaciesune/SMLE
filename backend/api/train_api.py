@@ -14,13 +14,11 @@ class TrainAPI:
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
             "FasterRCNN": self.base_path / "FasterRCNN" / "saved_models",
-            "MCNN": self.base_path / "MCNN" / "models",
-            "SSD - do zaimplementowania": self.base_path / "SSD" / "models"
+            "MCNN": self.base_path / "MCNN" / "models"
         }
         self.train_scripts = {
             "Mask R-CNN": "train_maskrcnn.py",
             "FasterRCNN": "run_training.py",
-            "SSD": "train_ssd.py",
             "MCNN": "train_model.py"
         }
         self._running = True

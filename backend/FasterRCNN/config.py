@@ -1,7 +1,7 @@
 # config.py
 # Detekcja
-CONFIDENCE_THRESHOLD = 0.05
-NMS_THRESHOLD = 0.3
+CONFIDENCE_THRESHOLD = 0.4
+NMS_THRESHOLD = 0.5  # Standardowa wartość
 
 # Augmentacja i obraz
 INPUT_SIZE = 1024
@@ -14,22 +14,15 @@ MAX_BOX_AREA_RATIO = 1.0
 
 # Model selection
 SAVE_PERFECT_MODEL_RATIO_RANGE = (0.93, 1.07)
+USE_FASTER_RCNN_V2 = True  # Użyj fasterrcnn_resnet50_fpn_v2
 
 # Anchory
-ANCHOR_SIZES = ((32,), (64,), (128,), (256,), (512,))
-ANCHOR_RATIOS = (
-    (0.8, 1.0, 1.2),
-    (0.8, 1.0, 1.2),
-    (0.8, 1.0, 1.2),
-    (0.8, 1.0, 1.2),
-    (0.8, 1.0, 1.2)
-)
+ANCHOR_SIZES = ((8, 16, 32, 64, 128),)  # Mniejsze rozmiary dla małych obiektów
+ANCHOR_RATIOS = ((0.2, 0.5, 1.0, 2.0, 5.0),)  # Szerszy zakres proporcji
+USE_CUSTOM_ANCHORS = True  # Włącz dla małych obiektów
 
 # Liczba klas
 NUM_CLASSES = 2
-
-# Włącz/Wyłącz anchory
-USE_CUSTOM_ANCHORS = False
 
 # Optymalizator i scheduler
 MOMENTUM = 0.9

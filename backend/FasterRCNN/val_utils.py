@@ -1,3 +1,4 @@
+# val_utils.py
 import os
 import sys
 import torch
@@ -5,7 +6,6 @@ import cv2
 import numpy as np
 from utils import filter_and_draw_boxes
 from pycocotools.coco import COCO
-import json
 from tqdm import tqdm
 from pycocotools.cocoeval import COCOeval
 from config import (
@@ -15,6 +15,14 @@ from config import (
     MIN_BOX_AREA_RATIO,
     MAX_BOX_AREA_RATIO
 )
+import logging
+
+# Konfiguracja logowania
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+# Wyłączenie debugowania dla Pillow
+logging.getLogger('PIL').setLevel(logging.WARNING)
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -28,15 +36,19 @@ def validate_model(model, dataloader, device, epoch, model_name):
     pred_count = 0
     gt_count = len(coco_gt.getAnnIds())
 
+    logger.info(f"Rozpoczynanie walidacji dla epoki {epoch}, model: {model_name}")
+    logger.info(f"Liczba adnotacji GT: {gt_count}")
+
     for images, targets in tqdm(dataloader, desc="Walidacja"):
         images = [img.to(device) for img in images]
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
         with torch.no_grad():
-            outputs = model(images)
+            with torch.amp.autocast('cuda'):  # Zaktualizowana składnia
+                outputs = model(images)
 
         for i, output in enumerate(outputs):
-            print(f"[DEBUG] Epoka {epoch}, obraz {i} -> liczba predykcji (raw): {len(output['boxes'])}")
+            logger.debug(f"Epoka {epoch}, obraz {i} -> liczba predykcji (raw): {len(output['boxes'])}")
 
             boxes = output["boxes"].detach().cpu().tolist()
             scores = output["scores"].detach().cpu().tolist()
@@ -60,28 +72,31 @@ def validate_model(model, dataloader, device, epoch, model_name):
                 if not (MIN_BOX_AREA_RATIO <= area_ratio <= MAX_BOX_AREA_RATIO):
                     continue
 
-                predictions.append({
+                pred = {
                     "image_id": image_id,
                     "category_id": int(label),
                     "bbox": [x1, y1, width, height],
                     "score": float(score)
-                })
+                }
+                predictions.append(pred)
+
+                # Debugowanie predykcji
+                if image_id not in coco_gt.imgs:
+                    logger.warning(f"Nieznane image_id w predykcji: {image_id}")
+                if pred["category_id"] not in coco_gt.cats:
+                    logger.warning(f"Nieznane category_id w predykcji: {pred['category_id']}")
+                if any(x < 0 for x in pred["bbox"]):
+                    logger.warning(f"Ujemne wartości w bbox: {pred['bbox']}")
 
             pred_count += len(scores)
             image_ids.append(image_id)
 
-    # Zapis predykcji do pliku
-    result_file = f"val/{model_name}/epoch_{epoch}_predictions.json"
-    os.makedirs(os.path.dirname(result_file), exist_ok=True)
-    with open(result_file, 'w', encoding="utf-8") as f:
-        json.dump(predictions, f)
-
     if len(predictions) == 0:
-        print("Brak predykcji - pomijam COCOeval.")
+        logger.warning("Brak predykcji - pomijam COCOeval.")
         return 1.0, 0, gt_count, 0.0, 0.0, 0.0, 0.0
 
     # Rysowanie wyników 
-    debug_dir = f"val/{model_name}/debug_preds"
+    debug_dir = f"/app/backend/FasterRCNN/logs/val/{model_name}/debug_preds"
     os.makedirs(debug_dir, exist_ok=True)
 
     for i, image in enumerate(images):
@@ -99,20 +114,26 @@ def validate_model(model, dataloader, device, epoch, model_name):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
         cv2.imwrite(os.path.join(debug_dir, image_name), image_np)
+        logger.debug(f"Zapisano obraz debugowania: {os.path.join(debug_dir, image_name)}")
 
-    # Ocena mAP
-    coco_dt = coco_gt.loadRes(result_file)
-    coco_eval = COCOeval(coco_gt, coco_dt, iouType='bbox')
-    coco_eval.evaluate()
-    coco_eval.accumulate()
-    coco_eval.summarize()
+    # Ocena mAP bez zapisywania do pliku JSON
+    try:
+        # Bezpośrednie użycie predictions w COCOeval
+        coco_dt = coco_gt.loadRes(predictions)  # Przekazanie listy predykcji bezpośrednio
+        coco_eval = COCOeval(coco_gt, coco_dt, iouType='bbox')
+        coco_eval.evaluate()
+        coco_eval.accumulate()
+        coco_eval.summarize()
 
-    map_50_95 = coco_eval.stats[0]
-    map_50 = coco_eval.stats[1]
-    precision = coco_eval.stats[6]
-    recall = coco_eval.stats[8]
+        map_50_95 = coco_eval.stats[0] if coco_eval.stats is not None else 0.0
+        map_50 = coco_eval.stats[1] if coco_eval.stats is not None else 0.0
+        precision = coco_eval.stats[6] if coco_eval.stats is not None else 0.0
+        recall = coco_eval.stats[8] if coco_eval.stats is not None else 0.0
 
-    print(f"Metryki COCO - mAP@0.5: {map_50:.4f} | mAP@0.5:0.95: {map_50_95:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f}")
+        logger.info(f"Metryki COCO - mAP@0.5: {map_50:.4f} | mAP@0.5:0.95: {map_50_95:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f}")
+    except Exception as e:
+        logger.error(f"Błąd podczas obliczania metryk COCO: {str(e)}")
+        map_50_95, map_50, precision, recall = 0.0, 0.0, 0.0, 0.0
 
     val_loss = 1 - map_50_95
     return val_loss, pred_count, gt_count, map_50_95, map_50, precision, recall

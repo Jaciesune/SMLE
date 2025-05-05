@@ -16,7 +16,6 @@ class CountTab(QtWidgets.QWidget):
         self.api_url = "http://localhost:8000"
         self.init_ui()
 
-
     def init_ui(self):
         # Główny układ poziomy
         main_layout = QtWidgets.QHBoxLayout()
@@ -143,28 +142,24 @@ class CountTab(QtWidgets.QWidget):
 
         try:
             logger.debug("Wysyłam żądanie do %s/detect_image: algorithm=%s, model_version=%s, username=%s",
-                         self.api_url, algorithm, model_version)
+                         self.api_url, algorithm, model_version, self.username)
             with open(self.current_image_path, "rb") as image_file:
                 files = {"image": (os.path.basename(self.current_image_path), image_file, "image/jpeg")}
                 data = {"algorithm": algorithm, "model_version": model_version, "username": self.username}
                 response = requests.post(f"{self.api_url}/detect_image", files=files, data=data)
                 response.raise_for_status()
 
-            # Pobranie liczby detekcji z nagłówka
             detections_count = int(response.headers.get("X-Detections-Count", 0))
 
-            # Zapisanie obrazu wynikowego tymczasowo
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
                 temp_file.write(response.content)
                 temp_file_path = temp_file.name
 
-            # Wyświetlenie obrazu wynikowego
             pixmap = QtGui.QPixmap(temp_file_path).scaled(
                 self.image_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
             )
             self.image_label.setPixmap(pixmap)
 
-            # Usunięcie pliku tymczasowego
             os.unlink(temp_file_path)
 
             QtWidgets.QMessageBox.information(

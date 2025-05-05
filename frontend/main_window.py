@@ -47,7 +47,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.models_tab = ModelsTab()
         self.archive_tab = ArchiveTab()
         self.auto_labeling_tab = AutoLabelingTab(self.user_role)
-        self.dataset_creation_tab = DatasetCreationTab(self.user_role)
+        self.dataset_creation_tab = DatasetCreationTab(self.user_role, self.username)
 
         self.tabs.addTab(self.count_tab, "Zliczanie")
         self.tabs.addTab(self.train_tab, "Trening")

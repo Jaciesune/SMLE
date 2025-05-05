@@ -13,9 +13,11 @@ from login import verify_credentials
 from users_tab import get_users, create_user
 from api.detection_api import DetectionAPI
 from api.auto_label_api import AutoLabelAPI
+from api.dataset_api import DatasetAPI
 from api.auto_label_routes import router as auto_label_router
-from api.dataset_routes import router as dataset_router
 from api.detection_routes import router as detection_router
+from api.dataset_routes import router as dataset_router
+
 import logging
 from datetime import datetime
 
@@ -58,6 +60,7 @@ app.add_middleware(
 
 detection_api = DetectionAPI()
 auto_label_api = AutoLabelAPI()
+dataset_api = DatasetAPI()
 
 app.include_router(auto_label_router)
 app.include_router(dataset_router)

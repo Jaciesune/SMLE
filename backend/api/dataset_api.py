@@ -8,14 +8,15 @@ from PIL import Image
 from pycocotools import mask as mask_utils
 from io import BytesIO
 import logging
+import random
 
 # Konfiguracja logowania
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DatasetAPI:
     def __init__(self):
-        self.output_base_dir = "/app/backend/data/datase_create"
+        self.output_base_dir = "/app/backend/data/dataset_create"
         self.allowed_image_extensions = {".jpg", ".jpeg", ".png", ".bmp"}
 
     def decode_mask(self, base64_str):
@@ -119,20 +120,16 @@ class DatasetAPI:
         return False
 
     def manual_split(self, files, train_ratio, val_ratio, test_ratio):
-        """Ręcznie dzieli listę plików na train, val i test według podanych proporcji."""
+        """Ręcznie dzieli listę plików na train, val i test według podanych proporcji w losowy sposób."""
         total = len(files)
         if total == 0:
             return [], [], []
 
-        # Oblicz indeksy podziału
+        random.shuffle(files)
         train_end = int(total * train_ratio)
         val_end = train_end + int(total * val_ratio)
         test_end = total
 
-        # Sortuj pliki dla powtarzalności
-        files.sort()
-
-        # Podział
         train_files = files[:train_end]
         val_files = files[train_end:val_end]
         test_files = files[val_end:test_end]
@@ -140,18 +137,15 @@ class DatasetAPI:
         return train_files, val_files, test_files
 
     def create_dataset(self, username, dataset_name, input_files, train_ratio, val_ratio, test_ratio):
-        """Tworzy dataset z przesłanych plików i zwraca .zip."""
+        """Tworzy dataset z przesłanych plików bez tworzenia ZIP."""
         user_dir = os.path.join(self.output_base_dir, username, dataset_name)
         input_dir = os.path.join(user_dir, "input")
         output_dir = os.path.join(user_dir, "output")
-        zip_path = os.path.join(user_dir, "results.zip")
 
         try:
-            # Utwórz katalogi
             os.makedirs(input_dir, exist_ok=True)
             os.makedirs(output_dir, exist_ok=True)
 
-            # Zapisz przesłane pliki z podziałem na obrazy i JSON
             json_files = []
             image_files = []
             for file in input_files:
@@ -174,10 +168,9 @@ class DatasetAPI:
             if not image_files:
                 raise ValueError("Brak plików obrazów (.jpg, .jpeg, .png, .bmp) w przesłanych danych.")
 
-            # Sprawdzanie par obraz-JSON i duplikatów
             paired_files = []
             for img in image_files:
-                json_name = img.replace(".jpg", ".json")
+                json_name = img.rsplit(".", 1)[0] + ".json"
                 if json_name not in json_files:
                     logger.warning("Brak pliku JSON dla obrazu %s, pomijam.", img)
                     continue
@@ -189,7 +182,6 @@ class DatasetAPI:
             if not paired_files:
                 raise ValueError("Brak nowych par obraz-JSON do przetworzenia.")
 
-            # Ręczny podział na train, val, test
             train_files, val_files, test_files = self.manual_split(
                 paired_files, train_ratio, val_ratio, test_ratio
             )
@@ -210,7 +202,7 @@ class DatasetAPI:
 
                 data_list = []
                 for img_file in files:
-                    json_file = img_file.replace(".jpg", ".json")
+                    json_file = img_file.rsplit(".", 1)[0] + ".json"
                     json_path = os.path.join(input_dir, json_file)
                     try:
                         labelme_data = self.load_labelme_json(json_path)
@@ -230,7 +222,6 @@ class DatasetAPI:
                             shutil.copy(source_image_path, target_image_path)
                             data_list.append(labelme_data)
                         else:
-                            # Dla test kopiuj zarówno obraz, jak i JSON
                             target_image_path = os.path.join(dataset_dir, image_name)
                             target_json_path = os.path.join(dataset_dir, json_file)
                             shutil.copy(source_image_path, target_image_path)
@@ -244,23 +235,7 @@ class DatasetAPI:
                     output_json_path = os.path.join(dataset_dir, "annotations", f"instances_{dataset}.json")
                     self.convert_to_coco(data_list, output_json_path)
 
-            # Spakuj wyniki
-            with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
-                for subset in ["train", "val", "test"]:
-                    subset_dir = os.path.join(user_dir, subset)
-                    for root, _, files in os.walk(subset_dir):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            arcname = os.path.join(subset, os.path.relpath(file_path, subset_dir))
-                            if subset != "test" and "images" in arcname:
-                                _, ext = os.path.splitext(file.lower())
-                                if ext not in self.allowed_image_extensions:
-                                    logger.warning("Pomijam plik %s w folderze images - nie jest to obraz.", file)
-                                    continue
-                            zipf.write(file_path, arcname)
-                            logger.debug("Dodano do zip: %s", arcname)
-
-            return zip_path
+            return True
         except Exception as e:
             logger.error("Błąd tworzenia datasetu: %s", e)
             raise
@@ -298,24 +273,49 @@ class DatasetAPI:
             return []
         return [d for d in os.listdir(user_dir) if os.path.isdir(os.path.join(user_dir, d))]
 
-    def download_dataset(self, username, dataset_name, subset=None):
-        """Zwraca ZIP z danymi datasetu lub podzbioru."""
-        user_dir = os.path.join(self.output_base_dir, username, dataset_name)
+    def create_zip(self, user_dir, subset=None):
+        """Tworzy plik ZIP dla całego datasetu lub podzbioru."""
         zip_path = os.path.join(user_dir, f"{subset if subset else 'full'}_results.zip")
+        subsets = [subset] if subset else ["train", "val", "test"]
         
-        if subset:
-            subset_dir = os.path.join(user_dir, subset)
-            if not os.path.exists(subset_dir):
-                raise ValueError(f"Podzbiór {subset} nie istnieje.")
-            with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
+            for subset in subsets:
+                subset_dir = os.path.join(user_dir, subset)
+                if not os.path.exists(subset_dir):
+                    continue
                 for root, _, files in os.walk(subset_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
                         arcname = os.path.join(subset, os.path.relpath(file_path, subset_dir))
+                        if subset != "test" and "images" in arcname:
+                            _, ext = os.path.splitext(file.lower())
+                            if ext not in self.allowed_image_extensions:
+                                continue
                         zipf.write(file_path, arcname)
-        else:
-            zip_path = os.path.join(user_dir, "results.zip")
-            if not os.path.exists(zip_path):
-                raise ValueError("Plik ZIP dla całego datasetu nie istnieje.")
-
         return zip_path
+
+    def download_dataset(self, username, dataset_name, subset=None):
+        """Zwraca ZIP z danymi datasetu lub podzbioru, tworząc go jeśli nie istnieje."""
+        user_dir = os.path.join(self.output_base_dir, username, dataset_name)
+        zip_path = os.path.join(user_dir, f"{subset if subset else 'full'}_results.zip")
+        
+        if not os.path.exists(zip_path):
+            zip_path = self.create_zip(user_dir, subset)
+        
+        if not os.path.exists(zip_path):
+            raise ValueError(f"Nie udało się utworzyć pliku ZIP dla {'podzbioru ' + subset if subset else 'całego datasetu'}.")
+        
+        return zip_path
+
+    def delete_dataset(self, username, dataset_name):
+        """Usuwa dataset użytkownika."""
+        user_dir = os.path.join(self.output_base_dir, username, dataset_name)
+        if not os.path.exists(user_dir):
+            raise ValueError(f"Dataset {dataset_name} nie istnieje.")
+        
+        try:
+            shutil.rmtree(user_dir, ignore_errors=True)
+            return True
+        except Exception as e:
+            logger.error("Błąd podczas usuwania datasetu: %s", e)
+            raise ValueError(f"Błąd podczas usuwania datasetu: {e}")

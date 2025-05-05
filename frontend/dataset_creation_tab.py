@@ -5,7 +5,7 @@ import logging
 import random
 
 # Konfiguracja logowania
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DatasetCreationTab(QtWidgets.QWidget):
@@ -31,6 +31,25 @@ class DatasetCreationTab(QtWidgets.QWidget):
         self.new_dataset_input = QtWidgets.QLineEdit()
         self.new_dataset_input.setPlaceholderText("Wpisz nazwę datasetu")
         self.new_dataset_layout.addWidget(self.new_dataset_input)
+        
+        self.train_ratio_label = QtWidgets.QLabel("Train (%):")
+        self.new_dataset_layout.addWidget(self.train_ratio_label)
+        self.train_ratio_input = QtWidgets.QLineEdit("60")
+        self.train_ratio_input.setFixedWidth(50)
+        self.new_dataset_layout.addWidget(self.train_ratio_input)
+        
+        self.val_ratio_label = QtWidgets.QLabel("Val (%):")
+        self.new_dataset_layout.addWidget(self.val_ratio_label)
+        self.val_ratio_input = QtWidgets.QLineEdit("30")
+        self.val_ratio_input.setFixedWidth(50)
+        self.new_dataset_layout.addWidget(self.val_ratio_input)
+        
+        self.test_ratio_label = QtWidgets.QLabel("Test (%):")
+        self.new_dataset_layout.addWidget(self.test_ratio_label)
+        self.test_ratio_input = QtWidgets.QLineEdit("10")
+        self.test_ratio_input.setFixedWidth(50)
+        self.new_dataset_layout.addWidget(self.test_ratio_input)
+        
         self.create_dataset_button = QtWidgets.QPushButton("Utwórz nowy dataset")
         self.create_dataset_button.clicked.connect(self.create_new_dataset)
         self.new_dataset_layout.addWidget(self.create_dataset_button)
@@ -44,15 +63,30 @@ class DatasetCreationTab(QtWidgets.QWidget):
         self.dataset_list.currentTextChanged.connect(self.load_dataset)
         layout.addWidget(self.dataset_list)
 
-        # Przycisk zwiększania datasetu
+        # Przyciski zwiększania i usuwania datasetu
+        self.dataset_actions_layout = QtWidgets.QHBoxLayout()
         self.increase_button = QtWidgets.QPushButton("Zwiększ dataset")
         self.increase_button.clicked.connect(self.increase_dataset)
         self.increase_button.setEnabled(False)
-        layout.addWidget(self.increase_button)
+        self.dataset_actions_layout.addWidget(self.increase_button)
+        
+        self.delete_button = QtWidgets.QPushButton("Usuń dataset")
+        self.delete_button.clicked.connect(self.delete_dataset)
+        self.delete_button.setEnabled(False)
+        self.dataset_actions_layout.addWidget(self.delete_button)
+        layout.addLayout(self.dataset_actions_layout)
+
+        # Przyciski pobierania nad kolumnami
+        self.download_buttons_layout = QtWidgets.QHBoxLayout()
+        for subset in ["train", "val", "test"]:
+            button = QtWidgets.QPushButton(f"Pobierz {subset.capitalize()}")
+            button.clicked.connect(lambda _, s=subset: self.download_subset(s))
+            button.setEnabled(False)
+            self.download_buttons_layout.addWidget(button)
+        layout.addLayout(self.download_buttons_layout)
 
         # Trzy kolumny (train, val, test) z przewijaniem
         self.columns_layout = QtWidgets.QHBoxLayout()
-
         wysokosc_kolumn = 800
         
         # Train column
@@ -98,6 +132,21 @@ class DatasetCreationTab(QtWidgets.QWidget):
         self.setLayout(layout)
         self.update_dataset_list()
 
+    def validate_ratios(self):
+        """Sprawdza, czy proporcje są poprawne i sumują się do 100%."""
+        try:
+            train_ratio = float(self.train_ratio_input.text())
+            val_ratio = float(self.val_ratio_input.text())
+            test_ratio = float(self.test_ratio_input.text())
+            total = train_ratio + val_ratio + test_ratio
+            if abs(total - 100.0) > 0.01:
+                return False, "Suma proporcji musi wynosić 100%!"
+            if train_ratio < 0 or val_ratio < 0 or test_ratio < 0:
+                return False, "Proporcje nie mogą być ujemne!"
+            return True, (train_ratio / 100, val_ratio / 100, test_ratio / 100)
+        except ValueError:
+            return False, "Proporcje muszą być liczbami!"
+
     def update_dataset_list(self):
         try:
             response = requests.get(f"{self.api_url}/list_datasets/{self.username}")
@@ -106,7 +155,11 @@ class DatasetCreationTab(QtWidgets.QWidget):
             self.dataset_list.clear()
             self.dataset_list.addItem("Wybierz dataset")
             self.dataset_list.addItems(datasets)
-            if not datasets:
+            if datasets:
+                first_dataset = datasets[0]
+                self.dataset_list.setCurrentText(first_dataset)
+                self.load_dataset(first_dataset)
+            else:
                 self.log_text.append("Brak istniejących datasetów. Utwórz nowy dataset.")
         except requests.exceptions.RequestException as e:
             logger.warning("Błąd podczas pobierania listy datasetów: %s", e)
@@ -119,6 +172,12 @@ class DatasetCreationTab(QtWidgets.QWidget):
         if not dataset_name:
             self.log_text.append("Proszę wpisać nazwę datasetu!")
             return
+
+        valid, result = self.validate_ratios()
+        if not valid:
+            self.log_text.append(result)
+            return
+        self.train_ratio, self.val_ratio, self.test_ratio = result
 
         directory = QtWidgets.QFileDialog.getExistingDirectory(self, "Wybierz katalog z obrazami i adnotacjami")
         if not directory:
@@ -147,13 +206,34 @@ class DatasetCreationTab(QtWidgets.QWidget):
             json_path = os.path.join(directory, fname.replace(".jpg", ".json"))
             new_files.append(('files', (fname.replace(".jpg", ".json"), open(json_path, 'rb'), "application/json")))
 
+        random.shuffle(paired_files)
+        total_files = len(paired_files)
+        train_count = int(total_files * self.train_ratio)
+        val_count = int(total_files * self.val_ratio)
+        test_count = total_files - train_count - val_count
+
+        train_files = paired_files[:train_count]
+        val_files = paired_files[train_count:train_count + val_count]
+        test_files = paired_files[train_count + val_count:]
+
+        for fname in train_files:
+            self.log_text.append(f"Dodano {fname} do train")
+            self.selected_dataset_images["train"].append(fname)
+        for fname in val_files:
+            self.log_text.append(f"Dodano {fname} do val")
+            self.selected_dataset_images["val"].append(fname)
+        for fname in test_files:
+            self.log_text.append(f"Dodano {fname} do test")
+            self.selected_dataset_images["test"].append(fname)
+
         data = {
             'username': self.username,
             'job_name': dataset_name,
-            'train_ratio': self.train_ratio,
-            'val_ratio': self.val_ratio,
-            'test_ratio': self.test_ratio
+            'train_ratio': str(self.train_ratio),  # Konwersja na string
+            'val_ratio': str(self.val_ratio),      # Konwersja na string
+            'test_ratio': str(self.test_ratio)     # Konwersja na string
         }
+        logger.debug("Wysyłane dane: %s", data)
         try:
             response = requests.post(
                 f"{self.api_url}/create_dataset",
@@ -165,6 +245,10 @@ class DatasetCreationTab(QtWidgets.QWidget):
             self.new_dataset_input.clear()
             self.update_dataset_list()
             self.dataset_list.setCurrentText(dataset_name)
+        except requests.exceptions.HTTPError as e:
+            error_detail = response.json().get('detail', str(e)) if response.text else str(e)
+            logger.error("Błąd podczas tworzenia datasetu: %s, szczegóły: %s", e, error_detail)
+            self.log_text.append(f"Błąd podczas tworzenia datasetu: {e}\nSzczegóły: {error_detail}")
         except requests.exceptions.RequestException as e:
             logger.error("Błąd podczas tworzenia datasetu: %s", e)
             self.log_text.append(f"Błąd podczas tworzenia datasetu: {e}")
@@ -175,7 +259,12 @@ class DatasetCreationTab(QtWidgets.QWidget):
     def load_dataset(self, dataset_name):
         self.dataset_name = dataset_name if dataset_name != "Wybierz dataset" else None
         self.increase_button.setEnabled(self.dataset_name is not None)
+        self.delete_button.setEnabled(self.dataset_name is not None)
         self.download_all_button.setEnabled(self.dataset_name is not None)
+        for i in range(self.download_buttons_layout.count()):
+            button = self.download_buttons_layout.itemAt(i).widget()
+            if button:
+                button.setEnabled(self.dataset_name is not None)
         self.clear_columns()
 
         if self.dataset_name:
@@ -189,18 +278,36 @@ class DatasetCreationTab(QtWidgets.QWidget):
                     "test": info.get("test", {}).get("images", [])
                 }
 
-                # Wyświetl kolumny z obrazkami
                 self.update_column("train", info.get("train", {}).get("count", 0), self.selected_dataset_images["train"], self.train_column)
                 self.update_column("val", info.get("val", {}).get("count", 0), self.selected_dataset_images["val"], self.val_column)
                 self.update_column("test", info.get("test", {}).get("count", 0), self.selected_dataset_images["test"], self.test_column)
 
-                # Dodaj przyciski pobierania
-                self.add_download_button("train", self.train_column)
-                self.add_download_button("val", self.val_column)
-                self.add_download_button("test", self.test_column)
             except requests.exceptions.RequestException as e:
                 logger.error("Błąd podczas ładowania datasetu: %s", e)
                 self.log_text.append(f"Błąd podczas ładowania datasetu: {e}")
+
+    def delete_dataset(self):
+        if not self.dataset_name or self.dataset_name == "Wybierz dataset":
+            self.log_text.append("Proszę wybrać dataset do usunięcia!")
+            return
+
+        reply = QtWidgets.QMessageBox.question(
+            self, "Potwierdzenie",
+            f"Czy na pewno chcesz usunąć dataset {self.dataset_name}?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No
+        )
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                response = requests.delete(f"{self.api_url}/delete_dataset/{self.username}/{self.dataset_name}")
+                response.raise_for_status()
+                self.log_text.append(f"Usunięto dataset: {self.dataset_name}")
+                self.dataset_name = None
+                self.clear_columns()
+                self.update_dataset_list()
+            except requests.exceptions.RequestException as e:
+                logger.error("Błąd podczas usuwania datasetu: %s", e)
+                self.log_text.append(f"Błąd podczas usuwania datasetu: {e}")
 
     def clear_columns(self):
         for layout in [self.train_column, self.val_column, self.test_column]:
@@ -216,11 +323,6 @@ class DatasetCreationTab(QtWidgets.QWidget):
             for img in images:
                 layout.addWidget(QtWidgets.QLabel(img))
         layout.addStretch()
-
-    def add_download_button(self, subset, layout):
-        button = QtWidgets.QPushButton(f"Pobierz {subset.capitalize()}")
-        button.clicked.connect(lambda: self.download_subset(subset))
-        layout.addWidget(button)
 
     def increase_dataset(self):
         if not self.dataset_name:
@@ -253,7 +355,6 @@ class DatasetCreationTab(QtWidgets.QWidget):
             json_path = os.path.join(directory, fname.replace(".jpg", ".json"))
             new_files.append(('files', (fname.replace(".jpg", ".json"), open(json_path, 'rb'), "application/json")))
 
-        # Sprawdzenie duplikatów
         unique_files = []
         for fname in paired_files:
             response = requests.get(f"{self.api_url}/dataset_info/{self.username}/{self.dataset_name}")
@@ -271,22 +372,34 @@ class DatasetCreationTab(QtWidgets.QWidget):
                 file_tuple[1].close()
             return
 
-        # Losowy podział
-        subsets = ["train", "val", "test"]
-        weights = [self.train_ratio, self.val_ratio, self.test_ratio]
-        assigned_subset = random.choices(subsets, weights=weights, k=len(unique_files))
-        for fname, subset in zip(unique_files, assigned_subset):
-            self.log_text.append(f"Dodano {fname} do {subset}")
-            self.selected_dataset_images[subset].append(fname)
+        random.shuffle(unique_files)
+        total_files = len(unique_files)
+        train_count = int(total_files * self.train_ratio)
+        val_count = int(total_files * self.val_ratio)
+        test_count = total_files - train_count - val_count
 
-        # Wywołanie API do aktualizacji datasetu
+        train_files = unique_files[:train_count]
+        val_files = unique_files[train_count:train_count + val_count]
+        test_files = unique_files[train_count + val_count:]
+
+        for fname in train_files:
+            self.log_text.append(f"Dodano {fname} do train")
+            self.selected_dataset_images["train"].append(fname)
+        for fname in val_files:
+            self.log_text.append(f"Dodano {fname} do val")
+            self.selected_dataset_images["val"].append(fname)
+        for fname in test_files:
+            self.log_text.append(f"Dodano {fname} do test")
+            self.selected_dataset_images["test"].append(fname)
+
         data = {
             'username': self.username,
             'job_name': self.dataset_name,
-            'train_ratio': self.train_ratio,
-            'val_ratio': self.val_ratio,
-            'test_ratio': self.test_ratio
+            'train_ratio': str(self.train_ratio),  # Konwersja na string
+            'val_ratio': str(self.val_ratio),      # Konwersja na string
+            'test_ratio': str(self.test_ratio)     # Konwersja na string
         }
+        logger.debug("Wysyłane dane: %s", data)
         try:
             response = requests.post(
                 f"{self.api_url}/create_dataset",
@@ -296,6 +409,10 @@ class DatasetCreationTab(QtWidgets.QWidget):
             response.raise_for_status()
             self.log_text.append("Dataset zaktualizowany pomyślnie!")
             self.load_dataset(self.dataset_name)
+        except requests.exceptions.HTTPError as e:
+            error_detail = response.json().get('detail', str(e)) if response.text else str(e)
+            logger.error("Błąd podczas aktualizacji datasetu: %s, szczegóły: %s", e, error_detail)
+            self.log_text.append(f"Błąd podczas aktualizacji datasetu: {e}\nSzczegóły: {error_detail}")
         except requests.exceptions.RequestException as e:
             logger.error("Błąd podczas aktualizacji datasetu: %s", e)
             self.log_text.append(f"Błąd podczas aktualizacji datasetu: {e}")

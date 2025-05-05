@@ -7,23 +7,15 @@ from pycocotools.coco import COCO
 from pycocotools import mask as coco_mask
 from pycocotools.cocoeval import COCOeval
 import gc
+import psutil
+import shutil
 
-# Funkcja do estymacji kroków akumulacji gradientów
-def estimate_accumulation_steps(batch_size, image_size, device):
-    memory_per_image = image_size[0] * image_size[1] * 3 * 4 * 0.6  # Przybliżone zużycie z AMP
-    total_memory = memory_per_image * batch_size
-    try:
-        available_vram = torch.cuda.get_device_properties(device).total_memory * 0.7
-        if total_memory * 8 > available_vram:
-            return int((total_memory / available_vram) * 8) + 1
-    except:
-        pass
-    return 8
+# Usunięto funkcję estimate_accumulation_steps, ponieważ akumulacja gradientów nie jest już potrzebna
 
-# Funkcja do treningu jednej epoki
-def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_steps=8, grad_clip=1.0):
+# Funkcja do treningu jednej epoki bez akumulacji gradientów i grad_clip
+def train_one_epoch(model, dataloader, optimizer, device, epoch):
     """
-    Trenuje model przez jedną epokę z użyciem mixed precision (AMP) i akumulacji gradientów.
+    Trenuje model przez jedną epokę z użyciem mixed precision (AMP), bez akumulacji gradientów i grad_clip.
     
     Args:
         model: Model PyTorch do treningu
@@ -31,8 +23,6 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_st
         optimizer: Optymalizator (np. SGD)
         device: Urządzenie (CPU/GPU)
         epoch: Numer bieżącej epoki
-        accumulation_steps: Liczba kroków akumulacji gradientów
-        grad_clip: Maksymalna norma gradientów (dla gradient clipping)
     Returns:
         Średnia strata dla epoki
     """
@@ -43,7 +33,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_st
     print(f"\nEpoka {epoch}... (Batchy: {len(dataloader)})")
 
     for batch_idx, (obrazy, cele) in enumerate(dataloader):
-        # Zwolnienie pamięci GPU i synchronizacja
+        # Monitorowanie pamięci RAM i /dev/shm
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
@@ -59,23 +49,21 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_st
             for t in cele
         ]
 
+        optimizer.zero_grad(set_to_none=True)  # Reset gradientów przed każdym batch-em
+
         with autocast('cuda', dtype=torch.bfloat16):
             słownik_strat = model(obrazy, nowe_cele)
-            strata = sum(strata for strata in słownik_strat.values()) / accumulation_steps
+            strata = sum(strata for strata in słownik_strat.values())
 
+        # Skalowanie straty i wsteczne propagowanie bez akumulacji
         scaler.scale(strata).backward()
 
-        if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(dataloader):
-            # Gradient clipping dla stabilności
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        # Aktualizacja wag bez grad_clip
+        scaler.step(optimizer)
+        scaler.update()
 
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad(set_to_none=True)  # Optymalizacja pamięci
-
-        całkowita_strata += strata.item() * accumulation_steps
-        print(f"Batch {batch_idx+1}/{len(dataloader)} - Strata: {strata.item() * accumulation_steps:.4f}")
+        całkowita_strata += strata.item()
+        print(f"Batch {batch_idx+1}/{len(dataloader)} - Strata: {strata.item():.4f}")
 
         # Czyszczenie zmiennych
         del obrazy, nowe_cele, słownik_strat, strata
@@ -83,7 +71,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, accumulation_st
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    return całkowita_strata / len(dataloader)
+    return całkowita_strata / len(dataloader) if len(dataloader) > 0 else 0
 
 # Funkcja do dekodowania RLE
 def decode_rle_segmentation(segmentation):
@@ -233,7 +221,7 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
             for t in cele
         ]
 
-        with autocast('cuda', dtype=torch.bfloat16):  # Agresywne AMP
+        with autocast('cuda', dtype=torch.bfloat16):
             model.train()
             with torch.no_grad():
                 słownik_strat = model(obrazy, nowe_cele)
@@ -306,9 +294,9 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
                 full_iou = intersection / union if union > 0 else 0
                 pełne_iou_sum += full_iou
                 pełne_iou_count += 1
-                print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt}, IoU pełnych masek: {full_iou:.3f}")
+                print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt:.2f}, IoU pełnych masek: {full_iou:.3f}")
             else:
-                print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt}, IoU pełnych masek: 0.000 (puste maski)")
+                print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt:.2f}, IoU pełnych masek: 0.000 (puste maski)")
 
             # Czyszczenie pamięci po każdym obrazie
             del obraz_np, pred_masks, pred_bboxes, pred_scores, pred_labels, full_pred_mask, gt_masks, gt_bboxes, full_gt_mask, pred_image

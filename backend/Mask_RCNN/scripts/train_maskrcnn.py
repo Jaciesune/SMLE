@@ -7,16 +7,16 @@ import os
 import argparse
 from datetime import datetime
 from dataset import get_data_loaders
-from utils import train_one_epoch, validate_model, estimate_accumulation_steps
+from utils import train_one_epoch, validate_model
 import numpy as np
 import shutil
 import sys
 from tqdm import tqdm
 
 # === KONFIGURACJA ===
-CONFIDENCE_THRESHOLD = 0.7
-NMS_THRESHOLD = 1000        # Liczba propozycji przed i po NMS
-DETECTION_PER_IMAGE = 500   # Maksymalna liczba detekcji na obraz
+CONFIDENCE_THRESHOLD = 0.5  # Obniżony próg
+NMS_THRESHOLD = 1600        # Liczba propozycji przed i po NMS
+DETECTION_PER_IMAGE = 800   # Maksymalna liczba detekcji na obraz
 NUM_CLASSES = 2
 
 BASE_DIR = "/app/backend/Mask_RCNN"
@@ -148,14 +148,6 @@ def train_model(args, is_api_call=False):
         coco_val_path=coco_val_path
     )
 
-    # Obliczenie batch_size na podstawie DataLoader
-    batch_size = train_loader.batch_size
-    image_size = (1024, 1024)  # Zgodne z dataset.py
-
-    # Dynamiczne obliczanie accumulation_steps
-    accumulation_steps = estimate_accumulation_steps(batch_size, image_size, device)
-    print(f"Dynamicznie obliczone accumulation_steps: {accumulation_steps}", flush=True)
-
     straty_treningowe = []
     straty_walidacyjne = []
     liczby_predykcji = []
@@ -216,8 +208,7 @@ def train_model(args, is_api_call=False):
         with tqdm(total=end_epoch - start_epoch + 1, desc="Trening", unit="epoka", file=sys.stdout) as pbar:
             for epoch in range(start_epoch, end_epoch + 1):
                 strata_treningowa = train_one_epoch(
-                    model, train_loader, optimizer, device, epoch, 
-                    accumulation_steps=accumulation_steps, grad_clip=1.0  # Dodano grad_clip
+                    model, train_loader, optimizer, device, epoch
                 )
                 strata_walidacyjna, liczba_predykcji, liczba_gt, mAP_bbox, mAP_seg = validate_model(
                     model, val_loader, device, epoch, base_model_name, coco_val_path

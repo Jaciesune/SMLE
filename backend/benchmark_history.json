@@ -1,1 +1,20 @@
-[{"MAE": 3.2, "effectiveness": 60.0, "algorithm": "Mask R-CNN", "model_version": "1.0", "model_name": "testowyfaster", "image_folder": "/app/backend/data/test/images", "timestamp": "2025-04-29T19:14:23.605011"}, {"MAE": 2.8, "effectiveness": 65.0, "algorithm": "Mask R-CNN", "model_version": "1.0", "model_name": "mask trzy epoki", "image_folder": "/app/backend/data/test/images", "timestamp": "2025-04-29T19:51:30.667983"}]
+[
+    {
+        "MAE": 11.833333333333334,
+        "effectiveness": 47.7,
+        "algorithm": "Mask R-CNN",
+        "model_version": "1.0",
+        "model_name": "testowyfaster",
+        "image_folder": "/app/backend/data/test/images",
+        "timestamp": "2025-05-05T17:49:30.630638"
+    },
+    {
+        "MAE": 2.8,
+        "effectiveness": 65.0,
+        "algorithm": "Mask R-CNN",
+        "model_version": "1.0",
+        "model_name": "mask trzy epoki",
+        "image_folder": "/app/backend/data/test/images",
+        "timestamp": "2025-05-05T17:41:36.886933"
+    }
+]

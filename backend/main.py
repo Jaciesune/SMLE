@@ -148,6 +148,22 @@ def get_models():
         cursor.execute("SELECT id, name, algorithm, version, accuracy, creation_date, training_date, status FROM model")
         models = cursor.fetchall()
         logger.debug(f"[DEBUG] Pobrano modele: {models}")
+        # Formatowanie odpowiedzi z użyciem nazwy modelu
+        formatted_models = [
+            {
+                "id": m["id"],
+                "name": m["name"],
+                "algorithm": m["algorithm"],
+                "version": m["version"],
+                "accuracy": m["accuracy"],
+                "creation_date": m["creation_date"],
+                "training_date": m["training_date"],
+                "status": m["status"],
+                "display_name": f"{m['name']} ({m['algorithm']} - v{m['version']})"
+            }
+            for m in models
+        ]
+        return formatted_models
     except mysql.connector.Error as err:
         conn.close()
         logger.error(f"[DEBUG] Błąd zapytania do bazy modeli: {err}")
@@ -155,7 +171,7 @@ def get_models():
     finally:
         cursor.close()
         conn.close()
-    return models
+
 @app.get("/compare_models")
 def compare_models():
     history_file = "/app/backend/benchmark_history.json"
@@ -177,7 +193,7 @@ def compare_models():
     # Grupowanie wyników według folderu danych
     results_by_dataset = {}
     for result in history:
-        dataset = result["image_folder"]
+        dataset = result.get("image_folder", "unknown_dataset")
         if dataset not in results_by_dataset:
             results_by_dataset[dataset] = []
         results_by_dataset[dataset].append(result)
@@ -194,23 +210,34 @@ def compare_models():
 
         for result in results:
             model_info = {
-                "model": f"{result['algorithm']} - v{result['version']}",
-                "model_name": result["model_name"],
-                "effectiveness": result["effectiveness"],
-                "mae": result["MAE"],
-                "timestamp": result["timestamp"]
+                "model": f"{result.get('algorithm', 'Unknown')} - v{result.get('model_version', 'Unknown')}",
+                "model_name": result.get("model_name", "Unknown"),
+                "effectiveness": result.get("effectiveness", 0),
+                "mae": result.get("MAE", 0),
+                "timestamp": result.get("timestamp", "Unknown")
             }
             dataset_results.append(model_info)
 
             # Znajdź najlepszy model dla tego zbioru danych
-            if result["effectiveness"] > best_effectiveness:
-                best_effectiveness = result["effectiveness"]
+            effectiveness = result.get("effectiveness", 0)
+            if effectiveness > best_effectiveness:
+                best_effectiveness = effectiveness
                 best_model_for_dataset = {
                     "dataset": dataset,
-                    "model": f"{result['algorithm']} - v{result['version']}",
-                    "model_name": result["model_name"],
-                    "effectiveness": result["effectiveness"]
+                    "model": f"{result.get('algorithm', 'Unknown')} - v{result.get('model_version', 'Unknown')}",
+                    "model_name": result.get("model_name", "Unknown"),
+                    "effectiveness": effectiveness,
+                    "mae": result.get("MAE", 0)
                 }
+
+        # Sortuj wyniki według skuteczności (od najlepszego do najgorszego)
+        dataset_results.sort(key=lambda x: x["effectiveness"], reverse=True)
+
+        # Dodaj ranking i różnice skuteczności
+        for i, model in enumerate(dataset_results):
+            model["rank"] = i + 1
+            if best_model_for_dataset:
+                model["effectiveness_diff"] = best_effectiveness - model["effectiveness"]
 
         # Dodaj wyniki dla tego zbioru danych
         comparison_results.append({
@@ -372,6 +399,7 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
 
     metrics_list = []
     ground_truth_counts = []  # Lista przechowująca liczby obiektów w ground truth
+    predicted_counts = []  # Lista przechowująca liczby przewidywanych obiektów
     for idx in range(len(dataset)):
         img_path, annotations = dataset[idx]
         logger.debug(f"[DEBUG] Przetwarzanie obrazu {idx+1}/{len(dataset)}: {img_path}")
@@ -393,6 +421,7 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
             # Policz obiekty z annotacji (format LabelMe)
             num_ground_truth = len(annotations)
             ground_truth_counts.append(num_ground_truth)
+            predicted_counts.append(num_predicted)
             logger.debug(f"[DEBUG] Liczba rur w annotacji: {num_ground_truth} dla {img_path}")
 
             # Oblicz metrykę
@@ -412,6 +441,10 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
         mae = sum(metrics_list) / len(metrics_list)
         # Oblicz średnią liczbę obiektów w ground truth
         avg_ground_truth = sum(ground_truth_counts) / len(ground_truth_counts) if ground_truth_counts else 1
+        logger.debug(f"[DEBUG] Średnia liczba obiektów w ground truth: {avg_ground_truth}")
+        # Oblicz średnią liczbę przewidywanych obiektów
+        avg_predicted = sum(predicted_counts) / len(predicted_counts) if predicted_counts else 0
+        logger.debug(f"[DEBUG] Średnia liczba przewidywanych obiektów: {avg_predicted}")
         # Oblicz skuteczność w procentach
         effectiveness = max(0, (1 - mae / avg_ground_truth)) * 100 if avg_ground_truth > 0 else 0
         results = {
@@ -423,7 +456,26 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
             "image_folder": request.image_folder,
             "timestamp": datetime.now().isoformat()
         }
-        logger.debug(f"[DEBUG] Wynik benchmarku: MAE={mae}, Skuteczność={effectiveness}%")
+        logger.debug(f"[DEBUG] Wynik benchmarku: MAE={mae}, Skuteczność={effectiveness}%, avg_ground_truth={avg_ground_truth}, avg_predicted={avg_predicted}")
+
+        # Aktualizuj accuracy w bazie danych
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            query = """
+                UPDATE model 
+                SET accuracy = %s 
+                WHERE name = %s AND algorithm = %s AND version = %s
+            """
+            cursor.execute(query, (effectiveness, request.model_name, request.algorithm, request.model_version))
+            conn.commit()
+            logger.debug(f"[DEBUG] Zaktualizowano accuracy w bazie danych: {effectiveness}% dla modelu {request.model_name}")
+        except mysql.connector.Error as err:
+            logger.error(f"[DEBUG] Błąd aktualizacji accuracy w bazie danych: {err}")
+            raise HTTPException(status_code=500, detail=f"Błąd aktualizacji accuracy: {err}")
+        finally:
+            cursor.close()
+            conn.close()
 
         # Zapisz wyniki do pliku benchmark_results.json (nadpisywanie pojedynczego wyniku)
         try:
@@ -434,22 +486,41 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
             logger.error(f"[DEBUG] Błąd zapisu wyników: {e}")
             raise HTTPException(status_code=500, detail=f"Błąd zapisu wyników: {e}")
 
-        # Zapisz wyniki do historii benchmarków (dopisywanie do listy)
+        # Zapisz wyniki do historii benchmarków (nadpisywanie dla tych samych danych)
         try:
             history_file = "/app/backend/benchmark_history.json"
+            history = []
             if os.path.exists(history_file):
-                with open(history_file, "r") as f:
-                    history = json.load(f)
-            else:
-                history = []
-            history.append(results)
+                try:
+                    with open(history_file, "r") as f:
+                        history = json.load(f)
+                        if not isinstance(history, list):
+                            history = []
+                except json.JSONDecodeError:
+                    history = []  # Reset w przypadku błędnego formatu JSON
+
+            # Szukaj istniejącego wpisu dla tych samych danych
+            found = False
+            for i, entry in enumerate(history):
+                if (entry.get("model_name") == request.model_name and
+                    entry.get("algorithm") == request.algorithm and
+                    entry.get("model_version") == request.model_version and
+                    entry.get("image_folder") == request.image_folder):
+                    history[i] = results  # Nadpisz istniejący wpis
+                    found = True
+                    logger.debug(f"[DEBUG] Nadpisz istniejący wpis w historii dla modelu {request.model_name}")
+                    break
+
+            if not found:
+                history.append(results)  # Dodaj nowy wpis, jeśli nie znaleziono dopasowania
+                logger.debug(f"[DEBUG] Dodano nowy wpis do historii dla modelu {request.model_name}")
+
             with open(history_file, "w") as f:
-                json.dump(history, f)
-            logger.debug("[DEBUG] Wyniki dodane do historii benchmarków")
+                json.dump(history, f, indent=4)
+            logger.debug("[DEBUG] Zaktualizowano historię benchmarków")
         except Exception as e:
             logger.error(f"[DEBUG] Błąd zapisu historii benchmarków: {e}")
             raise HTTPException(status_code=500, detail=f"Błąd zapisu historii: {e}")
-
         return results
     else:
         logger.error("[DEBUG] Brak przetworzonych par obraz-annotacja")
@@ -463,10 +534,16 @@ async def get_benchmark_results(request: Request):
         logger.error("[DEBUG] Brak nagłówka X-User-Role")
         raise HTTPException(status_code=401, detail="Unauthorized")
     try:
-        with open("/app/backend/benchmark_results.json", "r") as f:
-            results = json.load(f)
-        logger.debug(f"[DEBUG] Zwrócono wyniki: {results}")
-        return results
+        history_file = "/app/backend/benchmark_history.json"
+        if os.path.exists(history_file):
+            with open(history_file, "r") as f:
+                history = json.load(f)
+                if not isinstance(history, list):
+                    history = []
+        else:
+            history = []
+        logger.debug(f"[DEBUG] Zwrócono historię: {history}")
+        return {"history": history}
     except FileNotFoundError:
         logger.error("[DEBUG] Brak pliku z wynikami benchmarku")
         raise HTTPException(status_code=404, detail="No benchmark results available")

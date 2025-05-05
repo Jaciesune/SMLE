@@ -141,9 +141,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     return
                 self.model_combo.clear()
                 for model in models:
-                    display_text = f"{model['algorithm']} - v{model['version']}"
-                    # Przechowujemy algorithm, version i name
-                    self.model_combo.addItem(display_text, (model['algorithm'], model['version'], model['name']))
+                    display_text = model['display_name']  # Używamy display_name z API
+                    # Przechowujemy cały słownik modelu
+                    self.model_combo.addItem(display_text, model)
             else:
                 print(f"[DEBUG] Błąd podczas pobierania modeli: {response.status_code} - {response.text}")
                 QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd podczas pobierania modeli: {response.text}")
@@ -197,13 +197,16 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Błąd", "Nie wybrano folderu z danymi!")
             return
 
-        # Pobierz wybrany model (algorithm, version, name)
+        # Pobierz wybrany model (cały słownik modelu)
         selected_model = self.model_combo.currentData()
         if not selected_model:
             QtWidgets.QMessageBox.warning(self, "Błąd", "Nie wybrano modelu!")
             return
 
-        algorithm, model_version, model_name = selected_model
+        # Pobierz wartości ze słownika
+        algorithm = selected_model['algorithm']
+        model_version = selected_model['version']
+        model_name = selected_model['name']
 
         # Przygotuj pliki do przesłania
         files = []
@@ -280,13 +283,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.benchmark_results.setText("Brak wyników benchmarku lub błąd: " + response.text)
                 return
 
-            results = response.json()
-            result_text = "Wyniki benchmarku:\n"
-            result_text += f"Algorytm: {results.get('algorithm', 'Brak danych')}\n"
-            result_text += f"Wersja modelu: {results.get('model_version', 'Brak danych')}\n"
-            result_text += f"Nazwa modelu: {results.get('model_name', 'Brak danych')}\n"
-            result_text += f"MAE: {results.get('MAE', 'Brak danych')}\n"
-            result_text += f"Skuteczność: {results.get('effectiveness', 'Brak danych')}%\n"
+            data = response.json()
+            history = data.get("history", [])
+            
+            if not history:
+                self.benchmark_results.setText("Brak wyników benchmarku.")
+                return
+
+            result_text = "Historia benchmarków:\n\n"
+            for idx, results in enumerate(history, 1):
+                result_text += f"Benchmark #{idx}:\n"
+                result_text += f"Algorytm: {results.get('algorithm', 'Brak danych')}\n"
+                result_text += f"Wersja modelu: {results.get('model_version', 'Brak danych')}\n"
+                result_text += f"Nazwa modelu: {results.get('model_name', 'Brak danych')}\n"
+                result_text += f"MAE: {results.get('MAE', 'Brak danych')}\n"
+                result_text += f"Skuteczność: {results.get('effectiveness', 'Brak danych')}%\n"
+                result_text += f"Czas: {results.get('timestamp', 'Brak danych')}\n"
+                result_text += "-" * 40 + "\n"
+
             self.benchmark_results.setText(result_text)
         except Exception as e:
             print(f"[DEBUG] Błąd podczas aktualizacji wyników benchmarku: {e}")
@@ -316,13 +330,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 for model_result in dataset_result["results"]:
                     comparison_text += (
                         f"  Model: {model_result['model']}, "
+                        f"Nazwa modelu: {model_result['model_name']}, "
                         f"Skuteczność: {model_result['effectiveness']}%, "
                         f"MAE: {model_result['mae']}, "
                         f"Czas: {model_result['timestamp']}\n"
                     )
                 best_model = dataset_result["best_model"]
                 comparison_text += (
-                    f"  Najlepszy model dla tego zbioru: {best_model['model']}, "
+                    f"  Najlepszy model dla tego zbioru: {best_model['model_name']}, "
                     f"Skuteczność: {best_model['effectiveness']}%\n\n"
                 )
 
@@ -331,6 +346,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     f"Najlepszy model ogólny:\n"
                     f"Zbiór danych: {best_model_info['dataset']}\n"
                     f"Model: {best_model_info['model']}\n"
+                    f"Model_name: {best_model_info['model_name']}\n"
                     f"Skuteczność: {best_model_info['effectiveness']}%\n"
                 )
 

@@ -1,8 +1,8 @@
 import os
-import glob
+import shutil
 import re
 import mysql.connector
-from fastapi import HTTPException, APIRouter
+from fastapi import HTTPException, APIRouter, UploadFile, File, Form
 from pydantic import BaseModel
 from datetime import datetime
 import logging
@@ -18,14 +18,6 @@ def get_db_connection():
         password="password",
         database="smle-database"
     )
-
-class ModelPayload(BaseModel):
-    name: str
-    algorithm: str
-    path: str
-    epochs: int
-    augmentations: int
-    username: str
 
 def get_user_id_by_username(username: str):
     conn = get_db_connection()
@@ -45,6 +37,14 @@ def get_user_id_by_username(username: str):
     finally:
         cursor.close()
         conn.close()
+
+class ModelPayload(BaseModel):
+    name: str
+    algorithm: str
+    path: str
+    epochs: int
+    augmentations: int
+    username: str
 
 @router.post("/models/add")
 def add_model(payload: ModelPayload):
@@ -106,13 +106,106 @@ def add_model(payload: ModelPayload):
 
 # Funkcja pomocnicza do szukania plików
 def find_file_with_regex(model_name, timestamp_str, suffix, model_dir):
-    # Budujemy wzorzec regex z użyciem daty, dowolnych znaków i końcówki
-    pattern = f"{model_name}_{timestamp_str}.*{suffix}"
-    logger.debug(f"Szukam pliku za pomocą wzorca: {pattern}")
+    # Pierwszy przypadek: dokładne dopasowanie do nazwy pliku
+    exact_pattern = f"^{model_name}{suffix}$"
     
-    # Wyszukujemy pliki w katalogu, które pasują do wzorca
-    matching_files = [f for f in os.listdir(model_dir) if re.match(pattern, f)]
+    # Drugi przypadek: dopasowanie z dowolnymi znakami pomiędzy
+    wildcard_pattern = f"^{model_name}.*{suffix}$"
+
+    logger.debug(f"Szukam pliku za pomocą wzorców: {exact_pattern} i {wildcard_pattern}")
+
+    # Szukamy plików, które pasują do któregokolwiek z wzorców
+    matching_files = [
+        f for f in os.listdir(model_dir)
+        if re.match(exact_pattern, f) or re.match(wildcard_pattern, f)
+    ]
     return matching_files
+
+
+@router.post("/models/upload")
+def upload_model(
+    algorithm: str = Form(...),  # Algorytm w formularzu
+    file: UploadFile = File(...),  # Plik w formularzu
+    user_name: str = Form(...)  # Zmieniamy typ na str
+):
+    try:
+        if not file.filename.endswith(".pth"):
+            raise HTTPException(status_code=400, detail="Plik musi mieć rozszerzenie .pth")
+
+        # Wyciągamy nazwę modelu do pierwszego _
+        model_name = os.path.splitext(file.filename)[0].split('_')[0]
+
+        target_dirs = {
+            "MCNN": "/app/backend/MCNN/models",
+            "Mask-RCNN": "/app/backend/Mask_RCNN/models",
+            "Faster-RCNN": "/app/backend/FasterRCNN/saved_models"
+        }
+
+        normalized_algorithm = algorithm.replace(" ", "").replace("_", "").lower()
+        matched_dir = None
+        for key, path in target_dirs.items():
+            if key.replace("-", "").replace("_", "").lower() == normalized_algorithm:
+                matched_dir = path
+                break
+
+        if not matched_dir:
+            raise HTTPException(status_code=400, detail="Nieobsługiwany algorytm")
+
+        os.makedirs(matched_dir, exist_ok=True)
+
+        save_path = os.path.join(matched_dir, file.filename)
+
+        with open(save_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Zapisz dane do bazy
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Pobieramy user_id na podstawie user_name
+        user_id = get_user_id_by_username(user_name)
+
+        now = datetime.now()
+        version = "1.0"
+        status = "deployed"
+
+        # Używamy user_id z formularza
+        cursor.execute(""" 
+            INSERT INTO model (name, algorithm, version, creation_date, status, training_date, user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            model_name,  # Używamy model_name
+            algorithm,
+            version,
+            now,
+            status,
+            now,
+            user_id  # Używamy user_id
+        ))
+
+        model_id = cursor.lastrowid
+
+        cursor.execute(""" 
+            INSERT INTO archive (action, user_id, model_id, date)
+            VALUES (%s, %s, %s, %s)
+        """, (
+            "Import",
+            user_id,  # Używamy user_id
+            model_id,
+            now
+        ))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return {"message": f"Model '{file.filename}' został zaimportowany i zapisany do bazy danych."}
+
+    except Exception as e:
+        logger.exception(f"Błąd podczas uploadu modelu: {e}")
+        raise HTTPException(status_code=500, detail=f"Błąd podczas uploadu modelu: {e}")
+
+
 
 @router.delete("/models/{model_id}")
 def delete_model(model_id: int):
@@ -136,12 +229,11 @@ def delete_model(model_id: int):
         model_name = model['name']
         algorithm = model['algorithm']
         user_id = model['user_id']
-        creation_date = model['creation_date']
 
         model_dirs = {
             "MCNN": "/app/backend/MCNN/models",
             "MaskRCNN": "/app/backend/Mask_RCNN/models",
-            "FasterRCNN": "/app/backend/FasterRCNN/models"
+            "FasterRCNN": "/app/backend/FasterRCNN/saved_models"
         }
 
         suffixes = {
@@ -156,12 +248,10 @@ def delete_model(model_id: int):
         if not model_dir or not suffix:
             raise HTTPException(status_code=400, detail="Nieznany algorytm lub brak ścieżki")
 
-        # Formatowanie daty jako timestamp do nazwy pliku (usuwamy sekundy)
-        timestamp_str = creation_date.strftime("%Y%m%d_")  
-        logger.debug(f"Szukam pliku z nazwą: {model_name}_{timestamp_str}*{suffix}")
+        logger.debug(f"Szukam pliku z nazwą: {model_name}{suffix}")
 
-        # Znajdowanie pliku za pomocą wyrażenia regularnego
-        matching_files = find_file_with_regex(model_name, timestamp_str, suffix, model_dir)
+        # Znajdowanie pliku za pomocą wzorca nazwy modelu i sufiksu
+        matching_files = find_file_with_regex(model_name, "", suffix, model_dir)
 
         if matching_files:
             for file in matching_files:
@@ -172,7 +262,7 @@ def delete_model(model_id: int):
                 else:
                     logger.warning(f"Nie znaleziono pliku do usunięcia: {full_path}")
         else:
-            logger.warning(f"Nie znaleziono plików pasujących do wzorca: {model_name}_{timestamp_str}*{suffix}")
+            logger.warning(f"Nie znaleziono plików pasujących do wzorca: {model_name}{suffix}")
 
         # Archiwizacja w bazie
         cursor.execute("UPDATE model SET status = %s WHERE id = %s", ("archived", model_id))

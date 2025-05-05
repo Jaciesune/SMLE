@@ -82,3 +82,7 @@ backend/Inne/Auto_Labeling/images_debug
 backend/FasterRCNN/data
 
 node_modules
+
+# 🗂 Pliki i foldery specyficzne dla Benchmarka
+backend/benchmark_results.json
+backend/benchmark_history.json

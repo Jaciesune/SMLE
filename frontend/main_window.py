@@ -255,6 +255,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "model_version": model_version,
             "model_name": model_name,  # Przekazujemy name zamiast version do identyfikacji
             "image_folder": image_folder,
+            "source_folder": self.selected_folder,  # Przekazujemy nazwę źródłowego folderu
             "annotation_path": annotation_path
         }
 
@@ -298,6 +299,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 result_text += f"Nazwa modelu: {results.get('model_name', 'Brak danych')}\n"
                 result_text += f"MAE: {results.get('MAE', 'Brak danych')}\n"
                 result_text += f"Skuteczność: {results.get('effectiveness', 'Brak danych')}%\n"
+                result_text += f"Folder źródłowy: {results.get('source_folder', 'Brak danych')}\n"
                 result_text += f"Czas: {results.get('timestamp', 'Brak danych')}\n"
                 result_text += "-" * 40 + "\n"
 
@@ -323,30 +325,33 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
 
             # Tworzenie tekstu do wyświetlenia
-            comparison_text = "Porównanie modeli:\n\n"
+            comparison_text = "Porównanie modeli według danych wejściowych:\n\n"
             for dataset_result in results:
                 dataset = dataset_result["dataset"]
-                comparison_text += f"Zbiór danych: {dataset}\n"
+                comparison_text += f"📁 Zestaw danych: {dataset}\n"
+                comparison_text += "Wyniki modeli:\n"
                 for model_result in dataset_result["results"]:
                     comparison_text += (
-                        f"  Model: {model_result['model']}, "
-                        f"Nazwa modelu: {model_result['model_name']}, "
+                        f"  - Model: {model_result['model']}, "
+                        f"Nazwa: {model_result['model_name']}, "
                         f"Skuteczność: {model_result['effectiveness']}%, "
                         f"MAE: {model_result['mae']}, "
                         f"Czas: {model_result['timestamp']}\n"
                     )
                 best_model = dataset_result["best_model"]
                 comparison_text += (
-                    f"  Najlepszy model dla tego zbioru: {best_model['model_name']}, "
+                    f"🏆 Najlepszy model dla tego zestawu:\n"
+                    f"    Model: {best_model['model']}, "
+                    f"Nazwa: {best_model['model_name']}, "
                     f"Skuteczność: {best_model['effectiveness']}%\n\n"
                 )
 
             if best_model_info:
                 comparison_text += (
-                    f"Najlepszy model ogólny:\n"
-                    f"Zbiór danych: {best_model_info['dataset']}\n"
+                    f"🌟 Najlepszy model ogólny:\n"
+                    f"Zestaw danych: {best_model_info['dataset']}\n"
                     f"Model: {best_model_info['model']}\n"
-                    f"Model_name: {best_model_info['model_name']}\n"
+                    f"Nazwa: {best_model_info['model_name']}\n"
                     f"Skuteczność: {best_model_info['effectiveness']}%\n"
                 )
 

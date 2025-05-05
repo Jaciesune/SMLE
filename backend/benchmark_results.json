@@ -1,1 +1,1 @@
-{"MAE": 11.833333333333334, "effectiveness": 47.7, "algorithm": "Mask R-CNN", "model_version": "1.0", "model_name": "testowyfaster", "image_folder": "/app/backend/data/test/images", "timestamp": "2025-05-05T17:49:30.630638"}
+{"MAE": 2.8, "effectiveness": 65.0, "algorithm": "Mask R-CNN", "model_version": "1.0", "model_name": "mask trzy epoki", "image_folder": "/app/backend/data/test/images", "source_folder": "C:/Users/agnie/Desktop/benchmark", "timestamp": "2025-05-05T18:35:50.196226"}

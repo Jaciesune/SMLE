@@ -91,9 +91,10 @@ class TrainingRequest(BaseModel):
 class BenchmarkRequest(BaseModel):
     algorithm: str
     model_version: str
-    model_name: str  # Dodajemy model_name
+    model_name: str
     image_folder: str
     annotation_path: str
+    source_folder: str = ""  # Nowe pole dla folderu źródłowego
 
 class ImageDataset:
     def __init__(self, image_folder, annotation_path):
@@ -190,10 +191,10 @@ def compare_models():
         logger.debug("[DEBUG] Historia benchmarków jest pusta")
         return {"results": [], "best_model": None}
 
-    # Grupowanie wyników według folderu danych
+    # Grupowanie wyników według folderu źródłowego
     results_by_dataset = {}
     for result in history:
-        dataset = result.get("image_folder", "unknown_dataset")
+        dataset = result.get("source_folder", "unknown_dataset")
         if dataset not in results_by_dataset:
             results_by_dataset[dataset] = []
         results_by_dataset[dataset].append(result)
@@ -226,18 +227,8 @@ def compare_models():
                     "dataset": dataset,
                     "model": f"{result.get('algorithm', 'Unknown')} - v{result.get('model_version', 'Unknown')}",
                     "model_name": result.get("model_name", "Unknown"),
-                    "effectiveness": effectiveness,
-                    "mae": result.get("MAE", 0)
+                    "effectiveness": effectiveness
                 }
-
-        # Sortuj wyniki według skuteczności (od najlepszego do najgorszego)
-        dataset_results.sort(key=lambda x: x["effectiveness"], reverse=True)
-
-        # Dodaj ranking i różnice skuteczności
-        for i, model in enumerate(dataset_results):
-            model["rank"] = i + 1
-            if best_model_for_dataset:
-                model["effectiveness_diff"] = best_effectiveness - model["effectiveness"]
 
         # Dodaj wyniki dla tego zbioru danych
         comparison_results.append({
@@ -255,6 +246,7 @@ def compare_models():
         "results": comparison_results,
         "best_model": best_model_info
     }
+
 @app.get("/archives")
 def get_models():
     conn = get_db_connection()
@@ -351,7 +343,7 @@ async def prepare_benchmark_data(
 @app.post("/benchmark")
 async def benchmark(request: BenchmarkRequest, http_request: Request):
     user_role = http_request.headers.get("X-User-Role")
-    logger.debug(f"[DEBUG] Wywołanie /benchmark: user_role={user_role}, algorithm={request.algorithm}, model_version={request.model_version}, model_name={request.model_name}")
+    logger.debug(f"[DEBUG] Wywołanie /benchmark: user_role={user_role}, algorithm={request.algorithm}, model_version={request.model_version}, model_name={request.model_name}, source_folder={request.source_folder}")
     if user_role != "admin":
         logger.error("[DEBUG] Brak uprawnień: użytkownik nie jest adminem")
         raise HTTPException(status_code=403, detail="Only admins can run benchmark")
@@ -454,6 +446,7 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
             "model_version": request.model_version,
             "model_name": request.model_name,
             "image_folder": request.image_folder,
+            "source_folder": request.source_folder,  # Użyj wartości z żądania
             "timestamp": datetime.now().isoformat()
         }
         logger.debug(f"[DEBUG] Wynik benchmarku: MAE={mae}, Skuteczność={effectiveness}%, avg_ground_truth={avg_ground_truth}, avg_predicted={avg_predicted}")
@@ -505,15 +498,15 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
                 if (entry.get("model_name") == request.model_name and
                     entry.get("algorithm") == request.algorithm and
                     entry.get("model_version") == request.model_version and
-                    entry.get("image_folder") == request.image_folder):
+                    entry.get("source_folder") == request.source_folder):  # Dodano source_folder
                     history[i] = results  # Nadpisz istniejący wpis
                     found = True
-                    logger.debug(f"[DEBUG] Nadpisz istniejący wpis w historii dla modelu {request.model_name}")
+                    logger.debug(f"[DEBUG] Nadpisz istniejący wpis w historii dla modelu {request.model_name} z source_folder {request.source_folder}")
                     break
 
             if not found:
                 history.append(results)  # Dodaj nowy wpis, jeśli nie znaleziono dopasowania
-                logger.debug(f"[DEBUG] Dodano nowy wpis do historii dla modelu {request.model_name}")
+                logger.debug(f"[DEBUG] Dodano nowy wpis do historii dla modelu {request.model_name} z source_folder {request.source_folder}")
 
             with open(history_file, "w") as f:
                 json.dump(history, f, indent=4)
@@ -525,7 +518,7 @@ async def benchmark(request: BenchmarkRequest, http_request: Request):
     else:
         logger.error("[DEBUG] Brak przetworzonych par obraz-annotacja")
         raise HTTPException(status_code=400, detail="No valid image-annotation pairs processed")
-
+    
 @app.get("/get_benchmark_results")
 async def get_benchmark_results(request: Request):
     user_role = request.headers.get("X-User-Role")

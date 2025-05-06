@@ -32,11 +32,12 @@ async def detect_image(
     algorithm: str = Form(...),
     model_version: str = Form(...),
     image: UploadFile = File(...),
-    username: str = Form(None)  # opcjonalnie: nazwa zalogowanego użytkownika
+    username: str = Form(None),
+    preprocessing: bool = Form(False)
 ):
     logger.debug(
-        "Rozpoczynam detekcję: algorithm=%s, model_version=%s, image=%s, username=%s",
-        algorithm, model_version, image.filename, username
+        "Rozpoczynam detekcję: algorithm=%s, model_version=%s, image=%s, username=%s, preprocessing=%s",
+        algorithm, model_version, image.filename, username, preprocessing
     )
 
     # wybór ścieżek
@@ -61,11 +62,12 @@ async def detect_image(
             shutil.copyfileobj(image.file, f)
         logger.debug("Zapisano zdjęcie: %s", img_path)
 
-        # uruchomienie detekcji
+        # uruchomienie detekcji z preprocessingiem (jeśli włączone)
         result_path, count = detection_api.analyze_with_model(
-            img_path, algorithm, model_version
+            img_path, algorithm, model_version, preprocessing  # przekazujemy parametr preprocessing
         )
         logger.debug("Wynik detekcji: result=%s, count=%d", result_path, count)
+
 
         # sprawdzenie błędów
         if "Błąd" in result_path or not os.path.exists(result_path):
@@ -83,7 +85,7 @@ async def detect_image(
                 else:
                     raise Exception(f"Nie znaleziono użytkownika: {username}")
                 # Wyciągnij nazwę modelu przed pierwszym podkreśleniem
-                short_model_name = model_version.split('_checkpoint')[0]
+                short_model_name = model_version.split('_')[0]
 
                 # Pobierz model_id na podstawie skróconej nazwy i algorytmu
                 cur.execute("SELECT id FROM model WHERE name = %s AND algorithm = %s", (short_model_name, algorithm))

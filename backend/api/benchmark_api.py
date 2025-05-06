@@ -156,7 +156,7 @@ class BenchmarkAPI:
         model_paths = {
             "Mask R-CNN": "/app/backend/Mask_RCNN/models/",
             "MCNN": "/app/backend/MCNN/models/",
-            "FasterRCNN": "/app/backend/FasterRCNN/models/",
+            "FasterRCNN": "/app/backend/FasterRCNN/saved_models/",
         }
         file_name = f"{model_name}_checkpoint.pth"
         model_path = os.path.join(model_paths.get(algorithm, ""), file_name)

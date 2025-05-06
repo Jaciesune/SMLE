@@ -14,13 +14,11 @@ class TrainAPI:
         self.algorithms = {
             "Mask R-CNN": self.base_path / "Mask_RCNN" / "models",
             "FasterRCNN": self.base_path / "FasterRCNN" / "saved_models",
-            "MCNN": self.base_path / "MCNN" / "models",
-            "SSD - do zaimplementowania": self.base_path / "SSD" / "models"
+            "MCNN": self.base_path / "MCNN" / "models"
         }
         self.train_scripts = {
             "Mask R-CNN": "train_maskrcnn.py",
             "FasterRCNN": "run_training.py",
-            "SSD": "train_ssd.py",
             "MCNN": "train_model.py"
         }
         self._running = True
@@ -68,8 +66,9 @@ class TrainAPI:
 
     def stop(self):
         self._running = False
-        if hasattr(self, '_process') and self._process:
+        if self._process is not None:
             try:
+                print("Próba zakończenia procesu treningu...")
                 find_pid_cmd = ["docker", "exec", self.container_name, "ps", "-eo", "pid,cmd", "--no-headers"]
                 pid_output = subprocess.check_output(find_pid_cmd, text=True)
                 pid = None
@@ -79,20 +78,26 @@ class TrainAPI:
                         pid = line.split()[0]
                         break
                 if pid:
+                    print(f"Znaleziono PID: {pid}, zabijam proces...")
                     kill_cmd = ["docker", "exec", self.container_name, "kill", "-9", pid]
                     subprocess.run(kill_cmd, check=True)
                 self._process.terminate()
                 self._process.wait(timeout=2)
+                print("Proces zakończony pomyślnie.")
             except subprocess.TimeoutExpired:
+                print("Proces nie zakończył się w czasie, wymuszam zamknięcie...")
                 self._process.kill()
             except Exception as e:
                 print(f"Błąd podczas przerywania procesu: {e}")
             finally:
-                if self._process.stdout:
+                if hasattr(self._process, 'stdout') and self._process.stdout:
                     self._process.stdout.close()
-                if self._process.stderr:
+                if hasattr(self._process, 'stderr') and self._process.stderr:
                     self._process.stderr.close()
                 self._process = None
+                print("Proces wyczyszczony, self._process ustawione na None.")
+        else:
+            print("Brak aktywnego procesu do zatrzymania (self._process jest None).")
 
     def train_model_stream(self, algorithm, *args):
         if algorithm not in self.train_scripts:
@@ -104,7 +109,7 @@ class TrainAPI:
         script_name = self.train_scripts[algorithm]
 
         train_dir = None
-        val_dir = None  # Dodajemy zmienną dla val_dir
+        val_dir = None
         host_train_path = None
         host_val_path = None
         num_augmentations = "0"
@@ -112,7 +117,6 @@ class TrainAPI:
         model_name = ""
         username = ""
 
-        # Parsowanie argumentów
         for i in range(0, len(args), 2):
             if args[i] == "--train_dir":
                 train_dir = args[i + 1]
@@ -133,7 +137,6 @@ class TrainAPI:
             yield f"Błąd: Niepoprawna ścieżka do danych treningowych."
             return
 
-        # Kopiowanie danych treningowych
         try:
             host_train_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1]
             host_train_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +153,6 @@ class TrainAPI:
             yield f"Błąd kopiowania danych treningowych: {e}"
             return
 
-        # Kopiowanie danych walidacyjnych i ustawienie val_dir
         if host_val_path:
             try:
                 host_val_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1].replace("train", "val")
@@ -162,14 +164,12 @@ class TrainAPI:
                         shutil.copy(src_path, dst_path)
                     elif os.path.isdir(src_path):
                         shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
-                # Ustawiamy val_dir na ścieżkę w kontenerze
                 val_dir = "/app/backend/data/" + str(host_val_dir.relative_to(self.base_path / "data"))
                 yield f"Skopiowano dane walidacyjne do {host_val_dir}"
             except Exception as e:
                 yield f"Błąd kopiowania danych walidacyjnych: {e}"
                 return
         else:
-            # Jeśli host_val_path nie jest podane, ustawiamy domyślną ścieżkę
             val_dir = "/app/backend/data/val"
 
         def remove_arg_pair(args_list, key):
@@ -179,12 +179,10 @@ class TrainAPI:
                 del args[idx:idx+2]
             return args
 
-        # Filtrujemy niepotrzebne argumenty
         filtered_args = list(args)
         for arg_name in ["--host_train_path", "--host_val_path", "--username"]:
             filtered_args = remove_arg_pair(filtered_args, arg_name)
 
-        # Dodajemy --val_dir do argumentów, jeśli val_dir zostało ustawione
         if val_dir:
             filtered_args.extend(["--val_dir", val_dir])
 
@@ -202,7 +200,7 @@ class TrainAPI:
             command = ["docker", "exec", "-e", "PYTHONUNBUFFERED=1", self.container_name, "python", script_path]
             command.extend(filtered_args)
             yield f"Uruchamiam trening z {num_augmentations} augmentacjami na obraz..."
-            yield f"Komenda: {' '.join(command)}"  # Logowanie komendy dla debugowania
+            yield f"Komenda: {' '.join(command)}"
 
             process = subprocess.Popen(
                 command,
@@ -256,4 +254,4 @@ class TrainAPI:
             else:
                 yield f"Błąd podczas uruchamiania skryptu {script_name}: kod {process.returncode}"
         finally:
-            self._process = None
+            pass

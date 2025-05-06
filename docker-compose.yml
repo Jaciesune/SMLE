@@ -13,6 +13,7 @@ services:
       - "8000:8000"  # Port dla FastAPI lub innego serwera backendowego
     volumes:
       - ./backend:/app/backend  # Montowanie katalogu backendu
+      - ./data:/app/data  # Montowanie katalogu z danymi dla benchmarku
     tty: true
     shm_size: 5g  # Ustawienie rozmiaru pamięci współdzielonej
     deploy:

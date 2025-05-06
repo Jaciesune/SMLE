@@ -1,22 +1,22 @@
 import sys
 import os
-
+import json
 from models_tab import get_db_connection, router as models_router
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 import time
 import mysql.connector
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware  # Dodaj import
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from login import verify_credentials
 from users_tab import get_users, create_user
-
 from api.detection_api import DetectionAPI
 from api.auto_label_api import AutoLabelAPI
+from api.dataset_api import DatasetAPI
 from api.auto_label_routes import router as auto_label_router
-from api.dataset_routes import router as dataset_router
 from api.detection_routes import router as detection_router
+from api.dataset_routes import router as dataset_router
+from api.benchmark_routes import router as benchmark_router
 
 import logging
 
@@ -49,10 +49,9 @@ if not wait_for_db():
 
 app = FastAPI()
 
-# Dodaj middleware CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Zezwól na wszystkie pochodzenia (dla testów)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,12 +59,14 @@ app.add_middleware(
 
 detection_api = DetectionAPI()
 auto_label_api = AutoLabelAPI()
+dataset_api = DatasetAPI()
 
 # Rejestracja routerów
 app.include_router(auto_label_router)
 app.include_router(dataset_router)
 app.include_router(detection_router)
 app.include_router(models_router)
+app.include_router(benchmark_router)
 
 class LoginRequest(BaseModel):
     username: str
@@ -95,49 +96,60 @@ class TrainingRequest(BaseModel):
 def login(request: LoginRequest):
     auth_response = verify_credentials(request.username, request.password)
     if auth_response:
-        # Zwracamy pełne dane, w tym username i role
+        logger.debug(f"[DEBUG] Login successful: role={auth_response['role']}, username={auth_response['username']}")
         return {"role": auth_response["role"], "username": auth_response["username"]}
     else:
+        logger.error("[DEBUG] Login failed: Invalid credentials")
         raise HTTPException(status_code=401, detail="Nieprawidłowe dane logowania")
 
 @app.get("/models")
 def get_models():
-    """Endpoint do pobierania listy modeli z bazy danych"""
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    
     try:
-        # Zapytanie SQL, aby pobrać dane o modelach
         cursor.execute("SELECT id, name, algorithm, version, accuracy, creation_date, training_date, status FROM model")
-        models = cursor.fetchall()  # Pobieramy wszystkie modele
+        models = cursor.fetchall()
+        logger.debug(f"[DEBUG] Pobrano modele: {models}")
+        # Formatowanie odpowiedzi z użyciem nazwy modelu
+        formatted_models = [
+            {
+                "id": m["id"],
+                "name": m["name"],
+                "algorithm": m["algorithm"],
+                "version": m["version"],
+                "accuracy": m["accuracy"],
+                "creation_date": m["creation_date"],
+                "training_date": m["training_date"],
+                "status": m["status"],
+                "display_name": f"{m['name']} ({m['algorithm']} - v{m['version']})"
+            }
+            for m in models
+        ]
+        return formatted_models
     except mysql.connector.Error as err:
         conn.close()
+        logger.error(f"[DEBUG] Błąd zapytania do bazy modeli: {err}")
         raise HTTPException(status_code=500, detail=f"Błąd zapytania: {err}")
-    
-    cursor.close()
-    conn.close()
-    
-    return models
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.get("/archives")
 def get_models():
-    """Endpoint do pobierania listy archive z bazy danych"""
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    
     try:
-        # Zapytanie SQL, aby pobrać dane o modelach
-        cursor.execute("SELECT id, action, user_id, model_id, date  FROM archive")
-        models = cursor.fetchall()  # Pobieramy wszystkie modele
+        cursor.execute("SELECT id, action, user_id, model_id, date FROM archive")
+        models = cursor.fetchall()
+        logger.debug(f"[DEBUG] Pobrano archiwa: {models}")
     except mysql.connector.Error as err:
         conn.close()
+        logger.error(f"[DEBUG] Błąd zapytania do archiwów: {err}")
         raise HTTPException(status_code=500, detail=f"Błąd zapytania: {err}")
-    
-    cursor.close()
-    conn.close()
-    
+    finally:
+        cursor.close()
+        conn.close()
     return models
-
 
 @app.post("/train")
 def train(request: TrainingRequest):
@@ -158,11 +170,12 @@ def train(request: TrainingRequest):
         train_args.extend(["--host_val_path", request.host_val_path])
     if request.resume:
         train_args.extend(["--resume", request.resume])
-
     try:
         result = detection_api.train_model(train_args)
+        logger.debug(f"[DEBUG] Trening zakończony: {result}")
         return {"message": "Trening zakończony", "output": result}
     except Exception as e:
+        logger.error(f"[DEBUG] Błąd podczas treningu: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 app.add_api_route("/users", get_users, methods=["GET"])

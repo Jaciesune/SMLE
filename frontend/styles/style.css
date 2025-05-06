@@ -1,0 +1,208 @@
+/* Globalne style dla aplikacji */
+
+/* Podstawowe ustawienia dla wszystkich elementów */
+* {
+    font-family: "Segoe UI", sans-serif;
+    font-size: 14px;
+    color: #FFFFFF; /* Białe napisy dla czytelności */
+}
+
+/* Tło głównego okna i widgetów */
+QMainWindow, QWidget {
+    background-color: #222831; /* Główne ciemne tło */
+}
+
+/* Pasek menu i pasek narzędzi */
+QMenuBar {
+    background-color: #393E46;
+    color: #FFFFFF;
+    padding: 5px;
+}
+
+QMenuBar::item {
+    background-color: #393E46;
+    padding: 5px 10px;
+    margin: 2px;
+    border-radius: 4px;
+}
+
+QMenuBar::item:selected, QMenuBar::item:hover {
+    background-color: #948979; /* Złoty akcent przy najechaniu */
+}
+
+QToolBar {
+    background-color: #393E46;
+    border: none;
+    padding: 5px;
+}
+
+QToolBar QToolButton {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: none;
+    padding: 8px;
+    border-radius: 4px;
+}
+
+QToolBar QToolButton:hover {
+    background-color: #948979;
+}
+
+QToolBar QToolButton:pressed {
+    background-color: #222831;
+}
+
+/* Zakładki (QTabWidget) */
+QTabWidget::pane {
+    border: 1px solid #948979;
+    background-color: #222831;
+    border-radius: 8px;
+}
+
+QTabBar::tab {
+    background-color: #393E46;
+    color: #FFFFFF;
+    padding: 10px 20px;
+    margin: 2px;
+    border: 1px solid #948979;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}
+
+QTabBar::tab:selected {
+    background-color: #948979;
+    color: #FFFFFF;
+    font-weight: bold;
+}
+
+QTabBar::tab:hover {
+    background-color: #DFD0B8; /* Jasny akcent przy najechaniu */
+}
+
+/* Przyciski */
+QPushButton {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: 1px solid #948979;
+    border-radius: 8px;
+    padding: 10px;
+    min-width: 100px;
+}
+
+QPushButton:hover {
+    background-color: #948979;
+}
+
+QPushButton:pressed {
+    background-color: #222831;
+}
+
+/* Pola tekstowe */
+QLineEdit, QTextEdit {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: 1px solid #948979;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+QLineEdit:focus, QTextEdit:focus {
+    border: 2px solid #948979; /* Grubsza ramka przy fokusie */
+}
+
+/* ComboBox */
+QComboBox {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: 1px solid #948979;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+QComboBox::drop-down {
+    border: none;
+}
+
+QComboBox::down-arrow {
+    width: 12px;
+    height: 12px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: 1px solid #948979;
+    background-color: #948979;
+}
+
+/* Tabele */
+QTableWidget {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: 1px solid #948979;
+    border-radius: 8px;
+}
+
+QTableWidget::item {
+    padding: 5px;
+}
+
+QTableWidget::item:selected {
+    background-color: #948979;
+    color: #FFFFFF;
+}
+
+QHeaderView::section {
+    background-color: #393E46;
+    color: #FFFFFF;
+    padding: 5px;
+    border: 1px solid #948979;
+}
+
+/* ScrollArea */
+QScrollArea {
+    background-color: #222831;
+    border: none;
+}
+
+QScrollBar:vertical, QScrollBar:horizontal {
+    background: #393E46;
+    border: 1px solid #948979;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: #948979;
+    border-radius: 4px;
+}
+
+QScrollBar::add-line, QScrollBar::sub-line {
+    background: #393E46;
+}
+
+/* Etykiety */
+QLabel {
+    color: #FFFFFF;
+}
+
+/* Wiadomości (QMessageBox) */
+QMessageBox {
+    background-color: #222831;
+    color: #FFFFFF;
+}
+
+QMessageBox QPushButton {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: 1px solid #948979;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #948979;
+}
+
+QMessageBox QPushButton:pressed {
+    background-color: #222831;
+}

@@ -17,15 +17,20 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, user_role, user_name):
+    def __init__(self, user_role, user_name, stylesheet):
         super().__init__()
         self.user_role = user_role
         self.username = user_name
         self.selected_folder = None  # Inicjalizacja atrybutu selected_folder
         logger.debug(f"[DEBUG] Inicjalizacja MainWindow: user_role={self.user_role}, user_name={self.username}")
+        
+        # Ustawienia okna
         self.setWindowTitle("System Maszynowego Liczenia Elementów")
         self.setWindowIcon(QtGui.QIcon("frontend/styles/images/icon.png"))
         self.setGeometry(100, 100, 1600, 900)
+        self.setStyleSheet(stylesheet)  # Ustaw styl przekazany z main.py
+        
+        # Inicjalizacja UI
         self.init_ui()
         self.create_toolbar()
 
@@ -40,6 +45,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.users_tab.load_users()
         elif tab_text == "Benchmark":
             self.benchmark_tab.update_benchmark_results()
+        self.update_button_styles(index)  # Aktualizuj styl przycisku dla aktywnej zakładki
 
     def init_ui(self):
         self.tabs = QtWidgets.QTabWidget()
@@ -52,7 +58,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.archive_tab = ArchiveTab()
         self.auto_labeling_tab = AutoLabelingTab(self.user_role)
         self.dataset_creation_tab = DatasetCreationTab(self.user_role, self.username)
-        self.benchmark_tab = BenchmarkTab(self.user_role)  # Nowa zakładka
+        self.benchmark_tab = BenchmarkTab(self.user_role)
 
         self.tabs.addTab(self.count_tab, "Zliczanie")
         self.tabs.addTab(self.train_tab, "Trening")
@@ -69,12 +75,53 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             logger.debug("[DEBUG] Użytkownik nie jest adminem, pomijam zakładki Użytkownicy i Historia")
 
+        # Ukryj pasek zakładek, ponieważ przełączanie będzie za pomocą toolbara
+        self.tabs.tabBar().hide()
+
         self.tabs.currentChanged.connect(self.on_tab_changed)
 
     def create_toolbar(self):
-        toolbar = self.addToolBar("Główna")
+        toolbar = self.addToolBar("")
         toolbar.setMovable(False)
 
+        # Lista do przechowywania widgetów przycisków (QToolButton) i akcji
+        self.tab_buttons = []
+        self.actions = []
+        for index in range(self.tabs.count()):
+            tab_text = self.tabs.tabText(index)
+            action = QtWidgets.QAction(tab_text, self)
+            action.triggered.connect(lambda checked, idx=index: self.tabs.setCurrentIndex(idx))
+            toolbar.addAction(action)
+            self.actions.append(action)
+
+            # Pobierz QToolButton odpowiadający tej akcji
+            button = toolbar.widgetForAction(action)
+            self.tab_buttons.append(button)
+
+            # Dodaj separator po każdej akcji (oprócz ostatniej)
+            if index < self.tabs.count() - 1:
+                separator = QtWidgets.QFrame()
+                separator.setFrameShape(QtWidgets.QFrame.VLine)
+                separator.setStyleSheet("background-color: #000000; width: 2px; height: 36px;")  # 90% wysokości przycisku (ok. 40px)
+                toolbar.addWidget(separator)
+
+        # Dodajemy separator, aby przesunąć "Wyjście" na prawo
+        spacer = QtWidgets.QWidget()
+        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        toolbar.addWidget(spacer)
+
+        # Przycisk "Wyjście" po prawej stronie
         exit_action = QtWidgets.QAction("Wyjście", self)
         exit_action.triggered.connect(self.close)
         toolbar.addAction(exit_action)
+
+        # Początkowe podświetlenie pierwszej zakładki
+        self.update_button_styles(0)
+
+    def update_button_styles(self, index):
+        # Zaktualizuj styl przycisku dla aktywnej zakładki
+        for i, button in enumerate(self.tab_buttons):
+            if i == index:  # Przycisk aktywnej zakładki
+                button.setStyleSheet("background-color: #948979; color: #FFFFFF; border: 1px solid #948979; border-radius: 4px; padding: 8px 15px; min-width: 120px; min-height: 30px;")
+            else:
+                button.setStyleSheet("background-color: #393E46; color: #FFFFFF; border: none; border-radius: 4px; padding: 8px 15px; min-width: 120px; min-height: 30px;")

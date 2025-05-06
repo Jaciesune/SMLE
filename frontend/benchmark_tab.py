@@ -44,10 +44,11 @@ class BenchmarkTab(QtWidgets.QWidget):
             run_button.clicked.connect(self.run_benchmark)
             self.layout.addWidget(run_button)
 
-            # Przycisk do porównania modeli
-            compare_button = QtWidgets.QPushButton("Porównaj modele")
-            compare_button.clicked.connect(self.compare_models)
-            self.layout.addWidget(compare_button)
+            
+        # Przycisk do porównania modeli
+        compare_button = QtWidgets.QPushButton("Porównaj modele")
+        compare_button.clicked.connect(self.compare_models)
+        self.layout.addWidget(compare_button)
 
         # Wyniki benchmarku (dostępne dla wszystkich)
         self.benchmark_results = QtWidgets.QTextEdit()

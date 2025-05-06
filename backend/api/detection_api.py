@@ -94,7 +94,9 @@ class DetectionAPI:
             logger.error("Nieoczekiwany błąd: %s", str(e))
             return f"Nieoczekiwany błąd: {e}"
         
-    def analyze_with_model(self, image_path, algorithm, version):
+    def analyze_with_model(self, image_path, algorithm, version, preprocessing=False):
+            """Przeprowadza detekcję na obrazie przy użyciu wybranego modelu, opcjonalnie wykonując preprocessing."""
+
             model_path = self.get_model_path(algorithm, version)
             if not model_path:
                 return f"Błąd: Model {version} dla {algorithm} nie istnieje.", 0
@@ -118,10 +120,26 @@ class DetectionAPI:
             else:
                 return f"Błąd: Algorytm {algorithm} nie jest obsługiwany.", 0
 
-            # Tworzenie folderu na wyniki w kontenerze
-            container_detectes_path = f"{container_base_path}/data/detectes"
-            # Nie tworzymy folderu na hoście, tylko w kontenerze (skrypt działa w kontenerze)
-            os.makedirs(container_detectes_path, exist_ok=True)
+            # Tworzenie folderu na wyniki
+            host_detectes_path.mkdir(parents=True, exist_ok=True)
+
+            # Jeśli włączony preprocessing
+            if preprocessing:
+                preprocessing_script_path = '/app/backend/api/preprocessing.py'
+                try:
+                    logger.debug("Uruchamiam preprocessing dla obrazu: %s", image_path)
+                    result = subprocess.run(
+                        ["python", str(preprocessing_script_path), image_path],
+                        capture_output=True,
+                        text=True
+                    )
+                    if result.returncode != 0:
+                        logger.error("Błąd w preprocessing.py: %s", result.stderr)
+                        return f"Błąd podczas preprocessingu: {result.stderr}", 0
+                    logger.debug("Preprocessing zakończony: %s", result.stdout)
+                except Exception as e:
+                    logger.error("Wyjątek podczas preprocessingu: %s", str(e))
+                    return f"Błąd podczas preprocessingu: {e}", 0
 
             # Ścieżki w kontenerze
             image_name = os.path.basename(image_path)
@@ -135,7 +153,7 @@ class DetectionAPI:
                     algorithm,
                     "--image_path", container_image_path,
                     "--model_path", container_model_path,
-                    "--output_dir", container_detectes_path,
+                    "--output_dir", f"{container_base_path}/data/detectes",
                     "--threshold", "0.25",
                     "--num_classes", "2"
                 )
@@ -146,14 +164,11 @@ class DetectionAPI:
                 logger.error("Błąd w wyniku detekcji: %s", result)
                 return result, 0
 
-            # Sprawdzenie wyniku w kontenerze
+            # Przetwarzanie wyniku
             result_image_name = os.path.splitext(image_name)[0] + "_detected.jpg"
-            container_result_path = os.path.join(container_detectes_path, result_image_name)
-            if not os.path.exists(container_result_path):
-                return f"Błąd: Wynik detekcji nie został zapisany w {container_result_path}.", 0
-
-            # Mapowanie ścieżki z kontenera na hosta (do zwrócenia)
             result_path = host_detectes_path / result_image_name
+            if not result_path.exists():
+                return f"Błąd: Wynik detekcji nie został zapisany w {result_path}.", 0
 
             detections_count = 0
             match = re.search(r"Detections: (\d+)", result)

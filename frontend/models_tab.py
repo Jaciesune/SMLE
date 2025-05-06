@@ -1,9 +1,11 @@
 from PyQt5 import QtWidgets
 import requests
+import os
 
 class ModelsTab(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, user_name):
         super().__init__()
+        self.user_name = user_name
         self.init_ui()
         self.load_models()
 
@@ -34,15 +36,18 @@ class ModelsTab(QtWidgets.QWidget):
 
         btn_layout = QtWidgets.QHBoxLayout()
         self.load_model_btn = QtWidgets.QPushButton("Wczytaj model")
+        self.load_model_btn.clicked.connect(self.show_load_model_dialog)
+        
         self.delete_model_btn = QtWidgets.QPushButton("Usuń model")
-        self.delete_model_btn.clicked.connect(self.delete_selected_model)  # ← dodano
-        btn_layout.addWidget(self.load_model_btn)
-        btn_layout.addWidget(self.delete_model_btn)
+        self.delete_model_btn.clicked.connect(self.delete_selected_model)
 
         self.create_new_model_btn = QtWidgets.QPushButton("Utwórz Nowy Model")
         self.create_new_model_btn.clicked.connect(self.create_new_model)
+
+        btn_layout.addWidget(self.load_model_btn)
+        btn_layout.addWidget(self.delete_model_btn)
         btn_layout.addWidget(self.create_new_model_btn)
-        
+
         layout.addLayout(btn_layout)
         self.setLayout(layout)
 
@@ -99,3 +104,63 @@ class ModelsTab(QtWidgets.QWidget):
                 self.load_models()
             except requests.exceptions.RequestException as e:
                 QtWidgets.QMessageBox.critical(self, "Błąd", f"Nie udało się usunąć modelu: {e}")
+
+    def show_load_model_dialog(self):
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Wczytaj model")
+        dialog_layout = QtWidgets.QVBoxLayout(dialog)
+
+        # Algorytm
+        algo_label = QtWidgets.QLabel("Wybierz algorytm:")
+        algo_combo = QtWidgets.QComboBox()
+        algo_combo.addItems(["Mask R-CNN", "FasterRCNN", "MCNN"])
+        dialog_layout.addWidget(algo_label)
+        dialog_layout.addWidget(algo_combo)
+
+        # Wybór pliku
+        file_layout = QtWidgets.QHBoxLayout()
+        file_path_input = QtWidgets.QLineEdit()
+        file_path_input.setPlaceholderText("Ścieżka do pliku .pth")
+        browse_btn = QtWidgets.QPushButton("Przeglądaj")
+
+        def browse_file():
+            file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Wybierz plik modelu", "", "Model files (*.pth)")
+            if file_path:
+                file_path_input.setText(file_path)
+
+        browse_btn.clicked.connect(browse_file)
+        file_layout.addWidget(file_path_input)
+        file_layout.addWidget(browse_btn)
+        dialog_layout.addLayout(file_layout)
+
+        # OK / Anuluj
+        button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        dialog_layout.addWidget(button_box)
+
+        def on_accept():
+            algorithm = algo_combo.currentText()
+            file_path = file_path_input.text()
+            if not file_path or not os.path.isfile(file_path):
+                QtWidgets.QMessageBox.warning(dialog, "Błąd", "Nie wybrano prawidłowego pliku modelu.")
+                return
+            dialog.accept()
+            self.load_model(algorithm, file_path)
+
+        button_box.accepted.connect(on_accept)
+        button_box.rejected.connect(dialog.reject)
+        dialog.exec_()
+
+    def load_model(self, algorithm, file_path):
+        try:
+            with open(file_path, 'rb') as f:
+                files = {'file': (os.path.basename(file_path), f, 'application/octet-stream')}
+                data = {
+                    'algorithm': algorithm,
+                    'user_name': self.user_name
+                }
+                response = requests.post("http://localhost:8000/models/upload", files=files, data=data)
+                response.raise_for_status()
+                QtWidgets.QMessageBox.information(self, "Sukces", "Model został wczytany.")
+                self.load_models()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Błąd", f"Nie udało się wczytać modelu: {e}")

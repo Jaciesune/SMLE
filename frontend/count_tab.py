@@ -69,6 +69,12 @@ class CountTab(QtWidgets.QWidget):
         self.update_model_versions()
         right_layout.addWidget(self.model_version_combo)
 
+        # Checkbox "Preprocessing"
+        self.preprocessing_checkbox = QtWidgets.QCheckBox("Preprocessing")
+        self.preprocessing_checkbox.setChecked(False)  # Domyślnie niezaznaczony
+        right_layout.addWidget(self.preprocessing_checkbox)
+
+
         # Przycisk "Rozpocznij analizę"
         self.analyze_btn = QtWidgets.QPushButton("Rozpocznij analizę")
         self.analyze_btn.clicked.connect(self.analyze_image)
@@ -139,13 +145,16 @@ class CountTab(QtWidgets.QWidget):
         if not model_version or model_version == "Brak dostępnych modeli":
             QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać model.")
             return
+        
+         # Pobierz stan checkboxa Preprocessing
+        preprocessing_enabled = self.preprocessing_checkbox.isChecked()
 
         try:
-            logger.debug("Wysyłam żądanie do %s/detect_image: algorithm=%s, model_version=%s, username=%s",
-                         self.api_url, algorithm, model_version, self.username)
+            logger.debug("Wysyłam żądanie do %s/detect_image: algorithm=%s, model_version=%s, username=%s, preprocessing=%s",
+                         self.api_url, algorithm, model_version, self.username, preprocessing_enabled)
             with open(self.current_image_path, "rb") as image_file:
                 files = {"image": (os.path.basename(self.current_image_path), image_file, "image/jpeg")}
-                data = {"algorithm": algorithm, "model_version": model_version, "username": self.username}
+                data = {"algorithm": algorithm, "model_version": model_version, "username": self.username, "preprocessing": str(preprocessing_enabled).lower()}
                 response = requests.post(f"{self.api_url}/detect_image", files=files, data=data)
                 response.raise_for_status()
 

@@ -10,18 +10,15 @@ import torchvision.transforms as transforms
 from model import MCNN
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
-import sys
 
 # Ustawienie urządzenia (GPU lub CPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Funkcja wczytująca model
 def load_model(model_path, device):
-    """Wczytuje model MCNN z pliku .pth z końcówką _checkpoint.pth."""
     if not model_path.endswith('_checkpoint.pth'):
         print(f"Błąd: Ścieżka do modelu {model_path} nie kończy się na _checkpoint.pth.")
         sys.exit(1)
-
     if not os.path.exists(model_path):
         print(f"Błąd: Plik modelu {model_path} nie istnieje.")
         sys.exit(1)
@@ -29,29 +26,44 @@ def load_model(model_path, device):
     model = MCNN().to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
-    
     return model
 
-# Przygotowanie transformacji
-transform = transforms.Compose([
-    transforms.Resize((1024, 1024)),
-    transforms.ToTensor()
-])
-
-# Folder wyjściowy
+# Foldery wyjściowe
 output_folder = "/app/backend/MCNN/data/detectes"
+maps_folder = "/app/backend/MCNN/maps"
 os.makedirs(output_folder, exist_ok=True)
+os.makedirs(maps_folder, exist_ok=True)
 
-# Funkcja obliczania współczynnika okrągłości
+# Funkcja zapisywania mapy gęstości
+def save_density_map(density_map, image_path):
+    plt.figure(figsize=(10, 8))
+    plt.imshow(density_map, cmap='jet')
+    plt.colorbar()
+    plt.title('Density Map')
+    plt.axis('off')
+    map_filename = os.path.splitext(os.path.basename(image_path))[0] + '_density_map.png'
+    map_save_path = os.path.join(maps_folder, map_filename)
+    plt.savefig(map_save_path, bbox_inches='tight')
+    plt.close()
+    print(f"Mapa gęstości zapisana pod: {map_save_path}")
+
+# Obliczanie współczynnika okrągłości
 def calculate_circularity(contour):
     area = cv2.contourArea(contour)
     perimeter = cv2.arcLength(contour, True)
     return (4 * np.pi * area) / (perimeter ** 2) if perimeter > 0 else 0
 
-# Uniwersalna funkcja do przetwarzania obrazu
-def process_image(image_path, sigma, circularity_range, threshold_factor):
+# Przetwarzanie obrazu
+def process_image(image_path, sigma, circularity_range, threshold_factor, resize_shape=(1024, 1024)):
     image = Image.open(image_path)
-    img_tensor = transform(image).unsqueeze(0).to(device)
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+
+    resize_transform = transforms.Compose([
+        transforms.Resize(resize_shape),
+        transforms.ToTensor()
+    ])
+    img_tensor = resize_transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
         density_map = model(img_tensor).cpu().numpy()[0, 0]
@@ -91,30 +103,29 @@ def process_image(image_path, sigma, circularity_range, threshold_factor):
 
     return marked_contours, image_cv, density_map
 
-# Wybór lepszej metody
-def process_and_choose_best(image_path):
+# Wybór najlepszej metody
+def process_and_choose_best(image_path, resize_shape=(1024, 1024)):
     params_method_1 = (1.5, (0.55, 1.35), 0.5)
     params_method_2 = (2.75, (0.65, 1.35), 0.5)
 
-    marked_contours_1, image_1, density_map_1 = process_image(image_path, *params_method_1)
-    marked_contours_2, image_2, density_map_2 = process_image(image_path, *params_method_2)
+    marked_1, img_1, map_1 = process_image(image_path, *params_method_1, resize_shape=resize_shape)
+    marked_2, img_2, map_2 = process_image(image_path, *params_method_2, resize_shape=resize_shape)
 
-    if marked_contours_1 >= marked_contours_2:
-        return marked_contours_1, image_1, density_map_1
+    if marked_1 >= marked_2:
+        return marked_1, img_1, map_1
     else:
-        return marked_contours_2, image_2, density_map_2
+        return marked_2, img_2, map_2
 
-# Funkcja zapisująca wynik
+# Zapis wyniku
 def save_result(image, image_path):
     result_image_path = os.path.join(output_folder, f"{os.path.splitext(os.path.basename(image_path))[0]}_detected.jpg")
-
     image_cv_resized = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     if image_cv_resized.shape[0] < 1024 or image_cv_resized.shape[1] < 1024:
         image_cv_resized = cv2.resize(image_cv_resized, (1024, 1024))
     cv2.imwrite(result_image_path, image_cv_resized)
-
     return result_image_path
 
+# Główne wywołanie
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Użycie: python test_model.py <ścieżka_do_obrazu> <ścieżka_do_modelu>")
@@ -126,12 +137,21 @@ if __name__ == "__main__":
     # Wczytanie modelu
     model = load_model(model_path, device)
 
-    # Wybór najlepszej metody
-    detections_count, best_image, density_map = process_and_choose_best(image_path)
+    # Przetwarzanie w domyślnej rozdzielczości
+    detections_count, best_image, density_map = process_and_choose_best(image_path, resize_shape=(1024, 1024))
 
-    # Zapis wyniku
+    # Dodatkowe przetwarzanie w zależności od liczby wykryć
+    if detections_count < 100:
+        print("Liczba wykrytych obiektów < 100. Przetwarzanie ponownie w 512x512...")
+        detections_count, best_image, density_map = process_and_choose_best(image_path, resize_shape=(512, 512))
+
+    elif detections_count > 500:
+        print("Liczba wykrytych obiektów > 500. Przetwarzanie ponownie w 2048x2048...")
+        detections_count, best_image, density_map = process_and_choose_best(image_path, resize_shape=(2048, 2048))
+
+    # Zapis wyników
     result_path = save_result(best_image, image_path)
+    save_density_map(density_map, image_path)
 
-    # Wypisanie liczby detekcji w formacie łatwym do sparsowania
     print(f"Detections: {detections_count}")
     print(f"Wynik zapisany pod: {result_path}")

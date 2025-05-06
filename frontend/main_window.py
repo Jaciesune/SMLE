@@ -2,7 +2,7 @@ import json
 import requests
 import os
 import logging
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtGui
 from archive_tab import ArchiveTab
 from count_tab import CountTab
 from train_tab import TrainTab
@@ -24,6 +24,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selected_folder = None  # Inicjalizacja atrybutu selected_folder
         logger.debug(f"[DEBUG] Inicjalizacja MainWindow: user_role={self.user_role}, user_name={self.username}")
         self.setWindowTitle("System Maszynowego Liczenia Elementów")
+        self.setWindowIcon(QtGui.QIcon("frontend/styles/images/icon.png"))
         self.setGeometry(100, 100, 1600, 900)
         self.init_ui()
         self.create_toolbar()

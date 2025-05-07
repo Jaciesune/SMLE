@@ -42,10 +42,17 @@ QToolBar QToolButton {
     border: none;
     padding: 8px;
     border-radius: 4px;
+    min-height: 30px; /* Ujednolicona wysokość */
+    max-height: 30px; /* Ujednolicona wysokość */
+}
+
+QToolBar QToolButton[isActive="true"] {
+    background-color: #948979;
+    border: 1px solid #948979;
 }
 
 QToolBar QToolButton:hover {
-    background-color: #948979;
+    background-color: #948979; /* Efekt hover w QSS */
 }
 
 QToolBar QToolButton:pressed {
@@ -121,6 +128,12 @@ QComboBox {
 
 QComboBox::drop-down {
     border: none;
+    background-color: #393E46;
+    width: 20px;
+}
+
+QComboBox::drop-down:hover {
+    background-color: #948979; /* Złoty akcent przy najechaniu */
 }
 
 QComboBox::down-arrow {
@@ -132,7 +145,14 @@ QComboBox QAbstractItemView {
     background-color: #393E46;
     color: #FFFFFF;
     border: 1px solid #948979;
-    background-color: #948979;
+}
+
+QComboBox QAbstractItemView::item {
+    padding: 5px;
+}
+
+QComboBox QAbstractItemView::item:hover {
+    background-color: #948979; /* Złoty akcent przy najechaniu na element listy */
 }
 
 /* Tabele */
@@ -183,6 +203,8 @@ QScrollBar::add-line, QScrollBar::sub-line {
 /* Etykiety */
 QLabel {
     color: #FFFFFF;
+    background-color: transparent; /* Upewnienie się, że tło jest przezroczyste */
+    padding: 2px;
 }
 
 /* Wiadomości (QMessageBox) */
@@ -205,4 +227,86 @@ QMessageBox QPushButton:hover {
 
 QMessageBox QPushButton:pressed {
     background-color: #222831;
+}
+
+/* QDoubleSpinBox i QSpinBox */
+QDoubleSpinBox, QSpinBox {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: 1px solid #948979;
+    border-radius: 8px;
+    padding: 8px;
+    min-height: 30px;
+}
+
+QDoubleSpinBox:focus, QSpinBox:focus {
+    border: 2px solid #948979; /* Grubsza ramka przy fokusie */
+}
+
+QDoubleSpinBox:hover, QSpinBox:hover {
+    background-color: #948979; /* Złoty akcent przy najechaniu */
+}
+
+QDoubleSpinBox::up-button, QSpinBox::up-button,
+QDoubleSpinBox::down-button, QSpinBox::down-button {
+    background-color: #393E46;
+    border: 1px solid #948979;
+    border-radius: 4px;
+    width: 16px;
+    height: 14px;
+}
+
+QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover,
+QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {
+    background-color: #948979;
+}
+
+QDoubleSpinBox::up-button:pressed, QSpinBox::up-button:pressed,
+QDoubleSpinBox::down-button:pressed, QSpinBox::down-button:pressed {
+    background-color: #222831;
+}
+
+QDoubleSpinBox::up-arrow, QSpinBox::up-arrow {
+    width: 8px;
+    height: 8px;
+    /* Możesz dodać obrazek strzałki, jeśli chcesz */
+}
+
+QDoubleSpinBox::down-arrow, QSpinBox::down-arrow {
+    width: 8px;
+    height: 8px;
+    /* Możesz dodać obrazek strzałki, jeśli chcesz */
+}
+
+/* QCheckBox */
+QCheckBox {
+    color: #FFFFFF;
+    background-color: transparent;
+    padding: 2px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    background-color: #393E46;
+    border: 1px solid #948979;
+    border-radius: 4px;
+}
+
+QCheckBox::indicator:hover {
+    background-color: #948979;
+}
+
+QCheckBox::indicator:pressed {
+    background-color: #222831;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #948979;
+    border: 1px solid #948979;
+}
+
+QCheckBox::indicator:unchecked {
+    background-color: #393E46;
+    border: 1px solid #948979;
 }

@@ -14,7 +14,9 @@ class LoginDialog(QtWidgets.QDialog):
         self.setObjectName("LoginDialog")
         self.setFixedSize(500, 350)
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint)
-        self.setWindowIcon(QtGui.QIcon("frontend/styles/images/icon.png"))
+        self.setWindowIcon(QtGui.QIcon("frontend/styles/images/icon.ico"))
+        # Włączenie przezroczystości tła dla zaokrąglonych rogów
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         logger.debug("[DEBUG] Inicjalizacja LoginDialog")
         self.init_ui()
 
@@ -29,6 +31,7 @@ class LoginDialog(QtWidgets.QDialog):
 
         # Kontener dla treści panelu logowania
         content_widget = QtWidgets.QWidget()
+        content_widget.setObjectName("ContentWidget")  # Dodajemy unikalny identyfikator
         content_layout = QtWidgets.QVBoxLayout(content_widget)
         content_layout.setContentsMargins(40, 40, 40, 20)  # Większy górny margines (40px)
         content_layout.setSpacing(30)  # Większy odstęp między elementami (30px)
@@ -48,6 +51,7 @@ class LoginDialog(QtWidgets.QDialog):
         self.login_btn = QtWidgets.QPushButton("Zaloguj")
         self.login_btn.setDefault(True)  # Ustawienie jako domyślny przycisk
         self.login_btn.setAutoDefault(True)  # Enter w QLineEdit aktywuje przycisk
+        self.login_btn.setStyleSheet("background-color: #263859")
         self.login_btn.clicked.connect(self.handle_login)
         content_layout.addWidget(self.login_btn)
 
@@ -72,7 +76,7 @@ class LoginDialog(QtWidgets.QDialog):
         title_bar_layout.setSpacing(0)  # Zerowe odstępy
 
         title_label = QtWidgets.QLabel("Logowanie")
-        title_label.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold; margin-left: 20px; padding: 5px;")
+        title_label.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold; margin-left: 20px; padding: 5px; background-color: #1C2228;")
         title_bar_layout.addWidget(title_label)
 
         title_bar_layout.addStretch()  # Rozciągnięcie dla wyrównania przycisku do prawej krawędzi

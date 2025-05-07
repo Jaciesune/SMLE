@@ -5,7 +5,7 @@ import logging
 # Dodajemy katalog nadrzędny (SMLE) do sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtGui
 from login_dialog import LoginDialog
 from main_window import MainWindow
 from utils import load_stylesheet  # Załadowanie funkcji z utils
@@ -17,34 +17,42 @@ logger = logging.getLogger(__name__)
 def main():
     app = QtWidgets.QApplication(sys.argv)
 
-    # Określ ścieżki do plików stylów
-    base_path = os.path.abspath(os.path.dirname(__file__))
-    global_stylesheet_path = os.path.join(base_path, "frontend", "styles", "style.css")
-    login_stylesheet_path = os.path.join(base_path, "frontend", "styles", "login_style.css")
+    # Ustawienie nazwy aplikacji
+    app.setApplicationName("SMLE")
 
-    # Debugowanie: wypisz pełną ścieżkę do plików
-    logger.debug(f"[DEBUG] Ścieżka do style.css: {global_stylesheet_path}")
-    logger.debug(f"[DEBUG] Ścieżka do login_style.css: {login_stylesheet_path}")
+    # Ustawienie ikony dla całej aplikacji
+    icon_path = "frontend/styles/images/icon.ico"
+    icon = QtGui.QIcon(icon_path)
+    if icon.isNull():
+        logger.error(f"[ERROR] Nie udało się wczytać ikony z {icon_path}")
+    else:
+        app.setWindowIcon(icon)
+        logger.debug(f"[DEBUG] Załadowano ikonę z {icon_path}")
 
     # Załaduj globalny styl
     global_stylesheet = load_stylesheet("frontend/styles/style.css")
     if not global_stylesheet:
-        logger.error("[ERROR] Nie udało się wczytać style.css.")
+        logger.error("[ERROR] Nie udało się wczytać style.css")
+        sys.exit(1)
     logger.debug("[DEBUG] Załadowano style.css")
 
     # Załaduj styl specyficzny dla logowania
     login_stylesheet = load_stylesheet("frontend/styles/login_style.css")
     if not login_stylesheet:
-        logger.error("[ERROR] Nie udało się wczytać login_style.css.")
+        logger.error("[ERROR] Nie udało się wczytać login_style.css")
+        sys.exit(1)
     logger.debug("[DEBUG] Załadowano login_style.css")
 
-    # Połącz style (login_stylesheet nadpisze global_stylesheet w razie konfliktów) tylko dla logowania
+    # Połącz style (login_stylesheet nadpisze global_stylesheet w razie konfliktów)
     combined_stylesheet = global_stylesheet + "\n" + login_stylesheet
     app.setStyleSheet(combined_stylesheet)
     logger.debug("[DEBUG] Ustawiono style dla aplikacji")
 
+    # Inicjalizacja okna logowania
     login = LoginDialog()
     logger.debug("[DEBUG] Pokazano okno logowania")
+    
+    # Uruchomienie okna logowania i obsługa wyniku
     if login.exec_() == QtWidgets.QDialog.Accepted:
         user_role = login.accepted_role
         user_name = login.accepted_username
@@ -60,6 +68,7 @@ def main():
         logger.debug("[DEBUG] Logowanie nieudane lub anulowane")
         sys.exit(0)
 
+    # Uruchomienie pętli zdarzeń aplikacji
     sys.exit(app.exec_())
 
 if __name__ == "__main__":

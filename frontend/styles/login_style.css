@@ -1,8 +1,6 @@
 /* Specyficzne style dla okna logowania */
 QDialog#LoginDialog {
-    background-color: #222831;
-    border: 1px solid #948979;
-    border-radius: 12px;
+    background-color: transparent; /* Przezroczyste tło dla zaokrąglenia */
     font-family: "Segoe UI", sans-serif;
     font-size: 14px;
     color: #FFFFFF;
@@ -35,6 +33,7 @@ QDialog#LoginDialog #CloseButton {
     padding: 0;
     margin-right: 10px; /* Lekkie odsunięcie od prawej krawędzi */
     margin-top: 5px; /* Lekkie odsunięcie od górnej krawędzi */
+    margin-bottom: 5px; /* Lekkie odsunięcie od dolnej krawędzi */
     font-size: 16px;
     font-weight: bold;
     min-width: 30px;
@@ -48,6 +47,14 @@ QDialog#LoginDialog #CloseButton:hover {
 }
 QDialog#LoginDialog #CloseButton:pressed {
     background-color: #222831;
+}
+
+/* Kontener treści */
+QDialog#LoginDialog QWidget#ContentWidget {
+    background-color: #222831; /* Tło dla zawartości */
+    border: 1px solid #948979;
+    border-bottom-right-radius: 12px;
+    border-bottom-left-radius: 12px;
 }
 
 /* Pola tekstowe */
@@ -71,6 +78,7 @@ QDialog#LoginDialog QPushButton {
     padding: 14px;
     font-weight: bold;
     min-width: 120px;
+    min-height: 20px;
 }
 QDialog#LoginDialog QPushButton:hover {
     background-color: #948979;

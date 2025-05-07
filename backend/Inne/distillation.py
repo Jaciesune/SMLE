@@ -50,6 +50,9 @@ def create_student_model():
         out_channels=256
     )
     model = MaskRCNN(backbone_with_fpn, num_classes=2)
+    model.roi_heads.detections_per_img = 1000
+    model.roi_heads.nms_thresh = 0.15
+    model.roi_heads.score_thresh = 0.5
     model.to(device)
     return model
 
@@ -114,7 +117,7 @@ def distillation_loss(student_outputs, teacher_outputs):
     else:
         return torch.tensor(0.0, device=device, requires_grad=True)
 
-def distill_model(teacher, student, dataloader, epochs=10):
+def distill_model(teacher, student, dataloader, epochs=60):
     optimizer = torch.optim.SGD(student.parameters(), lr=0.001, momentum=0.9)
 
     for epoch in range(epochs):
@@ -162,10 +165,10 @@ def run_distillation(selected_model_name):
     student = create_student_model()
 
     dataset = CocoTrainDataset(TRAIN_IMAGES_DIR, TRAIN_ANNOTATIONS_PATH)
-    dataloader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
 
     print("Rozpoczynam destylację...")
-    distill_model(teacher, student, dataloader, epochs=10)
+    distill_model(teacher, student, dataloader, epochs=20)
 
     distilled_model_name = selected_model_name.replace(".pth", "_distilled.pth")
     distilled_model_path = os.path.join(DISTILLED_DIR, distilled_model_name)

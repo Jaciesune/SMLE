@@ -3,8 +3,9 @@ import requests
 from PyQt5 import QtWidgets, QtCore
 
 class UsersTab(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, api_url):
         super().__init__()
+        self.api_url = api_url
         self.init_ui()
         self.load_users()  # Załaduj użytkowników przy starcie
 
@@ -51,7 +52,7 @@ class UsersTab(QtWidgets.QWidget):
     def load_users(self):
         """Pobiera użytkowników z API backendu i wyświetla w tabeli"""
         try:
-            response = requests.get("http://localhost:8000/users")  # Połączenie z backendem
+            response = requests.get(f"{self.api_url}/users")  # Połączenie z backendem
             response.raise_for_status()  # Sprawdzenie, czy odpowiedź jest poprawna
 
             users = response.json()
@@ -79,7 +80,7 @@ class UsersTab(QtWidgets.QWidget):
             return
 
         try:
-            response = requests.post("http://localhost:8000/users", json={"username": username, "password": password})
+            response = requests.post(f"{self.api_url}/users", json={"username": username, "password": password})
             response.raise_for_status()
             QtWidgets.QMessageBox.information(self, "Sukces", "Użytkownik dodany!")
             self.load_users()  # Odśwież listę użytkowników

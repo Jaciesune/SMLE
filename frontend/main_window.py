@@ -33,12 +33,12 @@ class CustomToolButton(QtWidgets.QToolButton):
         self.style().polish(self)
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, user_role, user_name, stylesheet):
+    def __init__(self, user_role, user_name, stylesheet, api_url):
         super().__init__()
         self.user_role = user_role
         self.username = user_name
         self.selected_folder = None  # Inicjalizacja atrybutu selected_folder
-        self.api_url = "http://localhost:8000"  # Definiujemy api_url w MainWindow
+        self.api_url = api_url  # Definiujemy api_url w MainWindow
         logger.debug(f"[DEBUG] Inicjalizacja MainWindow: user_role={self.user_role}, user_name={self.username}, api_url={self.api_url}")
         
         # Ustawienia okna
@@ -69,24 +69,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(self.tabs)
 
         # Tworzymy odpowiednie zakładki
-        self.count_tab = CountTab(self.username, self.api_url)  # Przekazujemy api_url
-        self.train_tab = TrainTab(self.username)
-        self.models_tab = ModelsTab(self.username)
-        self.archive_tab = ArchiveTab()
-        self.auto_labeling_tab = AutoLabelingTab(self.user_role)
-        self.dataset_creation_tab = DatasetCreationTab(self.user_role, self.username)
-        self.benchmark_tab = BenchmarkTab(self.user_role)
+        self.count_tab = CountTab(self.username, self.api_url)
+        self.train_tab = TrainTab(self.username, self.api_url)
+        self.models_tab = ModelsTab(self.username, self.api_url)
+        self.archive_tab = ArchiveTab(self.api_url) 
+        self.auto_labeling_tab = AutoLabelingTab(self.user_role, self.api_url)
+        self.dataset_creation_tab = DatasetCreationTab(self.user_role, self.username, self.api_url)
+        self.benchmark_tab = BenchmarkTab(self.user_role, self.api_url)
 
         self.tabs.addTab(self.count_tab, "Zliczanie")
         self.tabs.addTab(self.train_tab, "Trening")
         self.tabs.addTab(self.models_tab, "Modele")
-        self.tabs.addTab(self.auto_labeling_tab, "Automatyczne oznaczanie zdjęć")
+        self.tabs.addTab(self.auto_labeling_tab, "Półautomatyczne oznaczanie zdjęć")
         self.tabs.addTab(self.dataset_creation_tab, "Tworzenie zbioru danych")
         self.tabs.addTab(self.benchmark_tab, "Benchmark")
 
         if self.user_role == "admin":
             logger.debug("[DEBUG] Użytkownik jest adminem, dodaję zakładki Użytkownicy i Historia")
-            self.users_tab = UsersTab()
+            self.users_tab = UsersTab(self.api_url)
             self.tabs.addTab(self.users_tab, "Użytkownicy")
             self.tabs.addTab(self.archive_tab, "Historia")
         else:

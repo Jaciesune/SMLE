@@ -19,6 +19,7 @@ def main():
 
     # Ustawienie nazwy aplikacji
     app.setApplicationName("SMLE")
+    api_url = "http://localhost:8000"  
 
     # Ustawienie ikony dla całej aplikacji
     icon_path = "frontend/styles/images/icon.ico"
@@ -50,7 +51,7 @@ def main():
     logger.debug("[DEBUG] Ustawiono style dla aplikacji")
 
     # Inicjalizacja okna logowania
-    login = LoginDialog()
+    login = LoginDialog(api_url)
     logger.debug("[DEBUG] Pokazano okno logowania")
     
     # Uruchomienie okna logowania i obsługa wyniku
@@ -59,7 +60,7 @@ def main():
         user_name = login.accepted_username
         logger.debug(f"[DEBUG] Logowanie udane: user_role={user_role}, user_name={user_name}")
         try:
-            main_window = MainWindow(user_role, user_name, combined_stylesheet)
+            main_window = MainWindow(user_role, user_name, combined_stylesheet, api_url)
             main_window.showFullScreen()
             logger.debug("[DEBUG] Uruchomiono MainWindow")
         except Exception as e:

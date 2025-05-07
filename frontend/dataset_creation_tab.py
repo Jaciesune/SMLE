@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DatasetCreationTab(QtWidgets.QWidget):
-    def __init__(self, user_role, username):
+    def __init__(self, user_role, username, api_url):
         super().__init__()
         self.user_role = user_role
         self.username = username
@@ -17,7 +17,7 @@ class DatasetCreationTab(QtWidgets.QWidget):
         self.train_ratio = 0.6
         self.val_ratio = 0.3
         self.test_ratio = 0.1
-        self.api_url = "http://localhost:8000"
+        self.api_url = api_url
         self.selected_dataset_images = {"train": [], "val": [], "test": []}
         self.init_ui()
 

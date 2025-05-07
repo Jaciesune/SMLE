@@ -3,9 +3,10 @@ import requests
 import os
 
 class ModelsTab(QtWidgets.QWidget):
-    def __init__(self, user_name):
+    def __init__(self, user_name, api_url):
         super().__init__()
         self.user_name = user_name
+        self.api_url = api_url
         self.init_ui()
         self.load_models()
 
@@ -53,7 +54,7 @@ class ModelsTab(QtWidgets.QWidget):
 
     def load_models(self):
         try:
-            response = requests.get("http://localhost:8000/models")
+            response = requests.get(f"{self.api_url}/models")
             response.raise_for_status()
             models = response.json()
             self.display_models(models)
@@ -98,7 +99,7 @@ class ModelsTab(QtWidgets.QWidget):
 
         if confirm == QtWidgets.QMessageBox.Yes:
             try:
-                response = requests.delete(f"http://localhost:8000/models/{model_id}")
+                response = requests.delete(f"{self.api_url}/models/{model_id}")
                 response.raise_for_status()
                 QtWidgets.QMessageBox.information(self, "Sukces", "Model został usunięty.")
                 self.load_models()
@@ -158,7 +159,7 @@ class ModelsTab(QtWidgets.QWidget):
                     'algorithm': algorithm,
                     'user_name': self.user_name
                 }
-                response = requests.post("http://localhost:8000/models/upload", files=files, data=data)
+                response = requests.post("{self.api_url}/models/upload", files=files, data=data)
                 response.raise_for_status()
                 QtWidgets.QMessageBox.information(self, "Sukces", "Model został wczytany.")
                 self.load_models()

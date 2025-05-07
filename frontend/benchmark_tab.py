@@ -9,10 +9,10 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class BenchmarkTab(QtWidgets.QWidget):
-    def __init__(self, user_role):
+    def __init__(self, user_role, api_url):
         super().__init__()
         self.user_role = user_role
-        self.api_url = "http://localhost:8000"
+        self.api_url = api_url
         self.selected_folder = None
         self.init_ui()
 

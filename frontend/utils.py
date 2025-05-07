@@ -8,9 +8,10 @@ def load_stylesheet(filename):
         print(f"Plik stylów {filename} nie został znaleziony.")
         return ""
 
-def verify_credentials(username, password):
+def verify_credentials(username, password, api_url):
     try:
-        response = requests.post("http://localhost:8000/login", json={"username": username, "password": password})
+
+        response = requests.post(f"{api_url}/login", json={"username": username, "password": password})
         print(f"Odpowiedź z backendu: {response.text}")  # Debugowanie
 
         if response.status_code == 200:

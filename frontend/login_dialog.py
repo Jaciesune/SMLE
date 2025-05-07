@@ -1,17 +1,18 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
 import logging
 
-from utils import verify_credentials, load_stylesheet  
+from utils import verify_credentials  
 
 # Konfiguracja logowania
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class LoginDialog(QtWidgets.QDialog):
-    def __init__(self):
+    def __init__(self, api_url):
         super().__init__()
         self.setWindowTitle("Logowanie")
         self.setObjectName("LoginDialog")
+        self.api_url = api_url
         self.setFixedSize(500, 350)
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint)
         self.setWindowIcon(QtGui.QIcon("frontend/styles/images/icon.ico"))
@@ -95,7 +96,7 @@ class LoginDialog(QtWidgets.QDialog):
         logger.debug(f"[DEBUG] Próba logowania: username={username}")
 
         try:
-            role = verify_credentials(username, password)
+            role = verify_credentials(username, password, self.api_url)
             logger.debug(f"[DEBUG] Wynik verify_credentials: role={role}")
 
             if role:

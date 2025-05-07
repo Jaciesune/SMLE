@@ -460,10 +460,10 @@ class ImageViewer(QtWidgets.QWidget):
         return int(x_image), int(y_image)
 
 class AutoLabelingTab(QtWidgets.QWidget):
-    def __init__(self, user_role):
+    def __init__(self, user_role, api_url):
         super().__init__()
         self.user_role = user_role
-        self.api_url = "http://localhost:8000"
+        self.api_url = api_url
         self.job_name = None
         self.temp_dir = None
         self.input_dir = None

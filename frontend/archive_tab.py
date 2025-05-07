@@ -2,9 +2,10 @@ from PyQt5 import QtWidgets
 import requests
 
 class ArchiveTab(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, api_url):
         super().__init__()
         self.init_ui()
+        self.api_url = api_url
         self.load_archive_data()  # Załaduj dane z archiwum przy starcie
 
     def init_ui(self):
@@ -55,7 +56,7 @@ class ArchiveTab(QtWidgets.QWidget):
     def load_archive_data(self):
         """Pobiera dane z archiwum z API backendu i wyświetla je w tabeli"""
         try:
-            response = requests.get("http://localhost:8000/archives")  # Poprawiony URL API
+            response = requests.get(f"{self.api_url}/archives")  # Poprawiony URL API
             response.raise_for_status()  # Sprawdzenie, czy odpowiedź jest poprawna
 
             archive_data = response.json()

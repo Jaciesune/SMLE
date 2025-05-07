@@ -31,14 +31,14 @@ def main():
         logger.debug(f"[DEBUG] Załadowano ikonę z {icon_path}")
 
     # Załaduj globalny styl
-    global_stylesheet = load_stylesheet("frontend/styles/style.css")
+    global_stylesheet = load_stylesheet("style.css")
     if not global_stylesheet:
         logger.error("[ERROR] Nie udało się wczytać style.css")
         sys.exit(1)
     logger.debug("[DEBUG] Załadowano style.css")
 
     # Załaduj styl specyficzny dla logowania
-    login_stylesheet = load_stylesheet("frontend/styles/login_style.css")
+    login_stylesheet = load_stylesheet("login_style.css")
     if not login_stylesheet:
         logger.error("[ERROR] Nie udało się wczytać login_style.css")
         sys.exit(1)

@@ -22,7 +22,7 @@ class CustomDialog(QtWidgets.QDialog):
         winsound.PlaySound("SystemNotification", winsound.SND_ALIAS)
 
         # Załaduj styl specyficzny dla CountTab_style
-        count_tab_stylesheet = load_stylesheet("frontend/styles/CountTab_style.css")
+        count_tab_stylesheet = load_stylesheet("CountTab_style.css")
         if not count_tab_stylesheet:
             logger.error("[ERROR] Nie udało się wczytać CountTab_style.css")
             count_tab_stylesheet = ""  # Fallback na pusty styl

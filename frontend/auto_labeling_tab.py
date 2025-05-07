@@ -12,6 +12,8 @@ import zipfile
 import logging
 from PIL import Image
 
+from utils import load_stylesheet  # Załadowanie funkcji z utils
+
 # Konfiguracja logowania
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -495,38 +497,13 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.right_panel.setFixedWidth(400)
         self.right_layout = QtWidgets.QVBoxLayout()
 
-        self.right_panel.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-            }
-            QComboBox, QLineEdit {
-                padding: 5px;
-                border: 1px solid #ccc;
-                border-radius: 5px;
-                font-size: 13px;
-            }
-            QComboBox:hover, QLineEdit:hover {
-                border: 1px solid #888;
-            }
-            QPushButton {
-                padding: 8px;
-                border: 1px solid #ccc;
-                border-radius: 5px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #d0d0d0;
-            }
-            QPushButton:pressed {
-                background-color: #c0c0c0;
-            }
-            QListWidget {
-                border: 1px solid #ccc;
-                border-radius: 5px;
-                padding: 5px;
-                font-size: 13px;
-            }
-        """)
+        autolabelingtab_stylesheet = load_stylesheet("AutoLabelingTab_style.css")
+        if not autolabelingtab_stylesheet:
+            logger.error("[ERROR] Nie udało się wczytać AutoLabelingTab_style.css")
+            autolabelingtab_stylesheet = ""  # Fallback na pusty styl
+        else:
+            logger.debug("[DEBUG] Załadowano AutoLabelingTab_style.css")
+        self.right_panel.setStyleSheet(autolabelingtab_stylesheet)
 
         self.mode_widget = QtWidgets.QWidget()
         mode_layout = QtWidgets.QVBoxLayout()

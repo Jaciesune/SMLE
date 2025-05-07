@@ -1,0 +1,61 @@
+/* Style dla CustomDialog */
+QDialog#count_dialog {
+    background-color: transparent;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 14px;
+    color: #FFFFFF;
+}
+
+/* Pasek tytułowy */
+QDialog#count_dialog #TitleBar {
+    background-color: #1C2228;
+    border: 1px solid #948979;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    height: 30px; /* Ściśle określona wysokość */
+}
+
+/* Etykieta tytułu w pasku */
+QDialog#count_dialog #TitleBar QLabel {
+    margin-left: 20px;
+    padding: 2px;
+    font-weight: bold;
+    color: #FFFFFF;
+    font-size: 16px;
+}
+
+/* Kontener treści */
+QDialog#count_dialog #ContentWidget {
+    background-color: #222831;
+    border: 1px solid #948979;
+    border-bottom-right-radius: 12px;
+    border-bottom-left-radius: 12px;
+}
+
+/* Etykiety w treści */
+QDialog#count_dialog QLabel {
+    color: #FFFFFF;
+    font-size: 14px;
+}
+QDialog#count_dialog #ContentWidget QLabel:nth-child(2) { /* "Liczba detekcji" */
+    font-size: 18px;
+}
+
+/* Styl dla przycisku OK */
+QDialog#count_dialog #OKButton {
+    background-color: #4CAF50; /* Zielone tło */
+    color: #FFFFFF;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: bold;
+    min-width: 80px;
+    min-height: 30px;
+}
+QDialog#count_dialog #OKButton:hover {
+    background-color: #45A049; /* Ciemniejszy zielony przy hover */
+}
+QDialog#count_dialog #OKButton:pressed {
+    background-color: #222831; /* Kolor tła aplikacji przy naciśnięciu */
+}

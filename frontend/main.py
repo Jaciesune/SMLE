@@ -43,6 +43,7 @@ def main():
         sys.exit(1)
     logger.debug("[DEBUG] Załadowano login_style.css")
 
+
     # Połącz style (login_stylesheet nadpisze global_stylesheet w razie konfliktów)
     combined_stylesheet = global_stylesheet + "\n" + login_stylesheet
     app.setStyleSheet(combined_stylesheet)

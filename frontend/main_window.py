@@ -38,7 +38,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.user_role = user_role
         self.username = user_name
         self.selected_folder = None  # Inicjalizacja atrybutu selected_folder
-        logger.debug(f"[DEBUG] Inicjalizacja MainWindow: user_role={self.user_role}, user_name={self.username}")
+        self.api_url = "http://localhost:8000"  # Definiujemy api_url w MainWindow
+        logger.debug(f"[DEBUG] Inicjalizacja MainWindow: user_role={self.user_role}, user_name={self.username}, api_url={self.api_url}")
         
         # Ustawienia okna
         self.setWindowTitle("System Maszynowego Liczenia Elementów")
@@ -68,7 +69,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(self.tabs)
 
         # Tworzymy odpowiednie zakładki
-        self.count_tab = CountTab(self.username)
+        self.count_tab = CountTab(self.username, self.api_url)  # Przekazujemy api_url
         self.train_tab = TrainTab(self.username)
         self.models_tab = ModelsTab(self.username)
         self.archive_tab = ArchiveTab()

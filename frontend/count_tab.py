@@ -216,7 +216,6 @@ class CountTab(QtWidgets.QWidget):
         self.image_label.setStyleSheet("background-color: transparent; border: 1px solid #606060;")
 
         self.overlay_label = QtWidgets.QLabel(image_container)
-        self.overlay_label.setFixedSize(1000, 800)
         self.overlay_label.setStyleSheet("background-color: rgba(0, 0, 0, 150);")
         self.overlay_label.setVisible(False)
         self.overlay_label.raise_()
@@ -327,7 +326,7 @@ class CountTab(QtWidgets.QWidget):
             return
         try:
             logger.debug("Pobieram modele dla algorytmu %s z %s/detect_model_versions/%s", 
-                        algorithm, self.api_url, algorithm)
+                         algorithm, self.api_url, algorithm)
             response = requests.get(f"{self.api_url}/detect_model_versions/{algorithm}")
             response.raise_for_status()
             model_versions = response.json()
@@ -361,6 +360,21 @@ class CountTab(QtWidgets.QWidget):
             return
         self.analyze_btn.setEnabled(False)
         logger.debug("Aktywuję nakładkę szarą i okno ładowania")
+
+        # Dopasuj overlay_label do rozmiaru i pozycji obrazka
+        pixmap = self.image_label.pixmap()
+        if pixmap and not pixmap.isNull():
+            pixmap_size = pixmap.size()
+            # Oblicz pozycję, aby overlay był wyśrodkowany na obrazku
+            x_offset = (self.image_label.width() - pixmap_size.width()) // 2
+            y_offset = (self.image_label.height() - pixmap_size.height()) // 2
+            self.overlay_label.setFixedSize(pixmap_size)
+            self.overlay_label.move(x_offset, y_offset)
+        else:
+            # Jeśli brak obrazka, użyj domyślnego rozmiaru (powinno być rzadkie, bo sprawdzamy current_image_path)
+            self.overlay_label.setFixedSize(1000, 800)
+            self.overlay_label.move(0, 0)
+
         self.overlay_label.setVisible(True)
         self.overlay_label.raise_()
         QtWidgets.QApplication.processEvents()

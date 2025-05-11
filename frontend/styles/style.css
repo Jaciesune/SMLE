@@ -33,7 +33,7 @@ QMenuBar::item:selected, QMenuBar::item:hover {
 QToolBar {
     background-color: #393E46;
     border: none;
-    padding: 5px;
+    padding: 0px;
 }
 
 QToolBar QToolButton {

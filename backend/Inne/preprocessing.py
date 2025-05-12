@@ -17,7 +17,7 @@ def resize_with_aspect_ratio(image, target_size=2048):
         resized = cv2.resize(image, (target_size, target_size), interpolation=cv2.INTER_AREA)
     return resized
 
-def preprocess_image(image_path, output_size=(2048, 2048)):
+def preprocess_image(image_path, output_path=None, output_size=(2048, 2048)):
     img = cv2.imread(image_path)
     if img is None:
         print(f"Błąd: nie można wczytać {image_path}")
@@ -50,28 +50,19 @@ def preprocess_image(image_path, output_size=(2048, 2048)):
 
     return opened
 
-def batch_preprocess(input_folder, output_folder, output_size=(2048, 2048)):
-    os.makedirs(output_folder, exist_ok=True)
-    for filename in os.listdir(input_folder):
-        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')):
-            input_path = os.path.join(input_folder, filename)
-            output_path = os.path.join(output_folder, filename)
-            processed_img = preprocess_image(input_path, output_size)
-            if processed_img is not None:
-                cv2.imwrite(output_path, processed_img)
-                print(f"Zapisano: {output_path}")
-
-# Jeśli skrypt wywołany z pojedynczym obrazem jako argument
 if __name__ == "__main__":
-    if len(sys.argv) == 2:
+    if len(sys.argv) >= 2:
         image_path = sys.argv[1]
-        processed = preprocess_image(image_path)
+        output_path = sys.argv[2] if len(sys.argv) > 2 else image_path
+        # Utwórz katalog wyjściowy, jeśli nie istnieje
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        processed = preprocess_image(image_path, output_path)
         if processed is not None:
-            cv2.imwrite(image_path, processed)
-            print(f"Zamieniono oryginał na wersję po preprocessingu: {image_path}")
+            cv2.imwrite(output_path, processed)
+            print(f"Zapisano preprocesowany obraz: {output_path}")
         else:
             print("Błąd: Nie udało się przetworzyć obrazu.")
             sys.exit(1)
     else:
-        print("Użycie: python preprocessing.py /ścieżka/do/obrazu.jpg")
+        print("Użycie: python preprocessing.py /ścieżka/do/obrazu.jpg [/ścieżka/wyjściowa]")
         sys.exit(1)

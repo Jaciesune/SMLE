@@ -12,7 +12,6 @@ lub wizualizacji.
 #######################
 import os                # Do operacji na systemie plików
 from pathlib import Path  # Do wygodnego zarządzania ścieżkami
-import shutil            # Do kopiowania i usuwania plików
 import glob              # Do wyszukiwania plików według wzorca
 import sys               # Do modyfikacji ścieżek importu i argumentów
 import logging           # Do logowania informacji i błędów
@@ -21,7 +20,7 @@ import logging           # Do logowania informacji i błędów
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Import funkcji głównej z modułu auto_label
-from backend.Inne.Auto_Labeling.auto_label import main as auto_label_main
+from backend.Inne.auto_label import main as auto_label_main
 
 #######################
 # Konfiguracja logowania

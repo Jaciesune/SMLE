@@ -1,15 +1,39 @@
+"""
+Główny moduł backendu aplikacji SMLE (System Maszynowego Liczenia Elementów).
+
+Moduł inicjalizuje serwer FastAPI, konfiguruje połączenie z bazą danych MySQL,
+rejestruje routery poszczególnych komponentów oraz definiuje podstawowe
+endpointy API. Stanowi centralny punkt wejścia dla całego backendu aplikacji.
+"""
+#######################
+# Importy bibliotek
+#######################
 import sys
 import os
 import json
-from models_tab import get_db_connection, router as models_router
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 import time
 import mysql.connector
+import logging
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+
+#######################
+# Dodanie katalogu nadrzędnego do ścieżki importu
+#######################
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+#######################
+# Importy lokalne
+#######################
+from models_tab import get_db_connection, router as models_router
 from login import verify_credentials
 from users_tab import get_users, create_user
+
+#######################
+# Importy API i routerów
+#######################
 from api.detection_api import DetectionAPI
 from api.auto_label_api import AutoLabelAPI
 from api.dataset_api import DatasetAPI
@@ -18,12 +42,28 @@ from api.detection_routes import router as detection_router
 from api.dataset_routes import router as dataset_router
 from api.benchmark_routes import router as benchmark_router
 
-import logging
-
+#######################
+# Konfiguracja logowania
+#######################
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 def wait_for_db(max_attempts=12, wait_seconds=5):
+    """
+    Czeka na dostępność bazy danych, wykonując próby połączenia.
+    
+    Funkcja próbuje połączyć się z bazą danych MySQL w określonych odstępach
+    czasu, aż osiągnie maksymalną liczbę prób. Jest używana podczas uruchamiania
+    aplikacji w środowisku kontenerowym, gdzie baza danych może potrzebować
+    więcej czasu na inicjalizację niż sam serwer API.
+    
+    Args:
+        max_attempts (int, optional): Maksymalna liczba prób połączenia
+        wait_seconds (int, optional): Czas oczekiwania między próbami w sekundach
+        
+    Returns:
+        bool: True jeśli połączenie zostało ustanowione, False w przeciwnym razie
+    """
     attempts = 0
     while attempts < max_attempts:
         try:
@@ -44,11 +84,14 @@ def wait_for_db(max_attempts=12, wait_seconds=5):
     logger.error("❌ Nie udało się połączyć z bazą danych po %d próbach.", max_attempts)
     return False
 
+# Sprawdzenie dostępności bazy danych przed uruchomieniem serwera
 if not wait_for_db():
     raise RuntimeError("Nie można uruchomić aplikacji bez połączenia z bazą danych.")
 
+# Inicjalizacja aplikacji FastAPI
 app = FastAPI()
 
+# Konfiguracja CORS (Cross-Origin Resource Sharing)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,27 +100,65 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Inicjalizacja kluczowych komponentów API
 detection_api = DetectionAPI()
 auto_label_api = AutoLabelAPI()
 dataset_api = DatasetAPI()
 
-# Rejestracja routerów
+# Rejestracja routerów dla poszczególnych modułów funkcjonalnych
 app.include_router(auto_label_router)
 app.include_router(dataset_router)
 app.include_router(detection_router)
 app.include_router(models_router)
 app.include_router(benchmark_router)
 
+# Modele danych dla żądań API
 class LoginRequest(BaseModel):
+    """
+    Model danych dla żądania logowania.
+    
+    Attributes:
+        username (str): Nazwa użytkownika
+        password (str): Hasło użytkownika
+    """
     username: str
     password: str
 
 class DetectionRequest(BaseModel):
+    """
+    Model danych dla żądania detekcji obiektów na obrazie.
+    
+    Attributes:
+        image_path (str): Ścieżka do obrazu
+        algorithm (str): Nazwa algorytmu do wykorzystania
+        model_version (str): Wersja modelu
+    """
     image_path: str
     algorithm: str
     model_version: str
 
 class TrainingRequest(BaseModel):
+    """
+    Model danych dla żądania treningu modelu.
+    
+    Zawiera wszystkie parametry potrzebne do skonfigurowania 
+    procesu treningu modelu uczenia maszynowego.
+    
+    Attributes:
+        train_dir (str): Katalog z danymi treningowymi
+        epochs (int): Liczba epok treningu
+        lr (float): Współczynnik uczenia
+        model_name (str): Nazwa modelu
+        coco_train_path (str): Ścieżka do adnotacji treningowych w formacie COCO
+        coco_gt_path (str): Ścieżka do adnotacji walidacyjnych w formacie COCO
+        host_train_path (str): Ścieżka do danych treningowych na hoście
+        host_val_path (str): Ścieżka do danych walidacyjnych na hoście
+        num_augmentations (int): Liczba augmentacji na obraz
+        resume (str): Nazwa modelu do wznowienia treningu (lub None)
+        batch_size (int): Rozmiar batcha
+        num_workers (int): Liczba równoległych wątków ładowania danych
+        patience (int): Parametr cierpliwości dla early stopping
+    """
     train_dir: str
     epochs: int
     lr: float
@@ -94,6 +175,21 @@ class TrainingRequest(BaseModel):
 
 @app.post("/login")
 def login(request: LoginRequest):
+    """
+    Endpoint uwierzytelniania użytkowników.
+    
+    Weryfikuje dane logowania i zwraca informacje o użytkowniku
+    w przypadku pomyślnego uwierzytelnienia.
+    
+    Args:
+        request (LoginRequest): Dane uwierzytelniające
+        
+    Returns:
+        dict: Informacje o zalogowanym użytkowniku (rola i nazwa)
+        
+    Raises:
+        HTTPException: W przypadku niepoprawnych danych logowania
+    """
     auth_response = verify_credentials(request.username, request.password)
     if auth_response:
         logger.debug(f"[DEBUG] Login successful: role={auth_response['role']}, username={auth_response['username']}")
@@ -104,6 +200,18 @@ def login(request: LoginRequest):
 
 @app.get("/models")
 def get_models():
+    """
+    Pobiera listę wszystkich modeli z bazy danych.
+    
+    Endpoint zwraca szczegółowe informacje o wszystkich dostępnych 
+    modelach w systemie, formatując odpowiedź z dodatkowymi metadanymi.
+    
+    Returns:
+        list: Lista słowników z informacjami o modelach
+        
+    Raises:
+        HTTPException: W przypadku błędu zapytania do bazy danych
+    """
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -135,7 +243,19 @@ def get_models():
         conn.close()
 
 @app.get("/archives")
-def get_models():
+def get_archives():
+    """
+    Pobiera listę wszystkich wpisów z archiwum zdarzeń.
+    
+    Endpoint zwraca historię działań wykonanych w systemie,
+    takich jak operacje na modelach czy działania użytkowników.
+    
+    Returns:
+        list: Lista słowników z wpisami archiwum
+        
+    Raises:
+        HTTPException: W przypadku błędu zapytania do bazy danych
+    """
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -153,6 +273,21 @@ def get_models():
 
 @app.post("/train")
 def train(request: TrainingRequest):
+    """
+    Inicjuje proces trenowania modelu.
+    
+    Endpoint przetwarza żądanie treningu modelu, przygotowuje argumenty
+    dla procesu trenowania i uruchamia trening poprzez API detekcji.
+    
+    Args:
+        request (TrainingRequest): Parametry konfiguracyjne treningu
+        
+    Returns:
+        dict: Wiadomość o wyniku operacji trenowania
+        
+    Raises:
+        HTTPException: W przypadku błędu podczas treningu
+    """
     train_args = [
         "--train_dir", request.train_dir,
         "--epochs", str(request.epochs),
@@ -178,9 +313,11 @@ def train(request: TrainingRequest):
         logger.error(f"[DEBUG] Błąd podczas treningu: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Dodanie endpointów dla zarządzania użytkownikami
 app.add_api_route("/users", get_users, methods=["GET"])
 app.add_api_route("/users", create_user, methods=["POST"])
 
+# Uruchomienie serwera
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

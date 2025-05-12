@@ -1,3 +1,13 @@
+"""
+Implementacja funkcji backendu do zarządzania modelami w aplikacji SMLE.
+
+Moduł dostarcza API do operacji na modelach uczenia maszynowego, takich jak
+dodawanie nowych modeli, importowanie modeli z plików, usuwanie/archiwizacja
+modeli oraz odczyt informacji o modelach z bazy danych MySQL.
+"""
+#######################
+# Importy bibliotek
+#######################
 import os
 import shutil
 import re
@@ -7,10 +17,22 @@ from pydantic import BaseModel
 from datetime import datetime
 import logging
 
+#######################
+# Konfiguracja logowania
+#######################
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 def get_db_connection():
+    """
+    Tworzy i zwraca połączenie do bazy danych MySQL.
+    
+    Połączenie jest konfigurowane z parametrami serwera ustalonymi
+    dla środowiska kontenerowego aplikacji.
+    
+    Returns:
+        mysql.connector.connection: Obiekt połączenia z bazą danych
+    """
     return mysql.connector.connect(
         host="mysql-db",
         port=3306,
@@ -20,6 +42,18 @@ def get_db_connection():
     )
 
 def get_user_id_by_username(username: str):
+    """
+    Pobiera identyfikator użytkownika na podstawie jego nazwy użytkownika.
+    
+    Args:
+        username (str): Nazwa użytkownika
+        
+    Returns:
+        int: Identyfikator użytkownika w bazie danych
+        
+    Raises:
+        HTTPException: Gdy użytkownik nie istnieje lub wystąpił błąd bazy danych
+    """
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
@@ -39,6 +73,17 @@ def get_user_id_by_username(username: str):
         conn.close()
 
 class ModelPayload(BaseModel):
+    """
+    Model danych dla żądania dodania nowego modelu.
+    
+    Attributes:
+        name (str): Nazwa modelu
+        algorithm (str): Algorytm użyty w modelu
+        path (str): Ścieżka do pliku modelu
+        epochs (int): Liczba epok treningu
+        augmentations (int): Liczba augmentacji użytych podczas treningu
+        username (str): Nazwa użytkownika tworzącego model
+    """
     name: str
     algorithm: str
     path: str
@@ -48,6 +93,21 @@ class ModelPayload(BaseModel):
 
 @router.post("/models/add")
 def add_model(payload: ModelPayload):
+    """
+    Endpoint do dodawania nowego modelu do bazy danych.
+    
+    Zapisuje informacje o modelu w bazie danych oraz tworzy
+    wpis w archiwum o operacji trenowania modelu.
+    
+    Args:
+        payload (ModelPayload): Dane nowego modelu
+        
+    Returns:
+        dict: Wiadomość o wyniku operacji
+        
+    Raises:
+        HTTPException: W przypadku błędu podczas dodawania modelu
+    """
     conn = None
     cursor = None
 
@@ -104,8 +164,22 @@ def add_model(payload: ModelPayload):
 
     return {"message": "Model zapisany i zarchiwizowany"}
 
-# Funkcja pomocnicza do szukania plików
 def find_file_with_regex(model_name, timestamp_str, suffix, model_dir):
+    """
+    Wyszukuje pliki modelu na podstawie wzorca nazwy.
+    
+    Funkcja pomocnicza do odnajdywania plików modeli, które mogą mieć
+    różne formaty nazw, ale zawierają nazwę modelu i określone rozszerzenie.
+    
+    Args:
+        model_name (str): Podstawowa nazwa modelu
+        timestamp_str (str): Znacznik czasu (nieużywany w aktualnej implementacji)
+        suffix (str): Sufiks/rozszerzenie pliku
+        model_dir (str): Katalog, w którym należy szukać plików
+        
+    Returns:
+        list: Lista nazw plików pasujących do wzorca
+    """
     # Pierwszy przypadek: dokładne dopasowanie do nazwy pliku
     exact_pattern = f"^{model_name}{suffix}$"
     
@@ -126,8 +200,25 @@ def find_file_with_regex(model_name, timestamp_str, suffix, model_dir):
 def upload_model(
     algorithm: str = Form(...),  # Algorytm w formularzu
     file: UploadFile = File(...),  # Plik w formularzu
-    user_name: str = Form(...)  # Zmieniamy typ na str
+    user_name: str = Form(...)  # Nazwa użytkownika
 ):
+    """
+    Endpoint do wczytywania nowego modelu z pliku.
+    
+    Przyjmuje plik modelu (.pth), zapisuje go w odpowiednim katalogu
+    w zależności od algorytmu oraz dodaje informacje o modelu do bazy danych.
+    
+    Args:
+        algorithm (str): Algorytm modelu (Mask R-CNN, FasterRCNN, MCNN)
+        file (UploadFile): Plik modelu w formacie .pth
+        user_name (str): Nazwa użytkownika wczytującego model
+        
+    Returns:
+        dict: Wiadomość o wyniku operacji
+        
+    Raises:
+        HTTPException: W przypadku błędu podczas wczytywania modelu
+    """
     try:
         if not file.filename.endswith(".pth"):
             raise HTTPException(status_code=400, detail="Plik musi mieć rozszerzenie .pth")
@@ -206,9 +297,23 @@ def upload_model(
         raise HTTPException(status_code=500, detail=f"Błąd podczas uploadu modelu: {e}")
 
 
-
 @router.delete("/models/{model_id}")
 def delete_model(model_id: int):
+    """
+    Endpoint do usuwania/archiwizacji modelu.
+    
+    Oznacza model jako zarchiwizowany w bazie danych oraz
+    fizycznie usuwa plik modelu z systemu plików, jeśli istnieje.
+    
+    Args:
+        model_id (int): Identyfikator modelu do usunięcia
+        
+    Returns:
+        dict: Wiadomość o wyniku operacji
+        
+    Raises:
+        HTTPException: W przypadku błędu podczas usuwania modelu
+    """
     conn = None
     cursor = None
 

@@ -2,15 +2,21 @@ import requests
 
 def load_stylesheet(filename):
     try:
-        with open(filename, "r") as file:
+        # Tworzymy pełną ścieżkę do pliku w katalogu frontend/styles/
+        full_path = f"frontend/styles/{filename}"
+        with open(full_path, "r", encoding="utf-8") as file:
             return file.read()
     except FileNotFoundError:
-        print(f"Plik stylów {filename} nie został znaleziony.")
+        print(f"Plik stylów {full_path} nie został znaleziony.")
+        return ""
+    except Exception as e:
+        print(f"Błąd podczas wczytywania pliku stylów {full_path}: {e}")
         return ""
 
-def verify_credentials(username, password):
+def verify_credentials(username, password, api_url):
     try:
-        response = requests.post("http://localhost:8000/login", json={"username": username, "password": password})
+
+        response = requests.post(f"{api_url}/login", json={"username": username, "password": password})
         print(f"Odpowiedź z backendu: {response.text}")  # Debugowanie
 
         if response.status_code == 200:

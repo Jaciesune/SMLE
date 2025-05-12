@@ -1,0 +1,101 @@
+/* Specyficzne style dla okna logowania */
+QDialog#LoginDialog {
+    background-color: transparent; /* Przezroczyste tło dla zaokrąglenia */
+    font-family: "Segoe UI", sans-serif;
+    font-size: 14px;
+    color: #FFFFFF;
+}
+
+/* Pasek tytułowy */
+QDialog#LoginDialog #TitleBar {
+    background-color: #1C2228;
+    border: 1px solid #948979; /* Złota obramówka */
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    min-height: 40px;
+}
+
+/* Etykieta tytułu w pasku */
+QDialog#LoginDialog #TitleBar QLabel {
+    margin-left: 20px; /* Odsunięcie 20px od lewej krawędzi */
+    padding: 5px;
+    font-weight: bold;
+    color: #FFFFFF;
+    font-size: 16px;
+}
+
+/* Przycisk zamykania lekko odsunięty od krawędzi */
+QDialog#LoginDialog #CloseButton {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 4px;
+    padding: 0;
+    margin-right: 10px; /* Lekkie odsunięcie od prawej krawędzi */
+    margin-top: 5px; /* Lekkie odsunięcie od górnej krawędzi */
+    margin-bottom: 5px; /* Lekkie odsunięcie od dolnej krawędzi */
+    font-size: 16px;
+    font-weight: bold;
+    min-width: 30px;
+    min-height: 30px;
+    max-width: 30px;
+    max-height: 30px;
+    text-align: center;
+}
+QDialog#LoginDialog #CloseButton:hover {
+    background-color: #948979;
+}
+QDialog#LoginDialog #CloseButton:pressed {
+    background-color: #222831;
+}
+
+/* Kontener treści */
+QDialog#LoginDialog QWidget#ContentWidget {
+    background-color: #222831; /* Tło dla zawartości */
+    border: 1px solid #948979;
+    border-bottom-right-radius: 12px;
+    border-bottom-left-radius: 12px;
+}
+
+/* Pola tekstowe */
+QDialog#LoginDialog QLineEdit {
+    background-color: #393E46;
+    border: 1px solid #948979;
+    border-radius: 8px;
+    padding: 12px;
+    color: #FFFFFF;
+}
+QDialog#LoginDialog QLineEdit:focus {
+    border: 1px solid #948979;
+}
+
+/* Przycisk logowania */
+QDialog#LoginDialog QPushButton {
+    background-color: #393E46;
+    color: #FFFFFF;
+    border: 1px solid #948979;
+    border-radius: 8px;
+    padding: 14px;
+    font-weight: bold;
+    min-width: 120px;
+    min-height: 20px;
+}
+QDialog#LoginDialog QPushButton:hover {
+    background-color: #948979;
+}
+QDialog#LoginDialog QPushButton:pressed {
+    background-color: #222831;
+}
+
+/* Etykiety */
+QDialog#LoginDialog QLabel {
+    color: #FFFFFF;
+}
+
+/* Etykieta błędu */
+QDialog#LoginDialog QLabel[styleSheet*="red"] {
+    color: #948979;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 10px;
+}

@@ -1,4 +1,5 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
+import winsound
 import requests
 import os
 import glob
@@ -12,9 +13,171 @@ import zipfile
 import logging
 from PIL import Image
 
+from utils import load_stylesheet  # Załadowanie funkcji z utils
+
 # Konfiguracja logowania
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+class LoadingDialog(QtWidgets.QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
+        self.setObjectName("loading_dialog")
+        self.setFixedSize(200, 100)
+        self.setStyleSheet("""
+            QDialog#loading_dialog {
+                background-color: #222831;
+                border: 1px solid #948979;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #FFFFFF;
+                font-size: 18px;
+                font-weight: bold;
+            }
+        """)
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        self.dots_label = QtWidgets.QLabel("Oznaczanie" + ".")
+        self.dots_label.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(self.dots_label)
+        self.setLayout(layout)
+
+        # Timer do animacji kropek
+        self.dot_count = 1
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self.update_dots)
+        self.timer.start(500)  # Zmiana co 500 ms
+
+    def update_dots(self):
+        self.dot_count = (self.dot_count % 3) + 1
+        self.dots_label.setText("Oznaczanie" + "." * self.dot_count)
+
+    def stop(self):
+        self.timer.stop()
+
+class ProgressThread(QtCore.QThread):
+    stop_progress = QtCore.pyqtSignal()
+
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        self.running = True
+
+    def run(self):
+        while self.running:
+            self.msleep(100)
+
+    def stop(self):
+        self.running = False
+        self.dialog.stop()
+        self.stop_progress.emit()
+
+class AutoLabelingThread(QtCore.QThread):
+    finished = QtCore.pyqtSignal(dict)
+    error = QtCore.pyqtSignal(str)
+    progress = QtCore.pyqtSignal(str)
+
+    def __init__(self, api_url, image_paths, job_name, model_version, custom_label):
+        super().__init__()
+        self.api_url = api_url
+        self.image_paths = image_paths
+        self.job_name = job_name
+        self.model_version = model_version
+        self.custom_label = custom_label
+        self.temp_dir = None
+
+    def run(self):
+        try:
+            self.progress.emit("Wysyłanie obrazów do API...")
+            files = [('images', (os.path.basename(path), open(path, 'rb'), 'image/jpeg')) for path in self.image_paths]
+            data = {
+                'job_name': self.job_name,
+                'model_version': self.model_version,
+                'custom_label': self.custom_label
+            }
+            logger.debug(f"Wysyłam żądanie do /auto_label z job_name={self.job_name}, custom_label={self.custom_label}")
+            response = requests.post(
+                f"{self.api_url}/auto_label",
+                files=files,
+                data=data
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.debug(f"Otrzymano odpowiedź z /auto_label: {result}")
+
+            if result["status"] != "success":
+                self.error.emit(result.get('message', 'Nieznany błąd'))
+                return
+
+            if "message" in result and "Nie znaleziono obiektów" in result["message"]:
+                self.finished.emit({"image_paths": self.image_paths, "annotation_files": [], "temp_dir": None})
+                return
+
+            data_dir = os.path.join(os.getcwd(), "backend", "data")
+            os.makedirs(data_dir, exist_ok=True)
+
+            self.temp_dir = os.path.join(data_dir, f"temp_{self.job_name}")
+            os.makedirs(self.temp_dir, exist_ok=True)
+
+            self.progress.emit("Pobieranie wyników...")
+            logger.debug(f"Pobieram wyniki z /get_results/{self.job_name}")
+            response = requests.get(f"{self.api_url}/get_results/{self.job_name}")
+            response.raise_for_status()
+            zip_path = os.path.join(self.temp_dir, f"{self.job_name}_results.zip")
+            with open(zip_path, "wb") as f:
+                f.write(response.content)
+            logger.debug(f"Zapisano ZIP do {zip_path}")
+
+            self.progress.emit("Rozpakowywanie wyników...")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(self.temp_dir)
+            logger.debug(f"Rozpakowano ZIP do {self.temp_dir}")
+
+            os.remove(zip_path)
+            logger.debug(f"Usunięto ZIP: {zip_path}")
+
+            after_dir = self.find_results_dir(self.temp_dir, self.job_name)
+            if not after_dir:
+                self.error.emit("Katalog z wynikami auto-labelingu nie istnieje!")
+                return
+
+            image_paths = glob.glob(os.path.join(after_dir, "*.jpg"))
+            annotation_files = glob.glob(os.path.join(after_dir, "*.json"))
+            image_paths.sort()
+            annotation_files.sort()
+
+            if not image_paths or not annotation_files:
+                self.error.emit("Brak wyników auto-labelingu (obrazów lub adnotacji)!")
+                return
+
+            if len(image_paths) != len(annotation_files):
+                self.error.emit("Liczba obrazów i adnotacji nie jest zgodna!")
+                return
+
+            self.finished.emit({
+                "image_paths": image_paths,
+                "annotation_files": annotation_files,
+                "temp_dir": self.temp_dir
+            })
+
+        except requests.exceptions.RequestException as e:
+            self.error.emit(f"Błąd podczas labelowania: {e}")
+        finally:
+            for _, file_tuple in files:
+                file_tuple[1].close()
+
+    def find_results_dir(self, base_path, job_name):
+        target_dir = f"{job_name}_after"
+        for root, dirs, _ in os.walk(base_path):
+            if target_dir in dirs:
+                found_dir = os.path.join(root, target_dir)
+                logger.debug(f"Znalazłem katalog wyników: {found_dir}")
+                return found_dir
+        logger.error(f"Nie znaleziono katalogu {target_dir} w {base_path}")
+        return None
 
 class ImageViewer(QtWidgets.QWidget):
     def __init__(self, image_path=None, annotations=None, auto_labeling_tab=None):
@@ -460,10 +623,10 @@ class ImageViewer(QtWidgets.QWidget):
         return int(x_image), int(y_image)
 
 class AutoLabelingTab(QtWidgets.QWidget):
-    def __init__(self, user_role):
+    def __init__(self, user_role, api_url):
         super().__init__()
         self.user_role = user_role
-        self.api_url = "http://localhost:8000"
+        self.api_url = api_url
         self.job_name = None
         self.temp_dir = None
         self.input_dir = None
@@ -476,6 +639,8 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.default_label = "obiekt"  # Domyślna etykieta dla wszystkich obrazów
         self.history = []
         self.edit_mode = False
+        self.labeling_thread = None
+        self.progress_thread = None
         self.init_ui()
 
     def init_ui(self):
@@ -495,38 +660,13 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.right_panel.setFixedWidth(400)
         self.right_layout = QtWidgets.QVBoxLayout()
 
-        self.right_panel.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-            }
-            QComboBox, QLineEdit {
-                padding: 5px;
-                border: 1px solid #ccc;
-                border-radius: 5px;
-                font-size: 13px;
-            }
-            QComboBox:hover, QLineEdit:hover {
-                border: 1px solid #888;
-            }
-            QPushButton {
-                padding: 8px;
-                border: 1px solid #ccc;
-                border-radius: 5px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #d0d0d0;
-            }
-            QPushButton:pressed {
-                background-color: #c0c0c0;
-            }
-            QListWidget {
-                border: 1px solid #ccc;
-                border-radius: 5px;
-                padding: 5px;
-                font-size: 13px;
-            }
-        """)
+        autolabelingtab_stylesheet = load_stylesheet("AutoLabelingTab_style.css")
+        if not autolabelingtab_stylesheet:
+            logger.error("[ERROR] Nie udało się wczytać AutoLabelingTab_style.css")
+            autolabelingtab_stylesheet = ""  # Fallback na pusty styl
+        else:
+            logger.debug("[DEBUG] Załadowano AutoLabelingTab_style.css")
+        self.right_panel.setStyleSheet(autolabelingtab_stylesheet)
 
         self.mode_widget = QtWidgets.QWidget()
         mode_layout = QtWidgets.QVBoxLayout()
@@ -749,104 +889,106 @@ class AutoLabelingTab(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wpisać etykietę dla modelu!")
                 return
 
-            QtWidgets.QMessageBox.information(self, "Informacja", "Rozpoczynam automatyczne oznaczanie...")
+            if self.labeling_thread and self.labeling_thread.isRunning():
+                logger.warning("Oznaczanie już w toku, zignorowano ponowne kliknięcie.")
+                return
 
-            progress_dialog = QtWidgets.QProgressDialog("Oznaczanie w toku...", "", 0, 0, self)
-            progress_dialog.setWindowTitle("Przetwarzanie")
-            progress_dialog.setCancelButton(None)
-            progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
-            progress_dialog.setMinimumDuration(0)
-            progress_dialog.setRange(0, 0)
+            # Wczytaj pierwszy obraz jako wizja
+            self.current_image_idx = 0
+            self.load_current_image()
+            self.update_image_list()
+
+            # Zablokuj interfejs użytkownika tylko dla tej karty
+            self.main_splitter.setEnabled(False)
+            self.right_panel.setEnabled(False)
+            self.mode_widget.setEnabled(False)
+            self.toolbar.setEnabled(False)
+            self.label_widget.setEnabled(False)
+            self.mask_list_widget.setEnabled(False)
+            self.image_list_widget.setEnabled(False)
+
+            # Pokazanie okna z animacją kropek
+            self.loading_dialog = LoadingDialog(self)
+            self.loading_dialog.move(
+                self.image_viewer_container.width() // 2 - self.loading_dialog.width() // 2,
+                self.image_viewer_container.height() // 2 - self.loading_dialog.height() // 2
+            )
+            self.loading_dialog.show()
             QtWidgets.QApplication.processEvents()
 
+            self.progress_thread = ProgressThread(self.loading_dialog)
+            self.progress_thread.start()
+
             self.job_name = f"auto_label_{uuid.uuid4().hex}"
-            try:
-                files = [('images', (os.path.basename(path), open(path, 'rb'), 'image/jpeg')) for path in self.original_image_paths]
-                data = {
-                    'job_name': self.job_name,
-                    'model_version': model_version,
-                    'custom_label': custom_label
-                }
-                logger.debug(f"Wysyłam żądanie do /auto_label z job_name={self.job_name}, custom_label={custom_label}")
-                response = requests.post(
-                    f"{self.api_url}/auto_label",
-                    files=files,
-                    data=data
-                )
-                response.raise_for_status()
-                result = response.json()
-                logger.debug(f"Otrzymano odpowiedź z /auto_label: {result}")
-                if result["status"] != "success":
-                    progress_dialog.close()
-                    QtWidgets.QMessageBox.warning(self, "Błąd", result.get('message', 'Nieznany błąd'))
-                    return
+            self.labeling_thread = AutoLabelingThread(
+                self.api_url, self.original_image_paths, self.job_name, model_version, custom_label
+            )
+            self.labeling_thread.finished.connect(self.on_labeling_finished)
+            self.labeling_thread.error.connect(self.on_labeling_error)
+            self.labeling_thread.progress.connect(self.on_labeling_progress)
+            self.labeling_thread.start()
+        else:
+            self.current_image_idx = 0
+            self.load_current_image()
+            self.update_image_list()
+            self.download_btn.setEnabled(True)
 
-                if "message" in result and "Nie znaleziono obiektów" in result["message"]:
-                    progress_dialog.close()
-                    QtWidgets.QMessageBox.information(self, "Informacja", "Auto-labeling nie znalazł żadnych obiektów. Możesz przejść do ręcznego oznaczania.")
-                    self.current_image_idx = 0
-                    self.load_current_image()
-                    self.update_image_list()
-                    self.download_btn.setEnabled(True)
-                    return
+    def on_labeling_progress(self, message):
+        logger.debug(f"Postęp oznaczania: {message}")
 
-                data_dir = os.path.join(os.getcwd(), "backend", "data")
-                os.makedirs(data_dir, exist_ok=True)
+    def on_labeling_finished(self, result):
+        logger.debug("Oznaczanie zakończone")
+        
+        # Odtwórz dźwięk powiadomienia
+        winsound.PlaySound("SystemNotification", winsound.SND_ALIAS)
+        
+        self.loading_dialog.close()
 
-                self.temp_dir = os.path.join(data_dir, f"temp_{self.job_name}")
-                os.makedirs(self.temp_dir, exist_ok=True)
+        if self.progress_thread:
+            self.progress_thread.stop()
+            self.progress_thread.wait()
 
-                logger.debug(f"Pobieram wyniki z /get_results/{self.job_name}")
-                response = requests.get(f"{self.api_url}/get_results/{self.job_name}")
-                response.raise_for_status()
-                zip_path = os.path.join(self.temp_dir, f"{self.job_name}_results.zip")
-                with open(zip_path, "wb") as f:
-                    f.write(response.content)
-                logger.debug(f"Zapisano ZIP do {zip_path}")
+        # Odblokuj interfejs użytkownika dla tej karty
+        self.main_splitter.setEnabled(True)
+        self.right_panel.setEnabled(True)
+        self.mode_widget.setEnabled(True)
+        self.toolbar.setEnabled(True)
+        self.label_widget.setEnabled(True)
+        self.mask_list_widget.setEnabled(True)
+        self.image_list_widget.setEnabled(True)
 
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(self.temp_dir)
-                logger.debug(f"Rozpakowano ZIP do {self.temp_dir}")
+        self.image_paths = result["image_paths"]
+        self.annotation_files = result["annotation_files"]
+        self.temp_dir = result["temp_dir"]
 
-                self.log_directory_structure(self.temp_dir)
-
-                os.remove(zip_path)
-                logger.debug(f"Usunięto ZIP: {zip_path}")
-
-                after_dir = self.find_results_dir(self.temp_dir, self.job_name)
-                if not after_dir:
-                    progress_dialog.close()
-                    QtWidgets.QMessageBox.warning(self, "Błąd", "Katalog z wynikami auto-labelingu nie istnieje!")
-                    return
-
-                self.image_paths = glob.glob(os.path.join(after_dir, "*.jpg"))
-                self.annotation_files = glob.glob(os.path.join(after_dir, "*.json"))
-                self.image_paths.sort()
-                self.annotation_files.sort()
-
-                if not self.image_paths or not self.annotation_files:
-                    progress_dialog.close()
-                    QtWidgets.QMessageBox.warning(self, "Błąd", "Brak wyników auto-labelingu (obrazów lub adnotacji)!")
-                    return
-
-                if len(self.image_paths) != len(self.annotation_files):
-                    progress_dialog.close()
-                    QtWidgets.QMessageBox.warning(self, "Błąd", "Liczba obrazów i adnotacji nie jest zgodna!")
-                    return
-
-            except requests.exceptions.RequestException as e:
-                progress_dialog.close()
-                QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd podczas labelowania: {e}")
-                return
-            finally:
-                for _, file_tuple in files:
-                    file_tuple[1].close()
-                progress_dialog.close()
+        if not self.image_paths:
+            QtWidgets.QMessageBox.information(self, "Informacja", "Auto-labeling nie znalazł żadnych obiektów. Możesz przejść do ręcznego oznaczania.")
+            self.image_paths = self.original_image_paths.copy()
+            self.annotation_files = [f"{os.path.splitext(p)[0]}.json" for p in self.image_paths]
 
         self.current_image_idx = 0
         self.load_current_image()
         self.update_image_list()
         self.download_btn.setEnabled(True)
+
+    def on_labeling_error(self, error_message):
+        logger.error(f"Błąd podczas oznaczania: {error_message}")
+        self.loading_dialog.close()
+
+        if self.progress_thread:
+            self.progress_thread.stop()
+            self.progress_thread.wait()
+
+        # Odblokuj interfejs użytkownika dla tej karty
+        self.main_splitter.setEnabled(True)
+        self.right_panel.setEnabled(True)
+        self.mode_widget.setEnabled(True)
+        self.toolbar.setEnabled(True)
+        self.label_widget.setEnabled(True)
+        self.mask_list_widget.setEnabled(True)
+        self.image_list_widget.setEnabled(True)
+
+        QtWidgets.QMessageBox.warning(self, "Błąd", error_message)
 
     def load_current_image(self):
         if not self.image_paths:

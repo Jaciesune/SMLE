@@ -2,18 +2,148 @@ import requests
 import os
 import json
 import logging
-from PyQt5 import QtWidgets
+import winsound
+from PyQt5 import QtWidgets, QtCore
 
 # Konfiguracja logowania
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+class LoadingDialog(QtWidgets.QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
+        self.setObjectName("loading_dialog")
+        self.setFixedSize(200, 100)
+        self.setStyleSheet("""
+            QDialog#loading_dialog {
+                background-color: #222831;
+                border: 1px solid #948979;
+                border-radius: 12px;
+                min-width: 300px;
+                max-width: none;
+            }
+            QLabel {
+                color: #FFFFFF;
+                font-size: 18px;
+                font-weight: bold;
+            }
+        """)
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        self.dots_label = QtWidgets.QLabel("Uruchamianie benchmarku" + ".")
+        self.dots_label.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(self.dots_label)
+        self.setLayout(layout)
+
+        # Timer do animacji kropek
+        self.dot_count = 1
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self.update_dots)
+        self.timer.start(500)  # Zmiana co 500 ms
+
+    def update_dots(self):
+        self.dot_count = (self.dot_count % 3) + 1
+        self.dots_label.setText("Uruchamianie benchmarku" + "." * self.dot_count)
+
+    def stop(self):
+        self.timer.stop()
+
+class ProgressThread(QtCore.QThread):
+    stop_progress = QtCore.pyqtSignal()
+
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        self.running = True
+
+    def run(self):
+        while self.running:
+            self.msleep(100)
+
+    def stop(self):
+        self.running = False
+        self.dialog.stop()
+        self.stop_progress.emit()
+
+class BenchmarkThread(QtCore.QThread):
+    finished = QtCore.pyqtSignal(dict)
+    error = QtCore.pyqtSignal(str)
+
+    def __init__(self, api_url, selected_folder, selected_model, user_role):
+        super().__init__()
+        self.api_url = api_url
+        self.selected_folder = selected_folder
+        self.selected_model = selected_model
+        self.user_role = user_role
+        self.files = []
+
+    def run(self):
+        try:
+            # Przygotuj pliki do przesłania
+            image_files = []
+            annotation_files = []
+            for file_name in os.listdir(self.selected_folder):
+                file_path = os.path.join(self.selected_folder, file_name)
+                if file_name.lower().endswith(('.jpg', '.png')):
+                    image_files.append(('images', (file_name, open(file_path, 'rb'), 'image/jpeg')))
+                elif file_name.lower().endswith('.json'):
+                    annotation_files.append(('annotations', (file_name, open(file_path, 'rb'), 'application/json')))
+
+            if not image_files:
+                raise ValueError("Wybrany folder nie zawiera obrazów (.jpg, .png)!")
+            if not annotation_files:
+                raise ValueError("Wybrany folder nie zawiera annotacji (.json)!")
+
+            self.files.extend(image_files)
+            self.files.extend(annotation_files)
+
+            logger.debug(f"[DEBUG] Przesyłane obrazy: {[f[1][0] for f in image_files]}")
+            logger.debug(f"[DEBUG] Przesyłane annotacje: {[f[1][0] for f in annotation_files]}")
+
+            # Przygotuj dane JSON
+            data = {
+                "algorithm": self.selected_model['algorithm'],
+                "model_version": self.selected_model['version'],
+                "model_name": self.selected_model['name'],
+                "image_folder": "",
+                "source_folder": self.selected_folder,
+                "annotation_path": ""
+            }
+            json_data = json.dumps(data)
+
+            # Połącz dane JSON i pliki w jednym żądaniu
+            headers = {"X-User-Role": self.user_role}
+            self.files.append(('json_data', (None, json_data, 'application/json')))
+            logger.debug(f"[DEBUG] Wysyłanie żądania do {self.api_url}/run_benchmark z nagłówkami: {headers}, pliki={len(self.files)}")
+            response = requests.post(f"{self.api_url}/run_benchmark", files=self.files, headers=headers)
+            logger.debug(f"[DEBUG] Odpowiedź serwera: status={response.status_code}, treść={response.text}")
+
+            if response.status_code == 200:
+                logger.debug("[DEBUG] Benchmark zakończony sukcesem")
+                self.finished.emit({"status": "success", "response": response.text})
+            else:
+                raise ValueError(f"Błąd podczas benchmarku: {response.status_code} - {response.text}")
+
+        except Exception as e:
+            logger.debug(f"[DEBUG] Wyjątek podczas benchmarku: {e}")
+            self.error.emit(str(e))
+        finally:
+            # Zamknij wszystkie otwarte pliki
+            for _, (filename, file, _) in self.files[:-1]:  # Pomijamy pole 'json_data'
+                file.close()
+                logger.debug(f"[DEBUG] Zamknięto plik: {filename}")
+
 class BenchmarkTab(QtWidgets.QWidget):
-    def __init__(self, user_role):
+    def __init__(self, user_role, api_url):
         super().__init__()
         self.user_role = user_role
-        self.api_url = "http://localhost:8000"
+        self.api_url = api_url
         self.selected_folder = None
+        self.benchmark_thread = None
+        self.progress_thread = None
+        self.loading_dialog = None
         self.init_ui()
 
     def init_ui(self):
@@ -44,7 +174,6 @@ class BenchmarkTab(QtWidgets.QWidget):
             run_button.clicked.connect(self.run_benchmark)
             self.layout.addWidget(run_button)
 
-            
         # Przycisk do porównania modeli
         compare_button = QtWidgets.QPushButton("Porównaj modele")
         compare_button.clicked.connect(self.compare_models)
@@ -102,64 +231,50 @@ class BenchmarkTab(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Błąd", "Nie wybrano modelu!")
             return
 
-        # Przygotuj pliki do przesłania
-        files = []
-        image_files = []
-        annotation_files = []
-        for file_name in os.listdir(self.selected_folder):
-            file_path = os.path.join(self.selected_folder, file_name)
-            if file_name.lower().endswith(('.jpg', '.png')):
-                image_files.append(('images', (file_name, open(file_path, 'rb'), 'image/jpeg')))
-            elif file_name.lower().endswith('.json'):
-                annotation_files.append(('annotations', (file_name, open(file_path, 'rb'), 'application/json')))
-
-        if not image_files:
-            QtWidgets.QMessageBox.warning(self, "Błąd", "Wybrany folder nie zawiera obrazów (.jpg, .png)!")
+        if self.benchmark_thread and self.benchmark_thread.isRunning():
+            logger.warning("Benchmark już w toku, zignorowano ponowne kliknięcie.")
             return
 
-        if not annotation_files:
-            QtWidgets.QMessageBox.warning(self, "Błąd", "Wybrany folder nie zawiera annotacji (.json)!")
-            return
+        # Pokazanie okna z animacją kropek
+        self.loading_dialog = LoadingDialog(self)
+        self.loading_dialog.move(
+            self.width() // 2 - self.loading_dialog.width() // 2,
+            self.height() // 2 - self.loading_dialog.height() // 2
+        )
+        self.loading_dialog.show()
+        QtWidgets.QApplication.processEvents()
 
-        files.extend(image_files)
-        files.extend(annotation_files)
+        self.progress_thread = ProgressThread(self.loading_dialog)
+        self.progress_thread.start()
 
-        logger.debug(f"[DEBUG] Przesyłane obrazy: {[f[1][0] for f in image_files]}")
-        logger.debug(f"[DEBUG] Przesyłane annotacje: {[f[1][0] for f in annotation_files]}")
+        self.benchmark_thread = BenchmarkThread(
+            self.api_url, self.selected_folder, selected_model, self.user_role
+        )
+        self.benchmark_thread.finished.connect(self.on_benchmark_finished)
+        self.benchmark_thread.error.connect(self.on_benchmark_error)
+        self.benchmark_thread.start()
 
-        # Przygotuj dane JSON
-        data = {
-            "algorithm": selected_model['algorithm'],
-            "model_version": selected_model['version'],
-            "model_name": selected_model['name'],
-            "image_folder": "",
-            "source_folder": self.selected_folder,
-            "annotation_path": ""
-        }
-        json_data = json.dumps(data)
+    def on_benchmark_finished(self, result):
+        logger.debug("Benchmark zakończony")
+        winsound.PlaySound("SystemNotification", winsound.SND_ALIAS)
+        self.loading_dialog.close()
 
-        # Połącz dane JSON i pliki w jednym żądaniu
-        try:
-            headers = {"X-User-Role": self.user_role}
-            files.append(('json_data', (None, json_data, 'application/json')))
-            logger.debug(f"[DEBUG] Wysyłanie żądania do {self.api_url}/run_benchmark z nagłówkami: {headers}, pliki={len(files)}")
-            response = requests.post(f"{self.api_url}/run_benchmark", files=files, headers=headers)
-            logger.debug(f"[DEBUG] Odpowiedź serwera: status={response.status_code}, treść={response.text}")
-            if response.status_code == 200:
-                logger.debug("[DEBUG] Benchmark zakończony sukcesem")
-                self.update_benchmark_results()
-                QtWidgets.QMessageBox.information(self, "Sukces", "Benchmark uruchomiony pomyślnie!")
-            else:
-                logger.debug(f"[DEBUG] Błąd podczas benchmarku: {response.status_code} - {response.text}")
-                QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd podczas uruchamiania benchmarku: {response.text}")
-        except Exception as e:
-            logger.debug(f"[DEBUG] Wyjątek podczas benchmarku: {e}")
-            QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd: {e}")
-        finally:
-            # Zamknij wszystkie otwarte pliki
-            for _, (filename, file, _) in files[:-1]:  # Pomijamy pole 'json_data', które nie jest plikiem
-                file.close()
-                logger.debug(f"[DEBUG] Zamknięto plik: {filename}")
+        if self.progress_thread:
+            self.progress_thread.stop()
+            self.progress_thread.wait()
+
+        self.update_benchmark_results()
+        QtWidgets.QMessageBox.information(self, "Sukces", "Benchmark uruchomiony pomyślnie!")
+
+    def on_benchmark_error(self, error_message):
+        logger.error(f"Błąd podczas benchmarku: {error_message}")
+        self.loading_dialog.close()
+
+        if self.progress_thread:
+            self.progress_thread.stop()
+            self.progress_thread.wait()
+
+        QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd podczas uruchamiania benchmarku: {error_message}")
 
     def update_benchmark_results(self):
         try:

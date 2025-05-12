@@ -42,10 +42,11 @@ class TrainingThread(QtCore.QThread):
         self.wait()  # Czekamy na pełne zakończenie wątku
 
 class TrainTab(QtWidgets.QWidget):
-    def __init__(self, username):
+    def __init__(self, username, api_url):
         super().__init__()
         self.username = username  
         self.train_api = TrainAPI()
+        self.api_url = api_url # nie używane
         self.training_thread = None
         self.DEFAULT_VAL_PATH = os.getenv("DEFAULT_VAL_PATH", "/app/backend/data/val")
         self.initial_epoch = 0

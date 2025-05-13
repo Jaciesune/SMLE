@@ -6,6 +6,9 @@ modelu MCNN do zliczania obiektów i generowania map gęstości. Skrypt automaty
 dostosowuje parametry przetwarzania w zależności od złożoności obrazu.
 """
 
+#######################
+# Importy bibliotek
+#######################
 import sys
 print("Interpreter:", sys.executable)
 
@@ -22,7 +25,9 @@ from scipy.ndimage import gaussian_filter
 # Ustawienie urządzenia (GPU lub CPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+#######################
 # Funkcja wczytująca model
+#######################
 def load_model(model_path, device):
     """
     Wczytuje zapisany model MCNN z pliku checkpointu.
@@ -49,13 +54,17 @@ def load_model(model_path, device):
     model.eval()
     return model
 
+#######################
 # Foldery wyjściowe
+#######################
 output_folder = "/app/backend/MCNN/data/detectes"
 maps_folder = "/app/backend/MCNN/maps"
 os.makedirs(output_folder, exist_ok=True)
 os.makedirs(maps_folder, exist_ok=True)
 
+#######################
 # Funkcja zapisywania mapy gęstości
+#######################
 def save_density_map(density_map, image_path):
     """
     Zapisuje wizualizację mapy gęstości jako obraz.
@@ -75,7 +84,9 @@ def save_density_map(density_map, image_path):
     plt.close()
     print(f"Mapa gęstości zapisana pod: {map_save_path}")
 
+#######################
 # Obliczanie współczynnika okrągłości
+#######################
 def calculate_circularity(contour):
     """
     Oblicza współczynnik okrągłości konturu (1.0 dla idealnego koła).
@@ -93,7 +104,9 @@ def calculate_circularity(contour):
     perimeter = cv2.arcLength(contour, True)
     return (4 * np.pi * area) / (perimeter ** 2) if perimeter > 0 else 0
 
+#######################
 # Przetwarzanie obrazu
+#######################
 def process_image(image_path, sigma, circularity_range, threshold_factor, resize_shape=(1024, 1024)):
     """
     Przetwarza obraz przy użyciu modelu MCNN i wykrywa obiekty.
@@ -172,7 +185,9 @@ def process_image(image_path, sigma, circularity_range, threshold_factor, resize
 
     return marked_contours, image_cv, density_map
 
+#######################
 # Wybór najlepszej metody
+#######################
 def process_and_choose_best(image_path, resize_shape=(1024, 1024)):
     """
     Przetwarza obraz przy użyciu dwóch różnych zestawów parametrów i wybiera lepszy wynik.
@@ -197,8 +212,10 @@ def process_and_choose_best(image_path, resize_shape=(1024, 1024)):
         return marked_1, img_1, map_1
     else:
         return marked_2, img_2, map_2
-
+    
+#######################
 # Zapis wyniku
+#######################
 def save_result(image, image_path):
     """
     Zapisuje przetworzony obraz z wykrytymi obiektami.
@@ -217,7 +234,9 @@ def save_result(image, image_path):
     cv2.imwrite(result_image_path, image_cv_resized)
     return result_image_path
 
+#######################
 # Główne wywołanie
+#######################
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Użycie: python test_model.py <ścieżka_do_obrazu> <ścieżka_do_modelu>")

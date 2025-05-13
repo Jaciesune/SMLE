@@ -453,7 +453,6 @@ class TrainTab(QtWidgets.QWidget):
         Args:
             log_line (str): Linia logu z procesu trenowania
         """
-        logger.debug(f"Otrzymano log: {log_line}")
         self.log_text.appendPlainText(log_line)
         self.log_text.ensureCursorVisible()
 

@@ -8,7 +8,9 @@ szczególnie efektywnym w zliczaniu obiektów o zróżnicowanych rozmiarach.
 
 Autorzy oryginalnej pracy: Zhang et al., "Single-Image Crowd Counting via Multi-Column CNN"
 """
-
+#######################
+# Importy bibliotek
+#######################
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

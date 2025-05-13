@@ -5,7 +5,9 @@ poprzez estymację map gęstości.
 Implementuje pełny proces treningu z obsługą formatu COCO, zaawansowaną augmentacją
 danych, mixed precision training i adaptacyjnym generowaniem map gęstości.
 """
-
+#######################
+# Importy bibliotek
+#######################
 import argparse
 import logging
 import os
@@ -25,7 +27,9 @@ from torch import optim
 from torch.amp import autocast, GradScaler
 from model import MCNN
 
+#######################
 # Logger
+#######################
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 console_handler = logging.StreamHandler(sys.stdout)
@@ -33,7 +37,9 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
+#######################
 # Transformacje treningowe
+#######################
 train_transforms = A.Compose([
     A.RandomRotate90(p=0.5),
     A.Rotate(limit=15, p=0.5),
@@ -46,7 +52,9 @@ train_transforms = A.Compose([
     ToTensorV2(),
 ])
 
+#######################
 # Transformacje walidacyjne (brak augmentacji)
+#######################
 val_transforms = A.Compose([
     A.Resize(height=1024, width=1024),
     ToTensorV2(),
@@ -304,7 +312,9 @@ def train_model(args):
         torch.save(model.state_dict(), emergency_path)
         logger.info(f"Awaryjny model zapisany jako: {emergency_path}")
 
+#######################
 # === GŁÓWNE WYWOŁANIE ===
+#######################
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_dir', required=True)

@@ -147,27 +147,87 @@ class CocoDataset(torch.utils.data.Dataset):
         self.base_transform = T.Compose([T.ToTensor()])
 
         # Pipeline augmentacji (zgodny z albumentations)
-        self.augment_transform = A.Compose([
-            A.HorizontalFlip(p=0.5),
-            A.VerticalFlip(p=0.5),
-            A.Affine(
-                scale=(0.9, 1.1),
-                translate_percent=(-0.1, 0.1),
-                rotate=(-10, 10),
-                shear=(-5, 5),
-                p=0.5
-            ),
-            A.RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.1, p=0.5),
-            A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=20, p=0.5),
-            A.GaussNoise(p=0.3),
-            A.Blur(blur_limit=3, p=0.2),
+        all_transforms = [
+            # Geometryczne transformacje z SomeOf
+            A.SomeOf([
+                A.HorizontalFlip(p=0.5),
+                A.VerticalFlip(p=0.5),
+                A.RandomRotate90(p=0.5),
+                A.Rotate(limit=15, p=0.2),
+                A.Perspective(scale=(0.05, 0.15), keep_size=True, p=0.4),
+                A.Affine(
+                    scale=(0.85, 1.15),
+                    translate_percent=(-0.1, 0.1),
+                    rotate=(-30, 30),
+                    shear=(-5, 5),
+                    p=0.4
+                ),
+                A.RandomResizedCrop(
+                    size=self.image_size,
+                    scale=(0.9, 1.0),
+                    ratio=(0.75, 1.33),
+                    p=0.3
+                ),
+                A.Affine(shear=(-15, 15), p=0.3),
+                A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.3),
+                A.PiecewiseAffine(scale=(0.01, 0.05), nb_rows=4, nb_cols=4, p=0.2),
+                A.RandomScale(scale_limit=(-0.2, 0.2), p=0.3),
+                A.CoarseDropout(
+                    num_holes_range=(1, 5),
+                    fill=0,
+                    fill_mask=0,
+                    p=0.3
+                ),
+            ], n=5, p=0.8),
+
+            # Wizualne transformacje z SomeOf
+            A.SomeOf([
+                A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
+                A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.5),
+                A.GaussNoise(p=0.3),
+                A.MultiplicativeNoise(multiplier=(0.5, 1.5), per_channel=True, p=0.2),
+                A.Blur(blur_limit=(3, 7), p=0.2),
+                A.MotionBlur(blur_limit=(3, 15), p=0.2),
+                A.RandomFog(alpha_coef=0.2, p=0.1),
+                A.RandomRain(brightness_coefficient=0.9, drop_length=20, p=0.1),
+                A.RandomSnow(p=0.1),
+                A.RandomSunFlare(
+                    flare_roi=(0, 0, 1, 0.5),
+                    src_radius=150,
+                    p=0.2
+                ),
+                A.RandomShadow(
+                    shadow_roi=(0, 0.5, 1, 1),
+                    num_shadows_limit=(1, 3),
+                    shadow_dimension=5,
+                    p=0.3
+                ),
+                A.RandomGamma(gamma_limit=(80, 120), p=0.3),
+                A.Emboss(p=0.2),
+                A.Sharpen(p=0.2),
+                A.CLAHE(p=0.2),
+                A.ImageCompression(quality_range=(50, 90), p=0.2),
+                A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
+                A.RandomToneCurve(scale=0.1, p=0.3),
+                A.Solarize(p=0.2),
+                A.Posterize(num_bits=(4, 8), p=0.2),
+                A.Downscale(scale_range=(0.25, 0.5), p=0.2),
+                A.Superpixels(p_replace=0.1, n_segments=100, p=0.2),
+            ], n=6, p=0.8),
+
+            # Końcowe skalowanie
             A.Resize(height=image_size[1], width=image_size[0]),
-        ], bbox_params=A.BboxParams(
-            format='coco',
-            label_fields=['category_ids'],
-            min_area=3,
-            min_visibility=0.3
-        ))
+        ]
+
+        self.augment_transform = A.Compose(
+            all_transforms,
+            bbox_params=A.BboxParams(
+                format='coco',
+                label_fields=['category_ids'],
+                min_area=8,  # Minimalna powierzchnia bbox po augmentacji
+                min_visibility=0.1  # Minimalna widoczność bbox po augmentacji
+            )
+        )
 
     def __len__(self):
         """
@@ -238,7 +298,7 @@ class CocoDataset(torch.utils.data.Dataset):
                 filtered_labels = []
                 height, width = image_np.shape[:2]
                 for bbox, label in zip(boxes, labels):
-                    x, y, w, h = map(int, bbox)
+                    x, y, w, h = map(float, bbox)  # Upewniamy się, że wartości są float
                     x = max(0, min(x, width - 1))
                     y = max(0, min(y, height - 1))
                     x_end = max(0, min(x + w, width - 1))

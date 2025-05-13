@@ -36,6 +36,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
     - Mixed precision training dla lepszej wydajności
     - Automatycznego skalowania gradientów za pomocą GradScaler
     - Zarządzania pamięcią poprzez ręczne wywoływanie garbage collectora
+    - Zamykania procesów DataLoader po epoce
     
     Args:
         model: Model PyTorch do treningu
@@ -47,7 +48,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
     Returns:
         float: Średnia strata dla epoki
     """
-    scaler = GradScaler('cuda')
+    scaler = GradScaler()
     model.train()
     całkowita_strata = 0
 
@@ -74,7 +75,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
         optimizer.zero_grad(set_to_none=True)  # Reset gradientów przed każdym batch-em
 
         # Forward pass z mixed precision
-        with autocast('cuda', dtype=torch.bfloat16):
+        with autocast(device_type='cuda', dtype=torch.bfloat16):  # Poprawione użycie autocast
             słownik_strat = model(obrazy, nowe_cele)
             strata = sum(strata for strata in słownik_strat.values())
 
@@ -93,6 +94,11 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+    # Zamknij procesy DataLoader po epoce
+    if hasattr(dataloader.dataset, '_shut_down_workers'):
+        dataloader.dataset._shut_down_workers()
+        logger.info(f"Zamknięto procesy DataLoader po epoce {epoch}")
 
     return całkowita_strata / len(dataloader) if len(dataloader) > 0 else 0
 
@@ -278,7 +284,7 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
         ]
 
         # Obliczenie straty walidacyjnej i wykonanie inferencji
-        with autocast('cuda', dtype=torch.bfloat16):
+        with autocast(device_type='cuda', dtype=torch.bfloat16):
             model.train()
             with torch.no_grad():
                 słownik_strat = model(obrazy, nowe_cele)

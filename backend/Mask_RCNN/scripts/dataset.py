@@ -22,7 +22,9 @@ from pycocotools import mask as mask_utils       # Narzędzia do obsługi masek 
 import logging                                   # Do logowania
 from functools import partial                    # Do częściowej aplikacji funkcji
 import psutil                                    # Do monitorowania zasobów systemowych
+from multiprocessing import Manager               # Do współdzielenia danych w multiprocessing
 from utils import custom_collate_fn, estimate_batch_size  # Funkcje pomocnicze do obliczeń
+from collections import OrderedDict             # Do uporządkowanych słowników
 
 #######################
 # Konfiguracja logowania
@@ -53,7 +55,7 @@ class MyDataset(Dataset):
         annotations (dict): Załadowane adnotacje w formacie COCO
         image_ids (list): Lista identyfikatorów obrazów
         max_objects (int): Maksymalna liczba obiektów na obrazie
-        mask_cache (dict): Pamięć podręczna zdekodowanych masek
+        mask_cache (dict): Współdzielona pamięć podręczna zdekodowanych masek
     """
     def __init__(self, root, split, image_size, augment=False, num_augmentations=1, annotation_path=None, num_processes=4):
         """
@@ -75,6 +77,15 @@ class MyDataset(Dataset):
         self.augment = augment
         self.num_augmentations = num_augmentations if augment else 1
         self.image_dir = os.path.join(root, "images")
+        self.num_processes = num_processes
+
+        # Współdzielony cache masek dla multiprocessing
+        self.manager = Manager()
+        self.mask_cache = self.manager.dict()
+
+        # Lokalny cache masek zamiast współdzielonego
+        self.mask_cache = OrderedDict()
+        self.max_cache_size = 1000  # Maksymalna liczba masek w cache
 
         # Dostosowanie num_processes na podstawie obciążenia CPU
         cpu_count = os.cpu_count()
@@ -148,76 +159,90 @@ class MyDataset(Dataset):
             T.ToDtype(torch.float32, scale=True),
         ])
 
-        # Pipeline augmentacji (albumentations)
-        self.augment_transform = A.Compose([
-            # Transformacje geometryczne
-            A.HorizontalFlip(p=0.5),
-            A.VerticalFlip(p=0.5),
-            A.Rotate(limit=50, p=0.5),
-            A.Perspective(scale=(0.05, 0.1), keep_size=True, p=0.3),
-            A.RandomResizedCrop(
-                size=(image_size[1], image_size[0]),
-                scale=(0.9, 1.0),
-                ratio=(0.75, 1.33),
-                p=0.3
-            ),
-            A.Affine(
-                scale=(0.9, 1.1),
-                translate_percent=(-0.1, 0.1),
-                rotate=(-30, 30),
-                shear=(-5, 5),
-                p=0.3
-            ),
-            
-            # Transformacje kolorów i jasności
-            A.RandomBrightnessContrast(p=0.5),
-            A.HueSaturationValue(p=0.5),
-            A.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True, p=0.2),
-            
-            # Symulacja warunków atmosferycznych i oświetlenia
-            A.RandomShadow(
-                shadow_roi=(0, 0.5, 1, 1),
-                num_shadows_limit=(1, 3),
-                shadow_dimension=5,
-                p=0.3
-            ),
-            A.RandomSunFlare(
-                flare_roi=(0, 0, 1, 0.5),
-                num_flare_circles_range=(1, 3),
-                src_radius=150,
-                p=0.2
-            ),
-            A.RandomFog(fog_coef_range=(0.1, 0.3), p=0.1),
-            A.RandomRain(brightness_coefficient=0.9, drop_length=20, p=0.1),
-            A.RandomSnow(snow_point_range=(0.1, 0.3), p=0.1),
-            
-            # Symulacja szumu i efektów aparatu
-            A.GaussNoise(p=0.2),
-            A.Blur(blur_limit=(3, 7), p=0.2),
-            A.MedianBlur(blur_limit=5, p=0.1),
-            A.ISONoise(p=0.1),
-            A.MotionBlur(blur_limit=(3, 15), p=0.2),
-            A.Defocus(radius=(3, 10), alias_blur=(0.1, 0.5), p=0.2),
-            
-            # Efekty okluzji
-            A.CoarseDropout(
-                num_holes_range=(5, 10),
-                hole_height_range=(32, 64),
-                hole_width_range=(32, 64),
-                p=0.3
-            ),
-            
-            # Dostosowanie rozmiaru
-            A.Resize(height=image_size[1], width=image_size[0]),
-        ], bbox_params=A.BboxParams(
-            format='coco',
-            label_fields=['category_ids'],
-            min_area=3,
-            min_visibility=0.3
-        ), additional_targets={'masks': 'masks'})
+        # Pipeline augmentacji
+        all_transforms = [
+            # Geometryczne transformacje z SomeOf
+            A.SomeOf([
+                A.HorizontalFlip(p=0.5),
+                A.VerticalFlip(p=0.5),
+                A.RandomRotate90(p=0.5),
+                A.Rotate(limit=15, p=0.2),
+                A.Perspective(scale=(0.05, 0.15), keep_size=True, p=0.4),
+                A.Affine(
+                    scale=(0.85, 1.15),
+                    translate_percent=(-0.1, 0.1),
+                    rotate=(-30, 30),
+                    shear=(-5, 5),
+                    p=0.4
+                ),
+                A.RandomResizedCrop(
+                    size=self.image_size,
+                    scale=(0.9, 1.0),
+                    ratio=(0.75, 1.33),
+                    p=0.3
+                ),
+                A.Affine(shear=(-15, 15), p=0.3),
+                A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.3),
+                A.PiecewiseAffine(scale=(0.01, 0.05), nb_rows=4, nb_cols=4, p=0.2),
+                A.RandomScale(scale_limit=(-0.2, 0.2), p=0.3),
+                A.CoarseDropout(
+                    num_holes_range=(1, 5),
+                    fill=0,
+                    fill_mask=0,
+                    p=0.3
+                ),
+            ], n=6, p=0.8),
 
-        # Inicjalizacja cache'a masek
-        self.mask_cache = {}
+            # Wizualne transformacje z SomeOf
+            A.SomeOf([
+                A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
+                A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.5),
+                A.GaussNoise(p=0.3),
+                A.MultiplicativeNoise(multiplier=(0.5, 1.5), per_channel=True, p=0.2),
+                A.Blur(blur_limit=(3, 7), p=0.2),
+                A.MotionBlur(blur_limit=(3, 15), p=0.2),
+                A.RandomFog(alpha_coef=0.2, p=0.1),
+                A.RandomRain(brightness_coefficient=0.9, drop_length=20, p=0.1),
+                A.RandomSnow(p=0.1),
+                A.RandomSunFlare(
+                    flare_roi=(0, 0, 1, 0.5),
+                    src_radius=150,
+                    p=0.2
+                ),
+                A.RandomShadow(
+                    shadow_roi=(0, 0.5, 1, 1),
+                    num_shadows_limit=(1, 3),
+                    shadow_dimension=5,
+                    p=0.3
+                ),
+                A.RandomGamma(gamma_limit=(80, 120), p=0.3),
+                A.Emboss(p=0.2),
+                A.Sharpen(p=0.2),
+                A.CLAHE(p=0.2),
+                A.ImageCompression(quality_range=(50, 90), p=0.2),
+                A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
+                A.RandomToneCurve(scale=0.1, p=0.3),
+                A.Solarize(p=0.2),
+                A.Posterize(num_bits=(4, 8), p=0.2),
+                A.Downscale(scale_range=(0.25, 0.5), p=0.2),
+                A.Superpixels(p_replace=0.1, n_segments=100, p=0.2),
+            ], n=6, p=0.8),
+
+
+            # Końcowe skalowanie
+            A.Resize(height=image_size[1], width=image_size[0]),
+        ]
+
+        self.augment_transform = A.Compose(
+            all_transforms,
+            bbox_params=A.BboxParams(
+                format='coco',
+                label_fields=['category_ids'],
+                min_area=10,
+                min_visibility=0.1
+            ),
+            additional_targets={'masks': 'masks'}
+        )
 
     def __len__(self):
         """Zwraca liczbę próbek w zbiorze danych, uwzględniając augmentacje."""
@@ -226,43 +251,30 @@ class MyDataset(Dataset):
     def decode_rle(self, segmentation, bbox, target_size):
         """
         Dekoduje maskę z formatu RLE (Run-Length Encoding) do maski binarnej.
-        
-        Args:
-            segmentation (dict): Segmentacja w formacie RLE
-            bbox (list): Ramka ograniczająca [x, y, width, height]
-            target_size (tuple): Docelowy rozmiar maski (wysokość, szerokość)
-            
-        Returns:
-            numpy.ndarray: Maska binarna
         """
-        # Sprawdzenie, czy maska jest już w cache'u
         rle_key = str(segmentation["counts"]) + str(segmentation["size"])
         if rle_key in self.mask_cache:
             return self.mask_cache[rle_key]
 
-        # Dekodowanie RLE
         rle = {"counts": segmentation["counts"].encode('utf-8'), "size": segmentation["size"]}
         mask = mask_utils.decode(rle)
         
-        # Dostosowanie maski do bounding boxa
         x, y, w, h = map(int, bbox)
         if w <= 0 or h <= 0:
             mask = np.zeros((target_size[0], target_size[1]), dtype=np.uint8)
         else:
-            # Zmiana rozmiaru maski do wymiarów bboxa
             mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-            
-            # Umieszczenie przeskalowanej maski na obrazie o docelowym rozmiarze
             full_mask = np.zeros((target_size[0], target_size[1]), dtype=np.uint8)
             x_end = min(x + w, target_size[1])
             y_end = min(y + h, target_size[0])
             full_mask[y:y_end, x:x_end] = mask[:y_end - y, :x_end - x]
             mask = full_mask
 
-        # Zapisanie maski w cache'u
         self.mask_cache[rle_key] = mask
-        return self.mask_cache[rle_key]
-
+        if len(self.mask_cache) > self.max_cache_size:
+            self.mask_cache.popitem(last=False)  # Usuń najstarszy wpis
+        return mask
+    
     def _load_item(self, idx):
         """
         Wewnętrzna funkcja ładująca i przetwarzająca pojedynczą próbkę.
@@ -298,7 +310,7 @@ class MyDataset(Dataset):
             # Wyodrębnienie boxów, masek i etykiet
             boxes = [ann['bbox'] for ann in anns]
             masks = [self.decode_rle(ann['segmentation'], ann['bbox'], (orig_height, orig_width))
-                     if 'segmentation' in ann else None for ann in anns]
+                    if 'segmentation' in ann else None for ann in anns]
             labels = [ann['category_id'] for ann in anns]
 
             # Zastosowanie augmentacji dla odpowiednich indeksów
@@ -330,19 +342,19 @@ class MyDataset(Dataset):
                 if np.any(image < 0) or np.any(image > 255) or np.any(np.isnan(image)):
                     raise ValueError(f"Niepoprawne wartości w obrazie po augmentacji: {image_path}")
 
-                # Filtrowanie boxów po augmentacji
+                # Filtrowanie i normalizacja boxów po augmentacji
                 height, width = image.shape[:2]
                 filtered_boxes = []
                 filtered_labels = []
                 filtered_masks = []
 
                 for bbox, label, mask in zip(aug_boxes, aug_labels, aug_masks):
-                    x, y, w, h = map(int, bbox)
+                    x, y, w, h = map(float, bbox)  # Upewniamy się, że wartości są float
+                    # Normalizacja współrzędnych
                     x = max(0, min(x, width - 1))
                     y = max(0, min(y, height - 1))
                     x_end = max(0, min(x + w, width - 1))
                     y_end = max(0, min(y + h, height - 1))
-
                     w = x_end - x
                     h = y_end - y
 
@@ -363,9 +375,23 @@ class MyDataset(Dataset):
                 scale_x = self.image_size[0] / orig_width
                 scale_y = self.image_size[1] / orig_height
                 boxes = [[x * scale_x, y * scale_y, w * scale_x, h * scale_y]
-                         for x, y, w, h in boxes]
+                        for x, y, w, h in boxes]
                 masks = [cv2.resize(mask, self.image_size, interpolation=cv2.INTER_NEAREST) if mask is not None else None
-                         for mask in masks]
+                        for mask in masks]
+
+                # Normalizacja boxów po skalowaniu
+                filtered_boxes = []
+                for box in boxes:
+                    x, y, w, h = map(float, box)
+                    x = max(0, min(x, self.image_size[0] - 1))
+                    y = max(0, min(y, self.image_size[1] - 1))
+                    x_end = max(0, min(x + w, self.image_size[0] - 1))
+                    y_end = max(0, min(y + h, self.image_size[1] - 1))
+                    w = x_end - x
+                    h = y_end - y
+                    if w > 0 and h > 0:
+                        filtered_boxes.append([x, y, w, h])
+                boxes = filtered_boxes
 
             if len(boxes) == 0:
                 raise ValueError(f"Obraz {image_path} nie ma bboxów po skalowaniu")
@@ -390,6 +416,12 @@ class MyDataset(Dataset):
                     boxes[:, 1] + boxes[:, 3]
                 ], dim=1)
                 
+                # Ostateczna normalizacja boxów w formacie [x_min, y_min, x_max, y_max]
+                boxes[:, 0] = torch.clamp(boxes[:, 0], 0, self.image_size[0] - 1)  # x_min
+                boxes[:, 1] = torch.clamp(boxes[:, 1], 0, self.image_size[1] - 1)  # y_min
+                boxes[:, 2] = torch.clamp(boxes[:, 2], 0, self.image_size[0] - 1)  # x_max
+                boxes[:, 3] = torch.clamp(boxes[:, 3], 0, self.image_size[1] - 1)  # y_max
+
                 # Filtracja niepoprawnych boxów
                 invalid_boxes = (boxes[:, 2] <= boxes[:, 0]) | (boxes[:, 3] <= boxes[:, 1])
                 if invalid_boxes.any():
@@ -451,6 +483,11 @@ class MyDataset(Dataset):
             idx = ((idx // self.num_augmentations + 1) % len(self.image_ids)) * self.num_augmentations + (idx % self.num_augmentations)
             attempts += 1
         raise ValueError(f"Nie udało się znaleźć poprawnego obrazu po %d próbach w zbiorze danych: %s", max_attempts, self.image_dir)
+    
+    def _shut_down_workers(self):
+        """Zamyka zasoby multiprocessing, jeśli istnieją."""
+        self.mask_cache.clear()
+        logger.info("Wyczyszczono cache masek")
 
 
 def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=1, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):

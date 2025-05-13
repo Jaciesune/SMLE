@@ -42,21 +42,21 @@ PRETRAINED_WEIGHTS_PATH = os.path.join(PRETRAINED_WEIGHTS_DIR, "maskrcnn_resnet5
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 LOGS_TRAIN_DIR = os.path.join(BASE_DIR, "logs/train")
 LOGS_VAL_DIR = os.path.join(BASE_DIR, "logs/val")
-DEFAULT_TRAIN_DIR = "/app/train_data"
+DEFAULT_TRAIN_DIR = "/app/backend/data/train"
 DEFAULT_VAL_DIR = "/app/backend/data/val"
 
 # Domyślne parametry treningu
 DEFAULT_EPOCHS = 20
 DEFAULT_LR = 0.0005
-DEFAULT_PATIENCE = 8
-DEFAULT_NUM_AUGMENTATIONS = 8
+DEFAULT_PATIENCE = 9
+DEFAULT_NUM_AUGMENTATIONS = 2
 
 # Parametry optymalizatora
 MOMENTUM = 0.9
 WEIGHT_DECAY = 0.0005
 SCHEDULER_FACTOR = 0.5
-SCHEDULER_PATIENCE = 2
-MIN_LR = 1e-6
+SCHEDULER_PATIENCE = 4
+MIN_LR = 5e-7
 
 #######################
 # Funkcje pomocnicze

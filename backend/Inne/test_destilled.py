@@ -1,6 +1,5 @@
 import os
 import torch
-import torchvision
 import torchvision.transforms.functional as F
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -8,9 +7,10 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import CocoDetection
 from torchvision.transforms import functional as TF
 from tqdm import tqdm
-from torchvision.models.detection import MaskRCNN
-from torchvision.models.detection.backbone_utils import BackboneWithFPN
 from torchvision.models import resnet18
+from torchvision.models.detection import FasterRCNN
+from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.ops import MultiScaleRoIAlign
 
 # Ścieżki
 VISUALS_DIR = "backend/val_distilled_visuals"
@@ -19,33 +19,54 @@ TEST_IMAGES_DIR = "backend/data/val/images/"
 TEST_ANNOTATIONS_PATH = "backend/data/val/annotations/instances_val.json"
 
 os.makedirs(VISUALS_DIR, exist_ok=True)
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class CocoTestDataset(CocoDetection):
     def __init__(self, img_folder, ann_file):
-        super(CocoTestDataset, self).__init__(img_folder, ann_file)
-    
+        super().__init__(img_folder, ann_file)
+
     def __getitem__(self, idx):
-        img, target = super(CocoTestDataset, self).__getitem__(idx)
+        img, target = super().__getitem__(idx)
         img = TF.to_tensor(img)
         return img, target
+
 
 def collate_fn(batch):
     return tuple(zip(*batch))
 
-def create_student_model():
+
+def create_student_model_from_arch(arch: dict):
     backbone = resnet18(weights="IMAGENET1K_V1")
-    backbone_with_fpn = BackboneWithFPN(
-        backbone,
-        return_layers={"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"},
-        in_channels_list=[64, 128, 256, 512],
-        out_channels=256
+    backbone = torch.nn.Sequential(*list(backbone.children())[:-2])
+    backbone.out_channels = arch.get("out_channels", 512)
+
+    anchor_generator = AnchorGenerator(
+        sizes=arch.get("anchor_sizes", ((32, 64, 128, 256),)),
+        aspect_ratios=arch.get("aspect_ratios", ((0.5, 1.0, 2.0),))
     )
-    model = MaskRCNN(backbone_with_fpn, num_classes=2)
+
+    roi_pooler = MultiScaleRoIAlign(
+        featmap_names=arch.get("featmap_names", ["0"]),
+        output_size=7,
+        sampling_ratio=2
+    )
+
+    model = FasterRCNN(
+        backbone=backbone,
+        num_classes=2,
+        rpn_anchor_generator=anchor_generator,
+        box_roi_pool=roi_pooler
+    )
+
+    model.roi_heads.detections_per_img = 1000
+    model.roi_heads.nms_thresh = 0.15
+    model.roi_heads.score_thresh = 0.5
+
     model.to(device)
     model.eval()
     return model
+
 
 def evaluate_model(model, dataloader):
     model.eval()
@@ -54,7 +75,7 @@ def evaluate_model(model, dataloader):
 
     with torch.no_grad():
         for idx, (images, _) in enumerate(tqdm(dataloader, desc="Testowanie")):
-            images = list(img.to(device) for img in images)
+            images = [img.to(device) for img in images]
             outputs = model(images)
 
             for i, output in enumerate(outputs):
@@ -75,7 +96,7 @@ def evaluate_model(model, dataloader):
                     )
                     ax.add_patch(rect)
 
-                save_path = os.path.join(VISUALS_DIR, f"test_image_{total_images+i}.png")
+                save_path = os.path.join(VISUALS_DIR, f"test_image_{total_images + i}.png")
                 plt.axis('off')
                 plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
                 plt.close(fig)
@@ -86,21 +107,39 @@ def evaluate_model(model, dataloader):
 
     print(f"\nŚrednia liczba wykryć na obraz: {total_detections / total_images:.2f}")
 
+
 def list_distilled_models():
     return [f for f in os.listdir(DISTILLED_DIR) if f.endswith(".pth")]
+
 
 def run_test(selected_model_name):
     model_path = os.path.join(DISTILLED_DIR, selected_model_name)
     print(f"Ładowanie destylatu: {model_path}")
 
-    model = create_student_model()
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    checkpoint = torch.load(model_path, map_location=device)
+
+    if "model_state_dict" in checkpoint:
+        arch = checkpoint.get("arch", {})
+        state_dict = checkpoint["model_state_dict"]
+    else:
+        # Kompatybilność wsteczna
+        arch = {
+            "out_channels": 512,
+            "anchor_sizes": ((32, 64, 128, 256),),
+            "aspect_ratios": ((0.5, 1.0, 2.0),),
+            "featmap_names": ["0"]
+        }
+        state_dict = checkpoint
+
+    model = create_student_model_from_arch(arch)
+    model.load_state_dict(state_dict)
 
     dataset = CocoTestDataset(TEST_IMAGES_DIR, TEST_ANNOTATIONS_PATH)
     dataloader = DataLoader(dataset, batch_size=2, shuffle=False, collate_fn=collate_fn)
 
     print("\nRozpoczynam testowanie...")
     evaluate_model(model, dataloader)
+
 
 if __name__ == "__main__":
     models = list_distilled_models()

@@ -153,7 +153,16 @@ def distill_model(teacher, student, dataloader, epochs=20):
 
 
 def save_student_model(student, save_path):
-    torch.save(student.state_dict(), save_path)
+    torch.save({
+        "model_state_dict": student.state_dict(),
+        "arch": {
+            "backbone": "resnet18",
+            "out_channels": 512,
+            "anchor_sizes": ((32, 64, 128, 256),),
+            "aspect_ratios": ((0.5, 1.0, 2.0),),
+            "featmap_names": ["0"]
+        }
+    }, save_path)
 
 
 def run_distillation(selected_model_name):

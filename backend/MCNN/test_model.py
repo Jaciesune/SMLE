@@ -67,7 +67,7 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
     if image.mode != 'RGB':
         image = image.convert('RGB')
 
-    resize_transform = transforms.Compose([
+    resize_transform = transforms.Compose([ 
         transforms.Resize(resize_shape),
         transforms.ToTensor()
     ])
@@ -91,13 +91,33 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
 
     marked_contours = 0
     marked_centroids = []
-    MIN_ELLIPSE_AREA = 100   # Minimalna powierzchnia elipsy (dopasuj w razie potrzeby)
-    MAX_ELLIPSE_AREA = 10000 # Maksymalna powierzchnia elipsy (dopasuj w razie potrzeby)
-    MIN_DISTANCE_BETWEEN_CENTROIDS = 20  # Minimalna odległość między centroidami (piksele)
+
+    # Ustalanie dynamicznych wartości dla parametrów
+    detections_count = len(valid_contours)
+
+    if detections_count < 50:
+        MIN_ELLIPSE_AREA = 50
+        MAX_ELLIPSE_AREA = 25000
+        MIN_DISTANCE_BETWEEN_CENTROIDS = 75
+    elif detections_count < 75:
+        MIN_ELLIPSE_AREA = 2500
+        MAX_ELLIPSE_AREA = 10000
+        MIN_DISTANCE_BETWEEN_CENTROIDS = 200
+    elif detections_count < 150:
+        MIN_ELLIPSE_AREA = 250
+        MAX_ELLIPSE_AREA = 10000
+        MIN_DISTANCE_BETWEEN_CENTROIDS = 50
+    elif detections_count < 500:
+        MIN_ELLIPSE_AREA = 100
+        MAX_ELLIPSE_AREA = 2500
+        MIN_DISTANCE_BETWEEN_CENTROIDS = 25
+    else:
+        MIN_ELLIPSE_AREA = 5
+        MAX_ELLIPSE_AREA = 1000
+        MIN_DISTANCE_BETWEEN_CENTROIDS = 5
 
     ellipses_info = []
 
-    # Najpierw zbierz elipsy z filtracją wstępną
     for contour in valid_contours:
         if len(contour) >= 5:
             ellipse = cv2.fitEllipse(contour)
@@ -107,9 +127,8 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
             major_axis = max(axes)
             minor_axis = min(axes)
 
-             # Sprawdzenie, czy minor_axis nie jest równe zero
             if minor_axis == 0:
-                continue  # Pomiń tę elipsę, jeśli minor_axis = 0
+                continue
 
             aspect_ratio = major_axis / minor_axis
 
@@ -123,14 +142,12 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
                 "center": center
             })
 
-    # Sortuj elipsy po pozycji X (możesz zmienić na Y jeśli bardziej liniowe są pionowo)
-    ellipses_info.sort(key=lambda e: e["center"][0])  # sortuj po X
+    ellipses_info.sort(key=lambda e: e["center"][0])
 
     filtered_ellipses = []
     for i, current in enumerate(ellipses_info):
         area = current["area"]
 
-        # Sprawdź sąsiadów, jeśli są
         neighbor_areas = []
         if i > 0:
             neighbor_areas.append(ellipses_info[i - 1]["area"])
@@ -140,11 +157,10 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
         if neighbor_areas:
             avg_neighbors = sum(neighbor_areas) / len(neighbor_areas)
             if area < 0.5 * avg_neighbors:
-                continue  # pomiń — zbyt mały w porównaniu do sąsiadów
+                continue
 
         filtered_ellipses.append(current)
 
-    # Teraz rysuj tylko zaakceptowane
     for item in filtered_ellipses:
         ellipse = item["ellipse"]
         (center, axes, angle) = ellipse
@@ -169,6 +185,7 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
             marked_contours += 1
 
     return marked_contours, image_cv, density_map
+
 
 
 def process_and_choose_best(image_path, resize_shape=(2048, 2048)):

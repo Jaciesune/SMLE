@@ -196,7 +196,7 @@ class MyDataset(Dataset):
                     fill_mask=0,
                     p=0.3
                 ),
-            ], n=6, p=0.8),
+            ], n=4, p=0.8),
 
             # Wizualne transformacje z SomeOf
             A.SomeOf([
@@ -231,7 +231,7 @@ class MyDataset(Dataset):
                 A.Posterize(num_bits=(4, 8), p=0.2),
                 A.Downscale(scale_range=(0.25, 0.5), p=0.2),
                 A.Superpixels(p_replace=0.1, n_segments=100, p=0.2),
-            ], n=6, p=0.8),
+            ], n=4, p=0.8),
 
 
             # Końcowe skalowanie

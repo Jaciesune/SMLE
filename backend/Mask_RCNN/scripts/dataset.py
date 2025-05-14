@@ -33,6 +33,11 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %
 logger = logging.getLogger(__name__)
 
 #######################
+# Ustawienia domyślne
+#######################
+NUM_WORKERS = 4  # Domyślna liczba wątków do równoległego przetwarzania
+
+#######################
 # Klasa zbioru danych
 #######################
 class MyDataset(Dataset):
@@ -490,7 +495,7 @@ class MyDataset(Dataset):
         logger.info("Wyczyszczono cache masek")
 
 
-def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=1, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):
+def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=NUM_WORKERS, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):
     """
     Tworzy i konfiguruje DataLoadery dla zbiorów treningowego i walidacyjnego.
     

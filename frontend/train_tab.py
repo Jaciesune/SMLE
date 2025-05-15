@@ -1,20 +1,55 @@
-from PyQt5 import QtWidgets, QtCore, QtGui
-from backend.api.train_api import TrainAPI
+"""
+Implementacja zakładki trenowania modeli w aplikacji SMLE.
+
+Moduł dostarcza interfejs użytkownika do trenowania nowych modeli uczenia maszynowego
+oraz doszkalania istniejących modeli. Pozwala na konfigurację parametrów treningu,
+wybór algorytmu, monitorowanie postępu oraz zarządzanie procesem treningowym.
+"""
+
+#######################
+# Importy bibliotek
+#######################
+from PyQt5 import QtWidgets, QtCore
 from pathlib import Path
 import uuid
-import time
 import logging
 import os
 import re
 
+#######################
+# Importy lokalne
+#######################
+from backend.api.train_api import TrainAPI
+
+#######################
+# Konfiguracja logowania
+#######################
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 class TrainingThread(QtCore.QThread):
+    """
+    Wątek wykonujący operację trenowania modelu w tle.
+    
+    Odpowiada za komunikację z API trenowania, przekazywanie parametrów
+    i streamowanie logów treningu z powrotem do interfejsu użytkownika.
+    
+    Sygnały:
+        log_signal: Emitowany dla każdej nowej linii logu z procesu trenowania
+        finished_signal: Emitowany po zakończeniu treningu z informacją o wyniku
+    """
     log_signal = QtCore.pyqtSignal(str)
     finished_signal = QtCore.pyqtSignal(str)
 
     def __init__(self, train_api, algorithm, args):
+        """
+        Inicjalizuje wątek trenowania.
+        
+        Args:
+            train_api (TrainAPI): Instancja API do komunikacji z backendem
+            algorithm (str): Nazwa algorytmu do trenowania
+            args (list): Argumenty dla procesu trenowania
+        """
         super().__init__()
         self.train_api = train_api
         self.algorithm = algorithm
@@ -23,6 +58,12 @@ class TrainingThread(QtCore.QThread):
         self._stopped_by_user = False
 
     def run(self):
+        """
+        Główna metoda wątku uruchamiająca proces trenowania.
+        
+        Wykonuje trening modelu poprzez API, emituje sygnały z logami
+        oraz informacją o zakończeniu procesu lub błędzie.
+        """
         try:
             for log_line in self.train_api.train_model_stream(self.algorithm, *self.args):
                 if not self._running:
@@ -36,17 +77,38 @@ class TrainingThread(QtCore.QThread):
             self.finished_signal.emit(f"Błąd podczas treningu: {str(e)}")
 
     def stop(self):
+        """
+        Zatrzymuje proces trenowania.
+        
+        Ustawia flagę zatrzymania, wywołuje metodę stop() na API
+        i czeka na zakończenie wątku.
+        """
         self._running = False
         self._stopped_by_user = True
         self.train_api.stop()
         self.wait()  # Czekamy na pełne zakończenie wątku
 
 class TrainTab(QtWidgets.QWidget):
+    """
+    Zakładka trenowania modeli uczenia maszynowego.
+    
+    Udostępnia interfejs użytkownika do konfigurowania i uruchamiania
+    procesu trenowania modeli, monitorowania postępu oraz przeglądania
+    logów. Umożliwia zarówno tworzenie nowych modeli, jak i doszkalanie
+    istniejących z wykorzystaniem różnych algorytmów i parametrów.
+    """
     def __init__(self, username, api_url):
+        """
+        Inicjalizuje zakładkę trenowania.
+        
+        Args:
+            username (str): Nazwa użytkownika wykonującego trening
+            api_url (str): URL API backendu (obecnie nieużywany bezpośrednio)
+        """
         super().__init__()
         self.username = username  
         self.train_api = TrainAPI()
-        self.api_url = api_url # nie używane
+        self.api_url = api_url  # nie używane
         self.training_thread = None
         self.DEFAULT_VAL_PATH = os.getenv("DEFAULT_VAL_PATH", "/app/backend/data/val")
         self.initial_epoch = 0
@@ -56,6 +118,16 @@ class TrainTab(QtWidgets.QWidget):
         self.init_ui()
 
     def init_ui(self):
+        """
+        Tworzy i konfiguruje elementy interfejsu użytkownika zakładki.
+        
+        Komponenty:
+        - Pola konfiguracji modelu (nazwa, ścieżki do danych, algorytm)
+        - Wybór modelu do doszkolenia
+        - Parametry treningu (liczba epok, współczynnik uczenia, augmentacje)
+        - Przyciski sterowania treningiem
+        - Pasek postępu i obszar logów
+        """
         outer_layout = QtWidgets.QVBoxLayout()
         outer_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -63,9 +135,11 @@ class TrainTab(QtWidgets.QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(10)
 
+        # Nazwa modelu
         self.model_name_input = QtWidgets.QLineEdit()
         layout.addRow("Nazwa Modelu:", self.model_name_input)
 
+        # Ścieżka do danych treningowych
         self.dataset_path_input = QtWidgets.QLineEdit()
         self.dataset_path_btn = QtWidgets.QPushButton("Wybierz dane treningowe")
         self.dataset_path_btn.clicked.connect(self.select_dataset)
@@ -74,6 +148,7 @@ class TrainTab(QtWidgets.QWidget):
         dataset_layout.addWidget(self.dataset_path_btn)
         layout.addRow("Ścieżka do danych treningowych:", dataset_layout)
 
+        # Ścieżka do danych walidacyjnych
         self.val_path_input = QtWidgets.QLineEdit()
         self.val_path_btn = QtWidgets.QPushButton("Wybierz dane walidacyjne")
         self.val_path_btn.clicked.connect(self.select_val_dataset)
@@ -82,11 +157,13 @@ class TrainTab(QtWidgets.QWidget):
         val_layout.addWidget(self.val_path_btn)
         layout.addRow("Ścieżka do danych walidacyjnych:", val_layout)
 
+        # Wybór algorytmu
         self.algorithm_combo = QtWidgets.QComboBox()
         self.algorithm_combo.addItems(self.train_api.get_algorithms())
         self.algorithm_combo.currentTextChanged.connect(self.update_model_versions)
         layout.addRow("Wybierz Algorytm:", self.algorithm_combo)
 
+        # Wybór wersji modelu do doszkolenia
         self.model_version_label = QtWidgets.QLabel("Wybierz model do doszkolenia (opcjonalne):")
         layout.addRow(self.model_version_label)
         self.model_version_combo = QtWidgets.QComboBox()
@@ -94,6 +171,7 @@ class TrainTab(QtWidgets.QWidget):
         self.update_model_versions()
         layout.addRow(self.model_version_combo)
 
+        # Parametry treningu
         self.epochs_input = QtWidgets.QSpinBox()
         self.epochs_input.setRange(1, 1000)
         self.epochs_input.setValue(10)
@@ -111,6 +189,7 @@ class TrainTab(QtWidgets.QWidget):
         self.augmentations_input.setValue(0)
         layout.addRow("Liczba augmentacji na obraz:", self.augmentations_input)
 
+        # Przyciski kontrolne
         self.button_layout = QtWidgets.QHBoxLayout()
         self.train_btn = QtWidgets.QPushButton("Rozpocznij trening")
         self.train_btn.clicked.connect(self.start_training)
@@ -121,6 +200,7 @@ class TrainTab(QtWidgets.QWidget):
         self.button_layout.addWidget(self.stop_btn)
         layout.addRow(self.button_layout)
 
+        # Pasek postępu i logi
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setVisible(False)
         layout.addRow("Postęp:", self.progress_bar)
@@ -131,6 +211,7 @@ class TrainTab(QtWidgets.QWidget):
         self.log_text.setFixedHeight(200)
         layout.addRow("Logi treningu:", self.log_text)
 
+        # Finalizacja layoutu
         form_widget = QtWidgets.QWidget()
         form_widget.setLayout(layout)
         form_widget.setFixedWidth(1000)
@@ -138,16 +219,32 @@ class TrainTab(QtWidgets.QWidget):
         self.setLayout(outer_layout)
 
     def select_dataset(self):
+        """
+        Otwiera dialog wyboru folderu z danymi treningowymi.
+        
+        Po wybraniu folderu aktualizuje pole ścieżki danych treningowych.
+        """
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Wybierz folder z danymi treningowymi")
         if folder:
             self.dataset_path_input.setText(folder)
 
     def select_val_dataset(self):
+        """
+        Otwiera dialog wyboru folderu z danymi walidacyjnymi.
+        
+        Po wybraniu folderu aktualizuje pole ścieżki danych walidacyjnych.
+        """
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Wybierz folder z danymi walidacyjnymi")
         if folder:
             self.val_path_input.setText(folder)
 
     def update_model_versions(self):
+        """
+        Aktualizuje listę dostępnych wersji modeli dla wybranego algorytmu.
+        
+        Pobiera listę modeli z API trenowania i wypełnia nią combobox,
+        dodając zawsze opcję "Nowy model" na początku listy.
+        """
         self.model_version_combo.clear()
         self.model_version_combo.addItem("Nowy model")
         algorithm = self.algorithm_combo.currentText()
@@ -159,6 +256,12 @@ class TrainTab(QtWidgets.QWidget):
         logger.info(f"Zaktualizowano listę modeli dla algorytmu {algorithm}: {model_versions}")
 
     def log_error(self, message):
+        """
+        Loguje błąd w interfejsie użytkownika i resetuje stan treningu.
+        
+        Args:
+            message (str): Komunikat błędu do wyświetlenia
+        """
         self.log_text.appendPlainText(f"Błąd: {message}")
         QtWidgets.QMessageBox.warning(self, "Błąd", message)
         self.train_btn.setEnabled(True)
@@ -172,6 +275,21 @@ class TrainTab(QtWidgets.QWidget):
         logger.info("Stan zresetowany po błędzie.")
 
     def validate_inputs(self, model_name, train_path, val_path, model_version):
+        """
+        Weryfikuje poprawność wprowadzonych danych przed rozpoczęciem treningu.
+        
+        Sprawdza czy podano nazwę modelu, czy ścieżki istnieją i czy wybrano
+        prawidłowy model do doszkolenia.
+        
+        Args:
+            model_name (str): Nazwa modelu
+            train_path (str): Ścieżka do danych treningowych
+            val_path (str): Ścieżka do danych walidacyjnych
+            model_version (str): Wybrana wersja modelu
+            
+        Returns:
+            bool: True jeśli wszystkie dane są poprawne, False w przeciwnym przypadku
+        """
         if not model_name:
             self.log_error("Proszę podać nazwę modelu.")
             return False
@@ -187,6 +305,25 @@ class TrainTab(QtWidgets.QWidget):
         return True
 
     def prepare_training_args(self, model_name, train_path, val_path, algorithm, model_version, epochs, lr, augmentations):
+        """
+        Przygotowuje argumenty dla procesu trenowania.
+        
+        Tworzy unikalny identyfikator sesji treningowej, konfiguruje ścieżki danych,
+        i przygotowuje pełną listę argumentów dla API trenowania.
+        
+        Args:
+            model_name (str): Nazwa modelu
+            train_path (str): Ścieżka do danych treningowych
+            val_path (str): Ścieżka do danych walidacyjnych
+            algorithm (str): Nazwa algorytmu
+            model_version (str): Wersja modelu do doszkolenia
+            epochs (int): Liczba epok treningu
+            lr (float): Współczynnik uczenia
+            augmentations (int): Liczba augmentacji na obraz
+            
+        Returns:
+            list: Lista argumentów dla procesu trenowania lub None w przypadku błędu
+        """
         unique_id = uuid.uuid4().hex
         user_train_dir = f"train_user_{unique_id}"
         container_train_path = Path("/app/backend/data") / user_train_dir
@@ -234,6 +371,13 @@ class TrainTab(QtWidgets.QWidget):
         return args
 
     def start_training(self):
+        """
+        Rozpoczyna proces trenowania modelu.
+        
+        Pobiera i waliduje parametry z interfejsu użytkownika,
+        przygotowuje argumenty, inicjalizuje wątek trenowania
+        i aktualizuje stan interfejsu.
+        """
         if self.training_thread and self.training_thread.isRunning():
             self.log_error("Trening już trwa!")
             return
@@ -275,6 +419,12 @@ class TrainTab(QtWidgets.QWidget):
         logger.info(f"Rozpoczęto trening modelu z {augmentations} augmentacjami na obraz (przekazano {augmentations + 1} do backendu).")
 
     def stop_training(self):
+        """
+        Zatrzymuje trwający proces trenowania modelu.
+        
+        Wywołuje metodę stop() na wątku trenowania, aktualizuje
+        interfejs i wyświetla informację o zatrzymaniu.
+        """
         if self.training_thread and self.training_thread.isRunning():
             logger.info("Rozpoczynanie zatrzymywania treningu...")
             self.training_thread.stop()
@@ -294,7 +444,15 @@ class TrainTab(QtWidgets.QWidget):
             logger.info("Próba zatrzymania treningu, ale brak aktywnego wątku.")
 
     def update_log(self, log_line):
-        logger.debug(f"Otrzymano log: {log_line}")
+        """
+        Aktualizuje obszar logów o nową linię z procesu trenowania.
+        
+        Analizuje linię logu w poszukiwaniu informacji o aktualnej epoce
+        i aktualizuje pasek postępu.
+        
+        Args:
+            log_line (str): Linia logu z procesu trenowania
+        """
         self.log_text.appendPlainText(log_line)
         self.log_text.ensureCursorVisible()
 
@@ -316,6 +474,14 @@ class TrainTab(QtWidgets.QWidget):
         QtWidgets.QApplication.processEvents()
 
     def training_finished(self, result):
+        """
+        Obsługuje zakończenie procesu trenowania modelu.
+        
+        Aktualizuje stan interfejsu i wyświetla komunikat o wyniku treningu.
+        
+        Args:
+            result (str): Komunikat o wyniku treningu
+        """
         logger.info(f"Trening zakończony: {result}")
         self.train_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)

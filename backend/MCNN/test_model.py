@@ -1,3 +1,14 @@
+"""
+Skrypt do testowania modelu MCNN (Multi-Column CNN) na obrazach.
+
+Ten moduł implementuje pełny potok przetwarzania obrazów przy użyciu wytrenowanego 
+modelu MCNN do zliczania obiektów i generowania map gęstości. Skrypt automatycznie 
+dostosowuje parametry przetwarzania w zależności od złożoności obrazu.
+"""
+
+#######################
+# Importy bibliotek
+#######################
 import sys
 print("Interpreter:", sys.executable)
 
@@ -14,8 +25,23 @@ from scipy.ndimage import gaussian_filter
 # Ustawienie urządzenia (GPU lub CPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+#######################
 # Funkcja wczytująca model
+#######################
 def load_model(model_path, device):
+    """
+    Wczytuje zapisany model MCNN z pliku checkpointu.
+    
+    Args:
+        model_path (str): Ścieżka do pliku modelu
+        device (torch.device): Urządzenie, na którym ma działać model (CPU/GPU)
+        
+    Returns:
+        MCNN: Wczytany model w trybie ewaluacji
+        
+    Raises:
+        SystemExit: Gdy plik modelu nie istnieje lub ma niepoprawny format
+    """
     if not model_path.endswith('_checkpoint.pth'):
         print(f"Błąd: Ścieżka do modelu {model_path} nie kończy się na _checkpoint.pth.")
         sys.exit(1)
@@ -28,14 +54,25 @@ def load_model(model_path, device):
     model.eval()
     return model
 
+#######################
 # Foldery wyjściowe
+#######################
 output_folder = "/app/backend/MCNN/data/detectes"
 maps_folder = "/app/backend/MCNN/maps"
 os.makedirs(output_folder, exist_ok=True)
 os.makedirs(maps_folder, exist_ok=True)
 
+#######################
 # Funkcja zapisywania mapy gęstości
+#######################
 def save_density_map(density_map, image_path):
+    """
+    Zapisuje wizualizację mapy gęstości jako obraz.
+    
+    Args:
+        density_map (numpy.ndarray): Mapa gęstości wygenerowana przez model
+        image_path (str): Ścieżka do oryginalnego obrazu (używana do nazwy pliku wyjściowego)
+    """
     plt.figure(figsize=(10, 8))
     plt.imshow(density_map, cmap='jet')
     plt.colorbar()
@@ -47,14 +84,51 @@ def save_density_map(density_map, image_path):
     plt.close()
     print(f"Mapa gęstości zapisana pod: {map_save_path}")
 
+#######################
 # Obliczanie współczynnika okrągłości
+#######################
 def calculate_circularity(contour):
+    """
+    Oblicza współczynnik okrągłości konturu (1.0 dla idealnego koła).
+    
+    Współczynnik okrągłości to stosunek pola powierzchni konturu do kwadratu obwodu,
+    znormalizowany tak, aby dla idealnego koła wynosił 1.0.
+    
+    Args:
+        contour (numpy.ndarray): Kontur z funkcji cv2.findContours()
+        
+    Returns:
+        float: Współczynnik okrągłości (0.0-1.0)
+    """
     area = cv2.contourArea(contour)
     perimeter = cv2.arcLength(contour, True)
     return (4 * np.pi * area) / (perimeter ** 2) if perimeter > 0 else 0
 
+#######################
 # Przetwarzanie obrazu
+#######################
 def process_image(image_path, sigma, circularity_range, threshold_factor, resize_shape=(1024, 1024)):
+    """
+    Przetwarza obraz przy użyciu modelu MCNN i wykrywa obiekty.
+    
+    Proces obejmuje:
+    1. Generowanie mapy gęstości za pomocą modelu MCNN
+    2. Wygładzanie mapy filtrem Gaussa
+    3. Progowanie adaptacyjne do uzyskania mapy binarnej
+    4. Wykrywanie konturów obiektów
+    5. Filtracja konturów na podstawie okrągłości
+    6. Rysowanie okręgów otaczających wykryte obiekty
+    
+    Args:
+        image_path (str): Ścieżka do przetwarzanego obrazu
+        sigma (float): Parametr sigma dla filtru Gaussa
+        circularity_range (tuple): Zakres akceptowalnej okrągłości (min, max)
+        threshold_factor (float): Współczynnik dla adaptacyjnego progu
+        resize_shape (tuple): Rozmiar, do którego przeskalować obraz
+        
+    Returns:
+        tuple: (liczba_wykrytych_obiektów, przetworzony_obraz, mapa_gęstości)
+    """
     image = Image.open(image_path)
     if image.mode != 'RGB':
         image = image.convert('RGB')
@@ -65,14 +139,19 @@ def process_image(image_path, sigma, circularity_range, threshold_factor, resize
     ])
     img_tensor = resize_transform(image).unsqueeze(0).to(device)
 
+    # Wygenerowanie mapy gęstości przy użyciu modelu MCNN
     with torch.no_grad():
         density_map = model(img_tensor).cpu().numpy()[0, 0]
 
+    # Wygładzanie mapy gęstości filtrem Gaussa
     density_map = gaussian_filter(density_map, sigma=sigma)
+    
+    # Adaptacyjne progowanie mapy gęstości
     threshold = np.mean(density_map) + np.std(density_map) * threshold_factor
     binary_map = (density_map > threshold).astype(np.uint8)
     binary_map_cv = (binary_map * 255).astype(np.uint8)
 
+    # Wykrywanie konturów obiektów
     contours, _ = cv2.findContours(binary_map_cv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     image_cv = np.array(image)
     h_ratio, w_ratio = image_cv.shape[0] / density_map.shape[0], image_cv.shape[1] / density_map.shape[1]
@@ -80,14 +159,16 @@ def process_image(image_path, sigma, circularity_range, threshold_factor, resize
     valid_circles = []
     high_confidence_circles = []
 
+    # Filtracja konturów na podstawie okrągłości
     for contour in contours:
-        if len(contour) >= 5:
+        if len(contour) >= 5:  # Musi być wystarczająco punktów do dopasowania okręgu
             (x, y), radius = cv2.minEnclosingCircle(contour)
             circularity = calculate_circularity(contour)
             if circularity_range[0] <= circularity <= circularity_range[1]:
                 valid_circles.append((contour, (x, y), radius))
                 high_confidence_circles.append((contour, (x, y), radius))
 
+    # Adaptacyjne filtrowanie promieni okręgów
     radii = [radius for _, _, radius in high_confidence_circles]
     if radii:
         mean_radius = np.mean(radii)
@@ -95,6 +176,7 @@ def process_image(image_path, sigma, circularity_range, threshold_factor, resize
         max_radius = mean_radius * 3.0
         valid_circles = [c for c in valid_circles if min_radius <= c[2] <= max_radius]
 
+    # Zaznaczanie wykrytych obiektów na obrazie
     marked_contours = 0
     for contour, (x, y), radius in valid_circles:
         x, y, radius = int(x * w_ratio), int(y * h_ratio), int(radius * w_ratio)
@@ -103,21 +185,48 @@ def process_image(image_path, sigma, circularity_range, threshold_factor, resize
 
     return marked_contours, image_cv, density_map
 
+#######################
 # Wybór najlepszej metody
+#######################
 def process_and_choose_best(image_path, resize_shape=(1024, 1024)):
-    params_method_1 = (1.5, (0.55, 1.35), 0.5)
+    """
+    Przetwarza obraz przy użyciu dwóch różnych zestawów parametrów i wybiera lepszy wynik.
+    
+    Args:
+        image_path (str): Ścieżka do przetwarzanego obrazu
+        resize_shape (tuple): Rozmiar, do którego przeskalować obraz
+        
+    Returns:
+        tuple: (liczba_wykrytych_obiektów, przetworzony_obraz, mapa_gęstości) z lepszej metody
+    """
+    # Dwa zestawy parametrów do wypróbowania
+    params_method_1 = (1.5, (0.55, 1.35), 0.5)  # (sigma, zakres_okrągłości, współczynnik_progu)
     params_method_2 = (2.75, (0.65, 1.35), 0.5)
 
+    # Przetworzenie obrazu obiema metodami
     marked_1, img_1, map_1 = process_image(image_path, *params_method_1, resize_shape=resize_shape)
     marked_2, img_2, map_2 = process_image(image_path, *params_method_2, resize_shape=resize_shape)
 
+    # Wybór metody, która wykryła więcej obiektów
     if marked_1 >= marked_2:
         return marked_1, img_1, map_1
     else:
         return marked_2, img_2, map_2
-
+    
+#######################
 # Zapis wyniku
+#######################
 def save_result(image, image_path):
+    """
+    Zapisuje przetworzony obraz z wykrytymi obiektami.
+    
+    Args:
+        image (numpy.ndarray): Przetworzony obraz z zaznaczonymi obiektami
+        image_path (str): Ścieżka do oryginalnego obrazu
+        
+    Returns:
+        str: Ścieżka do zapisanego pliku wynikowego
+    """
     result_image_path = os.path.join(output_folder, f"{os.path.splitext(os.path.basename(image_path))[0]}_detected.jpg")
     image_cv_resized = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     if image_cv_resized.shape[0] < 1024 or image_cv_resized.shape[1] < 1024:
@@ -125,7 +234,9 @@ def save_result(image, image_path):
     cv2.imwrite(result_image_path, image_cv_resized)
     return result_image_path
 
+#######################
 # Główne wywołanie
+#######################
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Użycie: python test_model.py <ścieżka_do_obrazu> <ścieżka_do_modelu>")
@@ -140,7 +251,7 @@ if __name__ == "__main__":
     # Przetwarzanie w domyślnej rozdzielczości
     detections_count, best_image, density_map = process_and_choose_best(image_path, resize_shape=(1024, 1024))
 
-    # Dodatkowe przetwarzanie w zależności od liczby wykryć
+    # Adaptacyjna strategia przetwarzania w zależności od liczby wykrytych obiektów
     if detections_count < 100:
         print("Liczba wykrytych obiektów < 100. Przetwarzanie ponownie w 512x512...")
         detections_count, best_image, density_map = process_and_choose_best(image_path, resize_shape=(512, 512))

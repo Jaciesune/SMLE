@@ -1,20 +1,45 @@
+"""
+Główny moduł startowy aplikacji SMLE (System Maszynowego Liczenia Elementów).
+
+Plik stanowi punkt wejściowy aplikacji, inicjalizuje interfejs użytkownika,
+zarządza procesem uwierzytelniania oraz uruchamia główne okno programu
+po pomyślnym zalogowaniu użytkownika.
+"""
+
+#######################
+# Importy bibliotek
+#######################
 import sys
 import os
 import logging
+from PyQt5 import QtWidgets, QtGui
 
-# Dodajemy katalog nadrzędny (SMLE) do sys.path
+#######################
+# Dodanie katalogu nadrzędnego do ścieżki importu
+#######################
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from PyQt5 import QtWidgets, QtGui
+#######################
+# Importy lokalne
+#######################
 from login_dialog import LoginDialog
 from main_window import MainWindow
 from utils import load_stylesheet  # Załadowanie funkcji z utils
 
+#######################
 # Konfiguracja logowania
+#######################
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 def main():
+    """
+    Główna funkcja uruchamiająca aplikację.
+    
+    Inicjalizuje aplikację PyQt, konfiguruje style i zasoby,
+    uruchamia proces uwierzytelniania, a następnie tworzy
+    i wyświetla główne okno aplikacji.
+    """
     app = QtWidgets.QApplication(sys.argv)
 
     # Ustawienie nazwy aplikacji
@@ -43,7 +68,6 @@ def main():
         logger.error("[ERROR] Nie udało się wczytać login_style.css")
         sys.exit(1)
     logger.debug("[DEBUG] Załadowano login_style.css")
-
 
     # Połącz style (login_stylesheet nadpisze global_stylesheet w razie konfliktów)
     combined_stylesheet = global_stylesheet + "\n" + login_stylesheet

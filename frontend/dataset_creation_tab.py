@@ -1,15 +1,43 @@
-from PyQt5 import QtWidgets, QtCore
+"""
+Implementacja zakładki tworzenia i zarządzania datasetami w aplikacji SMLE.
+
+Moduł dostarcza interfejs użytkownika do tworzenia zbiorów danych treningowych,
+walidacyjnych i testowych z obrazów i adnotacji, zarządzania istniejącymi datasetami
+oraz pobierania przygotowanych zestawów danych.
+"""
+#######################
+# Importy bibliotek
+#######################
+from PyQt5 import QtWidgets
 import requests
 import os
 import logging
 import random
 
+#######################
 # Konfiguracja logowania
+#######################
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DatasetCreationTab(QtWidgets.QWidget):
+    """
+    Zakładka tworzenia i zarządzania datasetami treningowymi.
+    
+    Udostępnia funkcje tworzenia nowych datasetów, przeglądania istniejących,
+    zwiększania datasetów o nowe obrazy oraz pobierania przygotowanych danych.
+    Automatycznie dzieli obrazy na zbiory treningowe, walidacyjne i testowe
+    zgodnie z ustawionymi proporcjami.
+    """
     def __init__(self, user_role, username, api_url):
+        """
+        Inicjalizuje zakładkę tworzenia datasetów.
+        
+        Args:
+            user_role (str): Rola użytkownika określająca dostępne funkcje
+            username (str): Nazwa użytkownika korzystającego z aplikacji
+            api_url (str): Adres URL API backendu
+        """
         super().__init__()
         self.user_role = user_role
         self.username = username
@@ -22,6 +50,17 @@ class DatasetCreationTab(QtWidgets.QWidget):
         self.init_ui()
 
     def init_ui(self):
+        """
+        Tworzy i konfiguruje elementy interfejsu użytkownika zakładki.
+        
+        Komponenty:
+        - Panel tworzenia nowego datasetu z ustawieniami proporcji podziału
+        - Lista wyboru istniejących datasetów
+        - Przyciski zarządzania datasetami (zwiększanie, usuwanie)
+        - Trzy kolumny wyświetlające zawartość zbiorów train, val i test
+        - Przyciski pobierania poszczególnych części lub całego datasetu
+        - Panel logów pokazujący historię operacji
+        """
         layout = QtWidgets.QVBoxLayout()
 
         # Sekcja tworzenia nowego datasetu
@@ -133,7 +172,13 @@ class DatasetCreationTab(QtWidgets.QWidget):
         self.update_dataset_list()
 
     def validate_ratios(self):
-        """Sprawdza, czy proporcje są poprawne i sumują się do 100%."""
+        """
+        Sprawdza, czy proporcje podziału są poprawne i sumują się do 100%.
+        
+        Returns:
+            tuple: (bool, str/tuple) - (True, (train_ratio, val_ratio, test_ratio)) 
+                  jeśli poprawne, (False, komunikat_błędu) jeśli niepoprawne
+        """
         try:
             train_ratio = float(self.train_ratio_input.text())
             val_ratio = float(self.val_ratio_input.text())
@@ -148,6 +193,12 @@ class DatasetCreationTab(QtWidgets.QWidget):
             return False, "Proporcje muszą być liczbami!"
 
     def update_dataset_list(self):
+        """
+        Pobiera listę dostępnych datasetów z API backendu i wypełnia nimi ComboBox.
+        
+        Aktualizuje listę rozwijalną datasetów i automatycznie ładuje pierwszy dostępny
+        dataset, jeśli istnieje.
+        """
         try:
             response = requests.get(f"{self.api_url}/list_datasets/{self.username}")
             response.raise_for_status()
@@ -168,6 +219,17 @@ class DatasetCreationTab(QtWidgets.QWidget):
             self.log_text.append(f"Błąd podczas pobierania listy datasetów: {e}")
 
     def create_new_dataset(self):
+        """
+        Tworzy nowy dataset na podstawie wprowadzonych danych i wybranych plików.
+        
+        Proces:
+        1. Pobiera i waliduje nazwę datasetu oraz proporcje podziału
+        2. Pozwala użytkownikowi wybrać folder z obrazami i adnotacjami
+        3. Identyfikuje pary obraz-adnotacja (JPG+JSON)
+        4. Dzieli dane na podzbiory (train/val/test) zgodnie z proporcjami
+        5. Przesyła dane do API backendu
+        6. Aktualizuje interfejs po utworzeniu datasetu
+        """
         dataset_name = self.new_dataset_input.text().strip()
         if not dataset_name:
             self.log_text.append("Proszę wpisać nazwę datasetu!")
@@ -257,6 +319,15 @@ class DatasetCreationTab(QtWidgets.QWidget):
                 file_tuple[1].close()
 
     def load_dataset(self, dataset_name):
+        """
+        Wczytuje informacje o wybranym datasecie z API backendu.
+        
+        Aktualizuje interfejs wyświetlając zawartość każdego z podzbiorów (train/val/test)
+        oraz włącza/wyłącza przyciski funkcji w zależności od dostępności datasetu.
+        
+        Args:
+            dataset_name (str): Nazwa datasetu do wczytania
+        """
         self.dataset_name = dataset_name if dataset_name != "Wybierz dataset" else None
         self.increase_button.setEnabled(self.dataset_name is not None)
         self.delete_button.setEnabled(self.dataset_name is not None)
@@ -287,6 +358,12 @@ class DatasetCreationTab(QtWidgets.QWidget):
                 self.log_text.append(f"Błąd podczas ładowania datasetu: {e}")
 
     def delete_dataset(self):
+        """
+        Usuwa wybrany dataset po potwierdzeniu przez użytkownika.
+        
+        Wysyła żądanie usunięcia do API backendu, a następnie odświeża listę dostępnych datasetów.
+        Przed usunięciem wyświetla dialog potwierdzenia.
+        """
         if not self.dataset_name or self.dataset_name == "Wybierz dataset":
             self.log_text.append("Proszę wybrać dataset do usunięcia!")
             return
@@ -310,6 +387,11 @@ class DatasetCreationTab(QtWidgets.QWidget):
                 self.log_text.append(f"Błąd podczas usuwania datasetu: {e}")
 
     def clear_columns(self):
+        """
+        Czyści zawartość wszystkich trzech kolumn wyświetlających obrazy.
+        
+        Usuwa wszystkie widżety z układów kolumn reprezentujących podzbiory train/val/test.
+        """
         for layout in [self.train_column, self.val_column, self.test_column]:
             while layout.count():
                 item = layout.takeAt(0)
@@ -318,6 +400,15 @@ class DatasetCreationTab(QtWidgets.QWidget):
                     widget.deleteLater()
 
     def update_column(self, subset, count, images, layout):
+        """
+        Aktualizuje zawartość kolumny wyświetlającej obrazy z wybranego podzbioru.
+        
+        Args:
+            subset (str): Nazwa podzbioru ('train', 'val' lub 'test')
+            count (int): Liczba obrazów w podzbiorze
+            images (list): Lista nazw plików obrazów
+            layout (QLayout): Układ kolumny do zaktualizowania
+        """
         layout.addWidget(QtWidgets.QLabel(f"{subset.capitalize()} ({count} obrazów)"))
         if count > 0:
             for img in images:
@@ -325,6 +416,13 @@ class DatasetCreationTab(QtWidgets.QWidget):
         layout.addStretch()
 
     def increase_dataset(self):
+        """
+        Zwiększa istniejący dataset o nowe obrazy i adnotacje.
+        
+        Pozwala użytkownikowi wybrać dodatkowy folder z danymi, które zostaną
+        dodane do istniejącego datasetu z zachowaniem proporcji podziału.
+        Przed dodaniem sprawdza, czy obrazy nie są już częścią datasetu.
+        """
         if not self.dataset_name:
             self.log_text.append("Proszę wybrać dataset!")
             return
@@ -421,6 +519,15 @@ class DatasetCreationTab(QtWidgets.QWidget):
                 file_tuple[1].close()
 
     def download_subset(self, subset):
+        """
+        Pobiera wybrany podzbiór datasetu (train, val lub test) jako archiwum ZIP.
+        
+        Pozwala użytkownikowi wybrać lokalizację zapisu archiwum.
+        Po pobraniu usuwa tymczasowe pliki z serwera.
+        
+        Args:
+            subset (str): Nazwa podzbioru do pobrania ('train', 'val' lub 'test')
+        """
         if not self.dataset_name:
             self.log_text.append("Proszę wybrać dataset!")
             return
@@ -446,6 +553,12 @@ class DatasetCreationTab(QtWidgets.QWidget):
             self.log_text.append(f"Błąd podczas pobierania {subset}: {e}")
 
     def download_all(self):
+        """
+        Pobiera cały dataset (wszystkie podzbiory) jako jedno archiwum ZIP.
+        
+        Pozwala użytkownikowi wybrać lokalizację zapisu archiwum.
+        Po pobraniu usuwa tymczasowe pliki z serwera.
+        """
         if not self.dataset_name:
             self.log_text.append("Proszę wybrać dataset!")
             return

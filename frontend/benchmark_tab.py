@@ -1,3 +1,14 @@
+"""
+Implementacja zakładki Benchmark w aplikacji SMLE.
+
+Moduł dostarcza narzędzia do oceny i porównywania wydajności modeli uczenia maszynowego
+na zbiorach testowych. Umożliwia uruchamianie benchmarków i prezentację wyników
+w formie czytelnych raportów, ze szczególnym uwzględnieniem metryk MAE i skuteczności.
+"""
+
+#######################
+# Importy bibliotek
+#######################
 import requests
 import os
 import json
@@ -5,12 +16,26 @@ import logging
 import winsound
 from PyQt5 import QtWidgets, QtCore
 
+#######################
 # Konfiguracja logowania
+#######################
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class LoadingDialog(QtWidgets.QDialog):
+    """
+    Okno dialogowe z animacją wyświetlane podczas wykonywania benchmarku.
+    
+    Zawiera animowany tekst z kropkami, który informuje użytkownika
+    o trwającym procesie benchmarkingu modelu.
+    """
     def __init__(self, parent):
+        """
+        Inicjalizuje okno dialogowe.
+        Ustawia styl, rozmiar i animację kropek.
+        Args:
+            parent (QWidget): Rodzic okna dialogowego.
+        """
         super().__init__(parent)
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
         self.setObjectName("loading_dialog")
@@ -44,13 +69,20 @@ class LoadingDialog(QtWidgets.QDialog):
         self.timer.start(500)  # Zmiana co 500 ms
 
     def update_dots(self):
+        """Aktualizuje animację kropek w etykiecie dialogu."""
         self.dot_count = (self.dot_count % 3) + 1
         self.dots_label.setText("Uruchamianie benchmarku" + "." * self.dot_count)
 
     def stop(self):
+        """Zatrzymuje timer animacji."""
         self.timer.stop()
 
 class ProgressThread(QtCore.QThread):
+    """
+    Wątek odpowiedzialny za aktualizację animacji dialogu ładowania.
+    
+    Emituje sygnał stop_progress po zakończeniu pracy.
+    """
     stop_progress = QtCore.pyqtSignal()
 
     def __init__(self, dialog):
@@ -59,19 +91,39 @@ class ProgressThread(QtCore.QThread):
         self.running = True
 
     def run(self):
+        """Główna pętla wątku, działa dopóki flaga running jest True."""
         while self.running:
             self.msleep(100)
 
     def stop(self):
+        """Zatrzymuje wątek i emituje sygnał zatrzymania."""
         self.running = False
         self.dialog.stop()
         self.stop_progress.emit()
 
 class BenchmarkThread(QtCore.QThread):
+    """
+    Wątek wykonujący operację benchmarku w tle.
+    
+    Komunikuje się z API backendu, przesyła obrazy i adnotacje do analizy,
+    a następnie odbiera i przetwarza wyniki benchmarku.
+    
+    Sygnały:
+        finished: Emitowany po zakończeniu benchmarku z wynikiem.
+        error: Emitowany w przypadku błędu z komunikatem.
+    """
     finished = QtCore.pyqtSignal(dict)
     error = QtCore.pyqtSignal(str)
 
     def __init__(self, api_url, selected_folder, selected_model, user_role):
+        """
+        Inicjalizuje wątek benchmarku.
+        Args:
+            api_url (str): Adres URL API backendu.
+            selected_folder (str): Ścieżka do folderu z danymi testowymi.
+            selected_model (dict): Wybrany model do benchmarku.
+            user_role (str): Rola użytkownika (admin lub user).
+        """
         super().__init__()
         self.api_url = api_url
         self.selected_folder = selected_folder
@@ -80,6 +132,12 @@ class BenchmarkThread(QtCore.QThread):
         self.files = []
 
     def run(self):
+        """
+        Główna metoda wątku wykonująca benchmark.
+        
+        Przygotowuje pliki do przesłania, wysyła je do API backendu
+        i przetwarza otrzymane odpowiedzi.
+        """
         try:
             # Przygotuj pliki do przesłania
             image_files = []
@@ -136,7 +194,22 @@ class BenchmarkThread(QtCore.QThread):
                 logger.debug(f"[DEBUG] Zamknięto plik: {filename}")
 
 class BenchmarkTab(QtWidgets.QWidget):
+    """
+    Główny komponent zakładki Benchmark w aplikacji SMLE.
+    
+    Umożliwia uruchamianie benchmarków modeli na wybranych zbiorach danych,
+    wyświetlanie wyników benchmarków oraz porównywanie wydajności różnych modeli.
+    Funkcjonalność różni się w zależności od roli użytkownika - administratorzy
+    mogą uruchamiać nowe benchmarki, a wszyscy użytkownicy mogą przeglądać wyniki.
+    """
     def __init__(self, user_role, api_url):
+        """
+        Inicjalizuje zakładkę Benchmark.
+        
+        Args:
+            user_role (str): Rola użytkownika, określająca dostępne funkcje.
+            api_url (str): Adres URL API backendu.
+        """
         super().__init__()
         self.user_role = user_role
         self.api_url = api_url
@@ -147,6 +220,14 @@ class BenchmarkTab(QtWidgets.QWidget):
         self.init_ui()
 
     def init_ui(self):
+        """
+        Tworzy i konfiguruje elementy interfejsu użytkownika zakładki.
+        
+        Komponenty:
+        - Panel sterowania benchmarkiem (tylko dla admina)
+        - Przycisk porównania modeli
+        - Obszar wyświetlania wyników benchmarku
+        """
         self.layout = QtWidgets.QVBoxLayout()
 
         # Panel sterowania (tylko dla admina)
@@ -188,6 +269,12 @@ class BenchmarkTab(QtWidgets.QWidget):
         self.update_benchmark_results()
 
     def select_folder(self):
+        """
+        Otwiera dialog wyboru folderu dla danych testowych.
+        
+        Folder powinien zawierać obrazy (.jpg, .png) oraz odpowiadające 
+        im pliki adnotacji (.json).
+        """
         folder_path = QtWidgets.QFileDialog.getExistingDirectory(self, "Wybierz folder z obrazami i annotacjami")
         if folder_path:
             self.selected_folder = folder_path
@@ -199,6 +286,11 @@ class BenchmarkTab(QtWidgets.QWidget):
             logger.debug("[DEBUG] Nie wybrano folderu")
 
     def load_models(self):
+        """
+        Pobiera listę dostępnych modeli z API backendu i wypełnia nimi ComboBox.
+        
+        W przypadku błędu lub braku dostępnych modeli wyświetla odpowiedni komunikat.
+        """
         logger.debug("[DEBUG] Ładowanie modeli do QComboBox")
         try:
             response = requests.get(f"{self.api_url}/models")
@@ -221,6 +313,12 @@ class BenchmarkTab(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd podczas ładowania modeli: {e}")
 
     def run_benchmark(self):
+        """
+        Uruchamia benchmark wybranego modelu na wskazanym folderze z danymi.
+        
+        Proces benchmarku wykonuje się w tle, a postęp jest sygnalizowany
+        przez dialog ładowania z animacją. Po zakończeniu aktualizowane są wyniki.
+        """
         if not self.selected_folder:
             QtWidgets.QMessageBox.warning(self, "Błąd", "Nie wybrano folderu z danymi!")
             return
@@ -255,6 +353,15 @@ class BenchmarkTab(QtWidgets.QWidget):
         self.benchmark_thread.start()
 
     def on_benchmark_finished(self, result):
+        """
+        Obsługuje zakończenie benchmarku.
+        
+        Zamyka dialog ładowania, odtwarza dźwięk powiadomienia,
+        aktualizuje wyniki i wyświetla komunikat o powodzeniu.
+        
+        Args:
+            result (dict): Wynik benchmarku zawierający status i odpowiedź.
+        """
         logger.debug("Benchmark zakończony")
         winsound.PlaySound("SystemNotification", winsound.SND_ALIAS)
         self.loading_dialog.close()
@@ -267,6 +374,14 @@ class BenchmarkTab(QtWidgets.QWidget):
         QtWidgets.QMessageBox.information(self, "Sukces", "Benchmark uruchomiony pomyślnie!")
 
     def on_benchmark_error(self, error_message):
+        """
+        Obsługuje błąd podczas benchmarku.
+        
+        Zamyka dialog ładowania i wyświetla komunikat o błędzie.
+        
+        Args:
+            error_message (str): Opis błędu do wyświetlenia użytkownikowi.
+        """
         logger.error(f"Błąd podczas benchmarku: {error_message}")
         self.loading_dialog.close()
 
@@ -277,6 +392,12 @@ class BenchmarkTab(QtWidgets.QWidget):
         QtWidgets.QMessageBox.critical(self, "Błąd", f"Błąd podczas uruchamiania benchmarku: {error_message}")
 
     def update_benchmark_results(self):
+        """
+        Pobiera i wyświetla wyniki benchmarków z API backendu.
+        
+        Formatuje dane w czytelny sposób, wyświetlając historię wszystkich
+        przeprowadzonych benchmarków wraz z ich kluczowymi metrykami.
+        """
         try:
             headers = {"X-User-Role": self.user_role}
             response = requests.get(f"{self.api_url}/get_benchmark_results", headers=headers)
@@ -310,6 +431,14 @@ class BenchmarkTab(QtWidgets.QWidget):
             self.benchmark_results.setText("Brak wyników benchmarku.")
 
     def compare_models(self):
+        """
+        Porównuje wydajność różnych modeli na dostępnych zbiorach danych.
+        
+        Pobiera dane porównawcze z API i wyświetla je w dialogu, uwzględniając:
+        - Wyniki dla poszczególnych zestawów danych
+        - Najlepszy model dla każdego zestawu danych
+        - Ogólnie najlepszy model według skuteczności
+        """
         try:
             response = requests.get(f"{self.api_url}/compare_models")
             logger.debug(f"[DEBUG] Odpowiedź z /compare_models: status={response.status_code}, treść={response.text}")

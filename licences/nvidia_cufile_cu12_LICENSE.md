@@ -1,0 +1,11 @@
+# License for nvidia-cufile-cu12
+
+## Library Information
+- **Name**: nvidia-cufile-cu12
+- **Version**: 1.11.1.6
+- **License**: NVIDIA Proprietary License
+- **License Check Date**: 2025-05-15
+- **Source**: https://pypi.org/project/nvidia-cufile-cu12/
+
+## License Text
+The full text of the NVIDIA Proprietary License can be found at the official project repository or website for nvidia-cufile-cu12.

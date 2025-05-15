@@ -8,4 +8,9 @@
 - **Source**: https://pypi.org/project/mysql-connector-python/
 
 ## License Text
-The full text of the GNU General Public License (GPL) can be found at the official project repository or website for mysql-connector-python.
+GNU General Public License
+Version 2, June 1991
+
+[Full text of the GPL can be found at: https://www.gnu.org/licenses/gpl-2.0.txt]
+
+Note: The GNU General Public License is a copyleft license that requires derivative works to be distributed under the same license. The full text is not included here due to its length. Please review the official GPL text for complete terms and conditions.

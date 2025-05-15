@@ -8,4 +8,10 @@
 - **Source**: https://pypi.org/project/nvidia-cufile-cu12/
 
 ## License Text
-The full text of the NVIDIA Proprietary License can be found at the official project repository or website for nvidia-cufile-cu12.
+NVIDIA Proprietary License
+
+This software is licensed under the NVIDIA Software License Agreement.
+The full text of the license can be found at:
+https://www.nvidia.com/en-us/drivers/nvidia-license/
+
+Please refer to the NVIDIA website for the specific terms and conditions. The license may include restrictions on redistribution and use, which must be reviewed before using the software in commercial applications.

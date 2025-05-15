@@ -8,4 +8,12 @@
 - **Source**: https://pypi.org/project/simsimd/
 
 ## License Text
-The full text of the Apache Software License can be found at the official project repository or website for simsimd.
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+[Full text of the Apache License can be found at: http://www.apache.org/licenses/LICENSE-2.0]
+
+Note: Due to the length of the Apache License, the full text is not included here. Please refer to the official Apache website for the complete license terms.

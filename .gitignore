@@ -90,3 +90,7 @@ node_modules
 # 🗂 Pliki i foldery specyficzne dla Benchmarka
 backend/benchmark_results.json
 backend/benchmark_history.json
+
+
+/package-lock.json
+/package.json

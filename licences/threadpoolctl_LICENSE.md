@@ -5,7 +5,8 @@
 - **Version**: 3.6.0
 - **License**: BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/threadpoolctl/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/threadpoolctl/
 
 ## License Text
 BSD 3-Clause License

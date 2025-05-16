@@ -5,7 +5,8 @@
 - **Version**: 3.1.6
 - **License**: BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/Jinja2/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/Jinja2/
 
 ## License Text
 BSD 3-Clause License

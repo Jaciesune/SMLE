@@ -2,10 +2,11 @@
 
 ## Library Information
 - **Name**: albumentations
-- **Version**: 2.0.6
+- **Version**: 2.0.5
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/albumentations/
+- **Source**: Frontend
+- **Project Source**: https://pypi.org/project/albumentations/
 
 ## License Text
 MIT License

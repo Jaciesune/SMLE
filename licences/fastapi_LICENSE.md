@@ -5,7 +5,8 @@
 - **Version**: 0.115.12
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/fastapi/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/fastapi/
 
 ## License Text
 MIT License

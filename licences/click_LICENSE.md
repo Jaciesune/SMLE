@@ -5,7 +5,8 @@
 - **Version**: 8.1.8
 - **License**: BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/click/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/click/
 
 ## License Text
 BSD 3-Clause License

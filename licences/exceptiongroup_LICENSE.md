@@ -5,7 +5,8 @@
 - **Version**: 1.2.2
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/exceptiongroup/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/exceptiongroup/
 
 ## License Text
 MIT License

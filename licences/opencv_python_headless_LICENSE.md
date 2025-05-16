@@ -5,7 +5,8 @@
 - **Version**: 4.11.0.86
 - **License**: Apache Software License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/opencv-python-headless/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/opencv-python-headless/
 
 ## License Text
 Apache License

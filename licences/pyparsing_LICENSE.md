@@ -5,7 +5,8 @@
 - **Version**: 3.2.3
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/pyparsing/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/pyparsing/
 
 ## License Text
 MIT License

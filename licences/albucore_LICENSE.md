@@ -2,10 +2,11 @@
 
 ## Library Information
 - **Name**: albucore
-- **Version**: 0.0.24
+- **Version**: 0.0.23
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/albucore/
+- **Source**: Frontend
+- **Project Source**: https://pypi.org/project/albucore/
 
 ## License Text
 MIT License

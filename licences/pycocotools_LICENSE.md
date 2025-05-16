@@ -5,7 +5,8 @@
 - **Version**: 2.0.8
 - **License**: FreeBSD
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/pycocotools/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/pycocotools/
 
 ## License Text
 FreeBSD License

@@ -5,7 +5,8 @@
 - **Version**: 11.3.0.4
 - **License**: NVIDIA Proprietary License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/nvidia-cufft-cu12/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/nvidia-cufft-cu12/
 
 ## License Text
 NVIDIA Proprietary License

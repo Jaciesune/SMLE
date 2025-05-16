@@ -5,7 +5,8 @@
 - **Version**: 3.12.5
 - **License**: Apache Software License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/stringzilla/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/stringzilla/
 
 ## License Text
 Apache License

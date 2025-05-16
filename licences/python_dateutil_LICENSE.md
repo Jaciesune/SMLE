@@ -5,7 +5,8 @@
 - **Version**: 2.9.0.post0
 - **License**: Apache Software License; BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/python-dateutil/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/python-dateutil/
 
 ## License Text
 Apache Software License; BSD License

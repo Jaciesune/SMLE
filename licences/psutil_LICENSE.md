@@ -5,7 +5,8 @@
 - **Version**: 7.0.0
 - **License**: BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/psutil/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/psutil/
 
 ## License Text
 BSD 3-Clause License

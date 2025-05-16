@@ -5,7 +5,8 @@
 - **Version**: 3.3.0
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/triton/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/triton/
 
 ## License Text
 MIT License

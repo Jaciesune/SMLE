@@ -5,7 +5,8 @@
 - **Version**: 1.3.1
 - **License**: Apache Software License; MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/sniffio/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/sniffio/
 
 ## License Text
 Apache Software License; MIT License

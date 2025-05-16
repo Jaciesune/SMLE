@@ -5,7 +5,8 @@
 - **Version**: 3.2.1
 - **License**: MIT AND Python-2.0
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/greenlet/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/greenlet/
 
 ## License Text
 MIT License; Python-2.0 License

@@ -5,7 +5,8 @@
 - **Version**: 1.4.2
 - **License**: BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/joblib/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/joblib/
 
 ## License Text
 BSD 3-Clause License

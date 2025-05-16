@@ -5,7 +5,8 @@
 - **Version**: 3.10.1
 - **License**: Python Software Foundation License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/matplotlib/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/matplotlib/
 
 ## License Text
 Python Software Foundation License

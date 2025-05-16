@@ -5,7 +5,8 @@
 - **Version**: 1.17.0
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/six/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/six/
 
 ## License Text
 MIT License

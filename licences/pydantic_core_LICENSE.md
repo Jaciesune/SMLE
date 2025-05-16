@@ -2,10 +2,11 @@
 
 ## Library Information
 - **Name**: pydantic_core
-- **Version**: 2.33.2
+- **Version**: 2.33.1
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/pydantic_core/
+- **Source**: Frontend
+- **Project Source**: https://pypi.org/project/pydantic_core/
 
 ## License Text
 MIT License

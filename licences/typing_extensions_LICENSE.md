@@ -5,7 +5,8 @@
 - **Version**: 4.13.2
 - **License**: Python Software Foundation License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/typing_extensions/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/typing_extensions/
 
 ## License Text
 Python Software Foundation License

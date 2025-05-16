@@ -5,7 +5,8 @@
 - **Version**: 2.0.40
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/SQLAlchemy/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/SQLAlchemy/
 
 ## License Text
 MIT License

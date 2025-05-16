@@ -2,10 +2,11 @@
 
 ## Library Information
 - **Name**: pydantic
-- **Version**: 2.11.4
+- **Version**: 2.11.3
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/pydantic/
+- **Source**: Frontend
+- **Project Source**: https://pypi.org/project/pydantic/
 
 ## License Text
 MIT License

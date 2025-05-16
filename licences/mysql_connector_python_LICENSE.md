@@ -5,7 +5,8 @@
 - **Version**: 9.3.0
 - **License**: GNU General Public License (GPL)
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/mysql-connector-python/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/mysql-connector-python/
 
 ## License Text
 GNU General Public License

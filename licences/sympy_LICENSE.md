@@ -5,7 +5,8 @@
 - **Version**: 1.14.0
 - **License**: BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/sympy/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/sympy/
 
 ## License Text
 BSD 3-Clause License

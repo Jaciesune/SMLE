@@ -2,10 +2,11 @@
 
 ## Library Information
 - **Name**: numpy
-- **Version**: 2.2.5
+- **Version**: 2.2.4
 - **License**: BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/numpy/
+- **Source**: Frontend
+- **Project Source**: https://pypi.org/project/numpy/
 
 ## License Text
 BSD 3-Clause License

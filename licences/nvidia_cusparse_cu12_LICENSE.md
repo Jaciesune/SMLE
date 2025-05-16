@@ -5,7 +5,8 @@
 - **Version**: 12.5.4.2
 - **License**: NVIDIA Proprietary License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/nvidia-cusparse-cu12/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/nvidia-cusparse-cu12/
 
 ## License Text
 NVIDIA Proprietary License

@@ -5,7 +5,8 @@
 - **Version**: 4.57.0
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/fonttools/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/fonttools/
 
 ## License Text
 MIT License

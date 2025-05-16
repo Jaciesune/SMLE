@@ -5,7 +5,8 @@
 - **Version**: 0.4.0
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/typing-inspection/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/typing-inspection/
 
 ## License Text
 MIT License

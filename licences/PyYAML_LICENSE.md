@@ -5,7 +5,8 @@
 - **Version**: 6.0.2
 - **License**: MIT License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/PyYAML/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/PyYAML/
 
 ## License Text
 MIT License

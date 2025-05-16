@@ -5,7 +5,8 @@
 - **Version**: 6.2.1
 - **License**: Apache Software License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/simsimd/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/simsimd/
 
 ## License Text
 Apache License

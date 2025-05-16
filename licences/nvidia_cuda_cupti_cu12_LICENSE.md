@@ -5,7 +5,8 @@
 - **Version**: 12.6.80
 - **License**: NVIDIA Proprietary License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/nvidia-cuda-cupti-cu12/
+- **Source**: Backend
+- **Project Source**: https://pypi.org/project/nvidia-cuda-cupti-cu12/
 
 ## License Text
 NVIDIA Proprietary License

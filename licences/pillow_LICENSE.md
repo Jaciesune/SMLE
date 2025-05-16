@@ -5,7 +5,8 @@
 - **Version**: 11.2.1
 - **License**: HPND License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/pillow/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/pillow/
 
 ## License Text
 Historical Permission Notice and Disclaimer (HPND)

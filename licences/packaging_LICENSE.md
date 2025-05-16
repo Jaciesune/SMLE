@@ -5,7 +5,8 @@
 - **Version**: 25.0
 - **License**: Apache Software License; BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/packaging/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/packaging/
 
 ## License Text
 Apache Software License; BSD License

@@ -5,7 +5,8 @@
 - **Version**: 1.4.8
 - **License**: BSD License
 - **License Check Date**: 2025-05-15
-- **Source**: https://pypi.org/project/kiwisolver/
+- **Source**: Backend, Frontend
+- **Project Source**: https://pypi.org/project/kiwisolver/
 
 ## License Text
 BSD 3-Clause License

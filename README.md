@@ -2,7 +2,7 @@
 
 ## Opis projektu
 
-**SMLE (System Maszynowego Liczenia Elementów)** to zaawansowana aplikacja do automatycznego zliczania i analizy elementów na obrazach przy użyciu technik widzenia komputerowego i uczenia maszynowego. Projekt integruje backend oparty na modelach głębokiego uczenia (Mask R-CNN, Faster R-CNN, MRCNN) z intuicyjnym interfejsem użytkownika, umożliwiającym zliczanie obiektów, trening modeli, oznaczanie danych, zarządzanie zbiorami danych, benchmarking oraz administrację użytkownikami. Wykorzystuje technologie takie jak Python, PyTorch, OpenCV, Docker i Docker Compose, zapewniając skalowalność i łatwość wdrożenia. Aplikacja jest przeznaczona do zastosowań w przemyśle, logistyce czy badaniach naukowych, gdzie wymagana jest precyzyjna detekcja i analiza obiektów na obrazach.
+**SMLE (System Maszynowego Liczenia Elementów)** to zaawansowana aplikacja do automatycznego zliczania i analizy elementów na obrazach przy użyciu technik widzenia komputerowego i uczenia maszynowego. Projekt integruje backend oparty na modelach głębokiego uczenia (Mask R-CNN, Faster R-CNN, MCNN) z intuicyjnym interfejsem użytkownika, umożliwiającym zliczanie obiektów, trening modeli, oznaczanie danych, zarządzanie zbiorami danych, benchmarking oraz administrację użytkownikami. Wykorzystuje technologie takie jak Python, PyTorch, OpenCV, Docker i Docker Compose, zapewniając skalowalność i łatwość wdrożenia. Aplikacja jest przeznaczona do zastosowań w przemyśle, logistyce czy badaniach naukowych, gdzie wymagana jest precyzyjna detekcja i analiza obiektów na obrazach.
 
 ## Uruchomienie projektu
 
@@ -35,7 +35,7 @@
 - **Docker Compose**: Orkiestracja wielu kontenerów.
 - **Mask R-CNN**: Model głębokiego uczenia do segmentacji instancji.
 - **Faster R-CNN**: Model do wykrywania obiektów.
-- **MRCNN**: Rozszerzenie Mask R-CNN dla zaawansowanej detekcji.
+- **MCNN**: Model do wykrywania dużej ilości obiektów z mapą gęstości.
 - **PyTorch**: Framework do uczenia maszynowego.
 - **OpenCV**: Biblioteka do przetwarzania obrazów.
 

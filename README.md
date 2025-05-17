@@ -63,7 +63,7 @@ Sekcja zarządzania modelami wyświetla listę dostępnych modeli (np. Mask R-CN
 - Narzędzie pozwala na wybór wcześniej wytrenowanego modelu Mask R-CNN, którego zadaniem jest wstępne oznaczenie zdjęć co przyspiesza proces oznaczania.
 
 ![](docs/screenshots/oznaczanie.png)
-- Widok skrótów klawiszowych dla narzędzia do oznaczania, ułatwiających szybkie wykonywanie operacji, takich jak przełączanie klas, zapisywanie etykiet czy nawigacja między obrazami.
+- Widok skrótów klawiszowych dla narzędzia do oznaczania, ułatwiających szybkie wykonywanie operacji.
 
 ![](docs/screenshots/oznaczanie_skroty.png)
 
@@ -75,13 +75,16 @@ Moduł tworzenia zbiorów danych pozwala na organizację i walidację oznaczonyc
 ## 6. Benchmark
 
 - Ekran benchmarku prezentuje wyniki testów wydajności modeli na wybranym zbiorze danych, w tym metryki takie jak MAE oraz skuteczność.
-- Porównanie wydajności różnych modeli (np. Mask R-CNN vs. Faster R-CNN) w formie listy z podziałem na zestaw danch, umożliwiające wybór optymalnego modelu dla konkretnego zastosowania oraz najlepszego modelu z całego zestawienia.
 
 ![](docs/screenshots/benchmark.png)
+
+- Porównanie wydajności różnych modeli (np. Mask R-CNN vs. Faster R-CNN) w formie listy z podziałem na zestaw danch, umożliwiające wybór optymalnego modelu dla konkretnego zastosowania oraz najlepszego modelu z całego zestawienia.
+
 ![](docs/screenshots/benchmark_porownanie.png)
 
 ## 7. Użytkownicy
 Panel administracyjny do zarządzania użytkownikami aplikacji. Pozwala na dodawanie i podgląd kont.
+
 ![](docs/screenshots/uzytkownicy.png)
 
 

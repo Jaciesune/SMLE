@@ -65,7 +65,9 @@ Sekcja zarządzania modelami wyświetla listę dostępnych modeli (np. Mask R-CN
 ![](docs/screenshots/oznaczanie.png)
 - Widok skrótów klawiszowych dla narzędzia do oznaczania, ułatwiających szybkie wykonywanie operacji.
 
-![](docs/screenshots/oznaczanie_skroty.png)
+<div align="center">
+  <img src="docs/screenshots/oznaczanie_skroty.png" alt="Oznaczanie skróty" height="400" style="display: block; margin: 0 auto;"/>
+</div>
 
 ## 5. Tworzenie zbiorów danych
 Moduł tworzenia zbiorów danych pozwala na organizację i walidację oznaczonych obrazów w zestawy treningowe, walidacyjne i testowe. Użytkownik może zarządzać metadanymi zbiorów i eksportować je w formatach zgodnych z PyTorch.
@@ -104,12 +106,13 @@ Aplikacja mobilna napisana w React Native, zaprojektowana do analizy zdjęć w c
 
 Ekran *Home* pozwala użytkownikowi wybrać zdjęcia do analizy, albogrytm oraz model. Po lewej stronie widoczne jest zdjęcie przed analizą, a po prawej – wynik analizy wykonanej przez serwer FastAPI.
 
-<table>
+<table align="center">
   <tr>
-    <td><img src="docs/screenshots/mobile_zliczanie_przed.jpg" alt="Zliczanie przed" width="300"/></td>
-    <td><img src="docs/screenshots/mobile_zliczanie_po.jpg" alt="Zliczanie po" width="300"/></td>
+    <td><img src="docs/screenshots/mobile_zliczanie_przed.jpg" alt="Zliczanie przed" width="350"/></td>
+    <td><img src="docs/screenshots/mobile_zliczanie_po.jpg" alt="Zliczanie po" width="350"/></td>
   </tr>
 </table>
+
 
 ## 2. Lista modeli 
 

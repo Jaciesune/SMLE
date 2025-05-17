@@ -88,6 +88,77 @@ Panel administracyjny do zarządzania użytkownikami aplikacji. Pozwala na dodaw
 ![](docs/screenshots/uzytkownicy.png)
 
 
+# Aplikacja mobilna
+Aplikacja mobilna napisana w React Native, zaprojektowana do analizy zdjęć w celu wykrywania elementów przy użyciu serwera FastAPI. Aplikacja przesyła zdjęcia do zdalnego serwera, który wykonuje analizę zdjęć przy użyciu znajdujących się na serwerze modeli, zwracając wyniki w czasie rzeczywistym. Aplikacja znajduje się w `docs/app-relase.apk`
+
+## Funkcjonalności
+- **Wybór zdjęć**: Użytkownik może robić zdjęcia aparatem lub wybierać je z galerii.
+- **Analiza na FastAPI**: Zdjęcia są przesyłane do serwera FastAPI, który wykorzystuje modele Faster R-CNN, Mask R-CNN oraz MCNN do analizy i generowania wyników.
+- **Historia**: Zapisuje historię analiz i zdjęć w pamięci urządzenia.
+- **Powiadomienia**: Wysyła powiadomienia push po zakończeniu analizy na serwerze.
+- **Interfejs użytkownika**: Intuicyjny UI z widokiem wyników analizy, w tym liczbą wykrytych elementów i przetworzonymi obrazami.
+
+## 1. Zliczanie
+
+Ekran *Home* pozwala użytkownikowi wybrać zdjęcia do analizy, albogrytm oraz model. Po lewej stronie widoczne jest zdjęcie przed analizą, a po prawej – wynik analizy wykonanej przez serwer FastAPI.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/mobile_zliczanie_przed.jpg" alt="Zliczanie przed" width="300"/></td>
+    <td><img src="docs/screenshots/mobile_zliczanie_po.jpg" alt="Zliczanie po" width="300"/></td>
+  </tr>
+</table>
+
+## 2. Lista modeli 
+
+Ekran *Models* wyświetla dostępne modele wizji komputerowej, które mogą być wykorzystane na serwerze FastAPI do analizy zdjęć. Użytkownik może wybrać preferowany model, co pozwala na elastyczne dostosowanie procesu analizy.
+
+![](docs/screenshots/mobile_lista_modeli.jpg)
+
+## 3. Ustawienia
+
+Ekran "Ustawienia" umożliwia użytkownikowi konfigurację aplikacji. Ustawienia są zapisywane lokalnie na urządzeniu.
+
+![](docs/screenshots/mobile_ustawienia.jpg)
+
+## 4. Historia
+
+Ekran "Historia" pokazuje listę wcześniej wykonanych analiz, w tym zdjęcia przed i po analizie oraz szczegóły, takie jak liczba wykrytych elemntów.
+
+![](docs/screenshots/mobile_historia.jpg)
+
+## Instalacja aplikacji mobilnej
+
+Poniższe kroki opisują, jak skonfigurować i uruchomić aplikację mobilną **SMLE** opartą na React Native. Upewnij się, że masz zainstalowane wszystkie wymagane narzędzia przed rozpoczęciem.
+
+### 1. Przygotowanie środowiska
+- Zainstaluj **Node.js** (zalecana wersja LTS: 18.x lub wyższa).
+- Skonfiguruj **Android SDK** przez Android Studio.
+- Zainstaluj **Gradle** (zazwyczaj dostarczany z Android Studio).
+- Upewnij się, że masz skonfigurowane środowisko React Native. Szczegółowe instrukcje znajdziesz w [oficjalnej dokumentacji React Native](https://reactnative.dev/docs/environment-setup).
+
+### 2. Sklonowanie repozytorium
+Sklonuj repozytorium projektu i przejdź do katalogu aplikacji:
+
+```bash
+cd "SMLE app/SMLE"
+```
+
+### 3. Instalacja zależności
+Zainstaluj wszystkie wymagane biblioteki Node.js:
+
+```bash
+npm install
+```
+
+### 4. Czyszczenie i budowanie projektu
+Uruchom aplikację na urządzeniu lub emulatorze Androida:
+
+```bash
+npx react-native run-android
+```
+
+> **Uwaga**: Upewnij się, że emulator Androida jest uruchomiony lub urządzenie fizyczne jest podłączone przez USB z włączonym trybem debugowania.
 
 # Licencje
 

@@ -79,8 +79,9 @@ Moduł tworzenia zbiorów danych pozwala na organizację i walidację oznaczonyc
 ![](docs/screenshots/benchmark.png)
 
 - Porównanie wydajności różnych modeli (np. Mask R-CNN vs. Faster R-CNN) w formie listy z podziałem na zestaw danch, umożliwiające wybór optymalnego modelu dla konkretnego zastosowania oraz najlepszego modelu z całego zestawienia.
-<div style="text-align: center;">
-    ![](docs/screenshots/benchmark_porownanie.png)
+
+<div align="center">
+  <img src="docs/screenshots/benchmark_porownanie.png" alt="Benchmark porównanie" height="400" style="display: block; margin: 0 auto;"/>
 </div>
 
 ## 7. Użytkownicy

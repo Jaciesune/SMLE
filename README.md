@@ -44,7 +44,7 @@
 ## 1. Zliczanie
 - Ekran zliczania umożliwia wgranie obrazu wejściowego do analizy. Użytkownik może wybrać modele Mask R-CNN, Faster R-CNN lub MCNN. Możliwa jest również opcja wyboru preprocesingu który znacznie poprawia wyniki detekcji MCNN.
 - Wynik detekcji obiektów na obrazie. Pokazuje obraz z naniesionymi maskami lub ramkami bounding box wokół wykrytych elementów, wraz z ich liczbą i etykietami klas, wygenerowanymi przez wybrany model.
-- Poniżej przedstawiono przykład detekcji przy użyciu modelu Mask R-CNN.
+### Poniżej przedstawiono przykład detekcji przy użyciu modelu Mask R-CNN.
 ![](docs/screenshots/detekcja_przed.png)
 ![](docs/screenshots/detekcja_po.png)
 

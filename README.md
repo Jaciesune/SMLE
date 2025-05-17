@@ -79,9 +79,9 @@ Moduł tworzenia zbiorów danych pozwala na organizację i walidację oznaczonyc
 ![](docs/screenshots/benchmark.png)
 
 - Porównanie wydajności różnych modeli (np. Mask R-CNN vs. Faster R-CNN) w formie listy z podziałem na zestaw danch, umożliwiające wybór optymalnego modelu dla konkretnego zastosowania oraz najlepszego modelu z całego zestawienia.
-
-![](docs/screenshots/benchmark_porownanie.png)
-
+<div style="text-align: center;">
+    ![](docs/screenshots/benchmark_porownanie.png)
+</div>
 ## 7. Użytkownicy
 Panel administracyjny do zarządzania użytkownikami aplikacji. Pozwala na dodawanie i podgląd kont.
 
@@ -113,20 +113,23 @@ Ekran *Home* pozwala użytkownikowi wybrać zdjęcia do analizy, albogrytm oraz 
 
 Ekran *Models* wyświetla dostępne modele wizji komputerowej, które mogą być wykorzystane na serwerze FastAPI do analizy zdjęć. Użytkownik może wybrać preferowany model, co pozwala na elastyczne dostosowanie procesu analizy.
 
-<img src="docs/screenshots/mobile_lista_modeli.jpg" alt="Lista modeli" height="300"/>
-
+<div style="text-align: center;">
+  <img src="docs/screenshots/mobile_lista_modeli.jpg" alt="Lista modeli" height="400"/>
+</div>
 ## 3. Ustawienia
 
 Ekran "Ustawienia" umożliwia użytkownikowi konfigurację aplikacji. Ustawienia są zapisywane lokalnie na urządzeniu.
 
-<img src="docs/screenshots/mobile_ustawienia.jpg" alt="Ustawienia" height="300"/>
-
+<div style="text-align: center;">
+  <img src="docs/screenshots/mobile_ustawienia.jpg" alt="Ustawienia" height="400"/>
+</div>
 ## 4. Historia
 
 Ekran "Historia" pokazuje listę wcześniej wykonanych analiz, w tym zdjęcia przed i po analizie oraz szczegóły, takie jak liczba wykrytych elemntów.
 
-<img src="docs/screenshots/mobile_historia.jpg" alt="Historia" height="300"/>
-
+<div style="text-align: center;">
+  <img src="docs/screenshots/mobile_historia.jpg" alt="Historia" height="400"/>
+</div>
 ## Instalacja aplikacji mobilnej
 
 Poniższe kroki opisują, jak skonfigurować i uruchomić aplikację mobilną **SMLE** opartą na React Native. Upewnij się, że masz zainstalowane wszystkie wymagane narzędzia przed rozpoczęciem.

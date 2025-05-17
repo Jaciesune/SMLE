@@ -113,19 +113,19 @@ Ekran *Home* pozwala użytkownikowi wybrać zdjęcia do analizy, albogrytm oraz 
 
 Ekran *Models* wyświetla dostępne modele wizji komputerowej, które mogą być wykorzystane na serwerze FastAPI do analizy zdjęć. Użytkownik może wybrać preferowany model, co pozwala na elastyczne dostosowanie procesu analizy.
 
-![](docs/screenshots/mobile_lista_modeli.jpg)
+<img src="docs/screenshots/mobile_lista_modeli.jpg" alt="Lista modeli" height="300"/>
 
 ## 3. Ustawienia
 
 Ekran "Ustawienia" umożliwia użytkownikowi konfigurację aplikacji. Ustawienia są zapisywane lokalnie na urządzeniu.
 
-![](docs/screenshots/mobile_ustawienia.jpg)
+<img src="docs/screenshots/mobile_ustawienia.jpg" alt="Ustawienia" height="300"/>
 
 ## 4. Historia
 
 Ekran "Historia" pokazuje listę wcześniej wykonanych analiz, w tym zdjęcia przed i po analizie oraz szczegóły, takie jak liczba wykrytych elemntów.
 
-![](docs/screenshots/mobile_historia.jpg)
+<img src="docs/screenshots/mobile_historia.jpg" alt="Historia" height="300"/>
 
 ## Instalacja aplikacji mobilnej
 

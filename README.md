@@ -22,28 +22,28 @@ Upewnij się, że masz zainstalowane wymagane biblioteki `frontend/requirements.
 # Interfejs użytkownika
 
 ## 1. Zliczanie
-![](assets/detekcja_przed.png)
-![](assets/detekcja_po.png)
+![](docs/screenshots/detekcja_przed.png)
+![](docs/screenshots/detekcja_po.png)
 
 ## 2. Trening
-![](assets/trening.png)
+![](docs/screenshots/trening.png)
 
 ## 3. Modele
-![](assets/modele.png)
+![](docs/screenshots/modele.png)
 
 ## 4. Oznaczanie zdjęć
-![](assets/oznaczanie.png)
-![](assets/oznaczanie_skroty.png)
+![](docs/screenshots/oznaczanie.png)
+![](docs/screenshots/oznaczanie_skroty.png)
 
 ## 5. Tworzenie zbiorów danych
-![](assets/zbior_danych.png)
+![](docs/screenshots/zbior_danych.png)
 
 ## 6. Benchmark
-![](assets/benchmark.png)
-![](assets/benchmark_porownanie.png)
+![](docs/screenshots/benchmark.png)
+![](docs/screenshots/benchmark_porownanie.png)
 
 ## 7. Użytkownicy
-![](assets/uzytkownicy.png)
+![](docs/screenshots/uzytkownicy.png)
 
 
 

@@ -42,18 +42,14 @@
 # Interfejs użytkownika
 
 ## 1. Zliczanie
-- \
-  Ekran zliczania umożliwia wgranie obrazu wejściowego do analizy. Użytkownik może wybrać modele Mask R-CNN, Faster R-CNN lub MCNN. Możliwa jest również opcja wyboru preprocesingu który znacznie poprawia wyniki detekcji MCNN.
-- \
-  Wynik detekcji obiektów na obrazie. Pokazuje obraz z naniesionymi maskami lub ramkami bounding box wokół wykrytych elementów, wraz z ich liczbą i etykietami klas, wygenerowanymi przez wybrany model.
-- \
-  Poniżej przedstawiono przykład detekcji przy użyciu modelu Mask R-CNN.
+- Ekran zliczania umożliwia wgranie obrazu wejściowego do analizy. Użytkownik może wybrać modele Mask R-CNN, Faster R-CNN lub MCNN. Możliwa jest również opcja wyboru preprocesingu który znacznie poprawia wyniki detekcji MCNN.
+- Wynik detekcji obiektów na obrazie. Pokazuje obraz z naniesionymi maskami lub ramkami bounding box wokół wykrytych elementów, wraz z ich liczbą i etykietami klas, wygenerowanymi przez wybrany model.
+- Poniżej przedstawiono przykład detekcji przy użyciu modelu Mask R-CNN.
 ![](docs/screenshots/detekcja_przed.png)
 ![](docs/screenshots/detekcja_po.png)
 
 ## 2. Trening
-- \
-  Moduł treningu pozwala użytkownikowi na konfigurację i uruchamianie procesu uczenia modeli głębokiego uczenia. Umożliwia wybór hiperparametrów, takich jak liczba epok, learning rate, oraz wgranie oznaczonych zbiorów danych do treningu.
+- Moduł treningu pozwala użytkownikowi na konfigurację i uruchamianie procesu uczenia modeli głębokiego uczenia. Umożliwia wybór hiperparametrów, takich jak liczba epok, learning rate, oraz wgranie oznaczonych zbiorów danych do treningu.
 ![](docs/screenshots/trening.png)
 
 ## 3. Modele
@@ -61,32 +57,25 @@ Sekcja zarządzania modelami wyświetla listę dostępnych modeli (np. Mask R-CN
 ![](docs/screenshots/modele.png)
 
 ## 4. Oznaczanie zdjęć
-- \
-  Narzędzie do półautomatycznego oznaczania obrazów umożliwia użytkownikowi dodawanie etykiet i masek dla obiektów na zdjęciach, tworząc dane treningowe dla modeli. Interfejs wspiera precyzyjne rysowanie poligonów i bounding boxów.
-- \
-  Narzędzie pozwala na wybór wcześniej wytrenowanego modelu Mask R-CNN, którego zadaniem jest wstępne oznaczenie zdjęć co przyspiesza proces oznaczania.
+- Narzędzie do półautomatycznego oznaczania obrazów umożliwia użytkownikowi dodawanie etykiet i masek dla obiektów na zdjęciach, tworząc dane treningowe dla modeli. Interfejs wspiera precyzyjne rysowanie poligonów i bounding boxów.
+- Narzędzie pozwala na wybór wcześniej wytrenowanego modelu Mask R-CNN, którego zadaniem jest wstępne oznaczenie zdjęć co przyspiesza proces oznaczania.
 ![](docs/screenshots/oznaczanie.png)
-- \
-  Widok skrótów klawiszowych dla narzędzia do oznaczania, ułatwiających szybkie wykonywanie operacji, takich jak przełączanie klas, zapisywanie etykiet czy nawigacja między obrazami.
+- Widok skrótów klawiszowych dla narzędzia do oznaczania, ułatwiających szybkie wykonywanie operacji, takich jak przełączanie klas, zapisywanie etykiet czy nawigacja między obrazami.
 ![](docs/screenshots/oznaczanie_skroty.png)
 
 ## 5. Tworzenie zbiorów danych
-- \
-  Moduł tworzenia zbiorów danych pozwala na organizację i walidację oznaczonych obrazów w zestawy treningowe, walidacyjne i testowe. Użytkownik może zarządzać metadanymi zbiorów i eksportować je w formatach zgodnych z PyTorch.
+- Moduł tworzenia zbiorów danych pozwala na organizację i walidację oznaczonych obrazów w zestawy treningowe, walidacyjne i testowe. Użytkownik może zarządzać metadanymi zbiorów i eksportować je w formatach zgodnych z PyTorch.
 ![](docs/screenshots/zbior_danych.png)
 
 ## 6. Benchmark
 
-- \
-  Ekran benchmarku prezentuje wyniki testów wydajności modeli na wybranym zbiorze danych, w tym metryki takie jak MAE oraz skuteczność.
-- \
-  Porównanie wydajności różnych modeli (np. Mask R-CNN vs. Faster R-CNN) w formie listy z podziałem na zestaw danch, umożliwiające wybór optymalnego modelu dla konkretnego zastosowania oraz najlepszego modelu z całego zestawienia.
+- Ekran benchmarku prezentuje wyniki testów wydajności modeli na wybranym zbiorze danych, w tym metryki takie jak MAE oraz skuteczność.
+- Porównanie wydajności różnych modeli (np. Mask R-CNN vs. Faster R-CNN) w formie listy z podziałem na zestaw danch, umożliwiające wybór optymalnego modelu dla konkretnego zastosowania oraz najlepszego modelu z całego zestawienia.
 ![](docs/screenshots/benchmark.png)
 ![](docs/screenshots/benchmark_porownanie.png)
 
 ## 7. Użytkownicy
-- \
-  Panel administracyjny do zarządzania użytkownikami aplikacji. Pozwala na dodawanie i podgląd kont.
+- Panel administracyjny do zarządzania użytkownikami aplikacji. Pozwala na dodawanie i podgląd kont.
 ![](docs/screenshots/uzytkownicy.png)
 
 

@@ -447,7 +447,7 @@ def estimate_batch_size(image_size, max_objects, max_batch_size=16, min_batch_si
     # Analiza dostępnej pamięci RAM
     available_memory = psutil.virtual_memory().available
     cpu_count = os.cpu_count()
-    usable_memory = available_memory * 0.7  # Używamy 70% dostępnej pamięci
+    usable_memory = available_memory * 0.8  # Używamy 80% dostępnej pamięci
     max_images_by_memory = int(usable_memory // (image_memory + masks_memory_per_image))
     max_images_by_cpu = cpu_count
 
@@ -457,7 +457,7 @@ def estimate_batch_size(image_size, max_objects, max_batch_size=16, min_batch_si
         try:
             gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
             gpu_memory_free = gpu_memory_total - torch.cuda.memory_reserved(0) - torch.cuda.memory_allocated(0)
-            usable_gpu_memory = gpu_memory_free * 0.7  # Używamy 70% wolnej pamięci GPU
+            usable_gpu_memory = gpu_memory_free * 0.85  # Używamy 85% wolnej pamięci GPU
             total_memory_per_image = memory_per_image_gpu + (model_memory + cuda_overhead) / max_batch_size
             max_images_by_gpu = int(usable_gpu_memory // total_memory_per_image)
             logger.info("Dostępna pamięć GPU: %.2f GB, szacowane zużycie na obraz: %.2f MB, model: %.2f GB, max obiektów: %d",

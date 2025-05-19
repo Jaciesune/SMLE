@@ -565,13 +565,13 @@ def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=NUM_WORKER
 
     # Dostosowanie num_workers w zależności od obciążenia systemu
     if available_memory < 4:
-        num_workers = min(num_workers, max(1, cpu_count // 2))
+        num_workers = min(num_workers, max(1, cpu_count // 3))
         logger.warning("Mało pamięci systemowej (%.2f GB), zmniejszam num_workers do %d", available_memory, num_workers)
     elif cpu_usage > 70:
-        num_workers = min(num_workers, max(1, cpu_count // 2))
+        num_workers = min(num_workers, max(1, cpu_count // 3))
         logger.warning("Wysokie obciążenie CPU (%.1f%%), zmniejszam num_workers do %d", cpu_usage, num_workers)
     else:
-        num_workers = min(num_workers, cpu_count)
+        num_workers = min(num_workers, cpu_count // 1.5)
 
     # Decyzja o użyciu pin_memory na podstawie dostępności zasobów
     use_pin_memory = False

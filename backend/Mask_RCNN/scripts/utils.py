@@ -65,7 +65,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
         nowe_cele = [
             {
                 k: v.to(device, dtype=torch.float32) if k == 'boxes' else 
-                  v.to(device, dtype=torch.bfloat16) if k == 'masks' else 
+                  v.to(device, dtype=torch.uint8) if k == 'masks' else  # Używamy uint8 dla masek
                   v.to(device) 
                 for k, v in t.items()
             } 
@@ -266,113 +266,114 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
     print(f"Walidacja epoki {epoch}...")
 
     # Pętla walidacyjna
-    for idx, (obrazy, cele) in enumerate(dataloader):
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-
-        # Przeniesienie danych na urządzenie
-        obrazy = [img.to(device, dtype=torch.bfloat16) for img in obrazy]
-        nowe_cele = [
-            {
-                k: v.to(device, dtype=torch.float32) if k == 'boxes' else 
-                  v.to(device, dtype=torch.bfloat16) if k == 'masks' else 
-                  v.to(device) 
-                for k, v in t.items()
-            } 
-            for t in cele
-        ]
-
-        # Obliczenie straty walidacyjnej i wykonanie inferencji
-        with autocast(device_type='cuda', dtype=torch.bfloat16):
-            model.train()
-            with torch.no_grad():
-                słownik_strat = model(obrazy, nowe_cele)
-                strata_walidacyjna = sum(strata for strata in słownik_strat.values())
-            całkowita_strata_walidacyjna += strata_walidacyjna.item()
-
-            model.eval()
-            wyniki = model(obrazy)
-
-        # Przetwarzanie wyników dla każdego obrazu
-        for i, (obraz, wynik, cel) in enumerate(zip(obrazy, wyniki, cele)):
-            obraz_np = (obraz.cpu().float().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
-            obraz_np = cv2.cvtColor(obraz_np, cv2.COLOR_RGB2BGR)
-            liczba_gt = cel["boxes"].shape[0] if "boxes" in cel and cel["boxes"].numel() > 0 else 0
-            całkowita_liczba_gt += liczba_gt
-
-            if liczba_gt == 0 or "image_id" not in cel:
-                print(f"Batch {idx}, Obraz {i}: Brak adnotacji GT lub image_id, pomijam.")
-                continue
-            id_obrazu = int(cel["image_id"].cpu().numpy()[0])
-
-            # Ekstrakcja predykcji modelu
-            pred_masks = [maska.detach().cpu().numpy()[0] > 0.5 for maska in wynik["masks"]]
-            pred_bboxes = [box.detach().cpu().numpy() for box in wynik["boxes"]]
-            pred_scores = wynik["scores"].detach().cpu().numpy()
-            pred_labels = wynik["labels"].detach().cpu().numpy()
-
-            # Tworzenie pełnej maski predykcji
-            full_pred_mask = np.zeros(nowy_rozmiar, dtype=np.uint8)
-            for mask in pred_masks:
-                full_pred_mask |= mask.astype(np.uint8)
-
-            # Filtrowanie predykcji według progu pewności
-            filtered_preds = [
-                (box, mask, score, label)
-                for box, mask, score, label in zip(pred_bboxes, pred_masks, pred_scores, pred_labels)
-                if score >= 0.1
-            ]
-            liczba_predykcji = len(filtered_preds)
-            całkowita_liczba_predykcji += liczba_predykcji
-
-            # Konwersja predykcji do formatu COCO
-            for box, mask, score, label in filtered_preds:
-                x1, y1, x2, y2 = map(int, box)
-                szerokość = max(0, x2 - x1)
-                wysokość = max(0, y2 - y1)
-                if szerokość > 0 and wysokość > 0:
-                    mask_cropped = mask[y1:y1 + wysokość, x1:x1 + szerokość]
-                    rle = coco_mask.encode(np.asfortranarray(mask_cropped.astype(np.uint8)))
-                    rle["counts"] = rle["counts"].decode("utf-8")
-                    coco_dt.append({
-                        "image_id": id_obrazu,
-                        "category_id": int(label),
-                        "bbox": [x1, y1, szerokość, wysokość],
-                        "score": float(score),
-                        "segmentation": rle
-                    })
-
-            # Wczytanie adnotacji ground truth dla bieżącego obrazu
-            gt_anns = coco_gt.loadAnns(coco_gt.getAnnIds(imgIds=id_obrazu))
-            gt_masks = [decode_rle_segmentation(ann["segmentation"]) for ann in gt_anns]
-            gt_bboxes = [ann["bbox"] for ann in gt_anns]
-            full_gt_mask = create_full_mask(gt_masks, gt_bboxes, nowy_rozmiar)
-
-            # Generowanie wizualizacji predykcji
-            pred_image = obraz_np.copy()
-            for box, mask, score, label in filtered_preds:
-                x1, y1, x2, y2 = map(int, box)
-                cv2.rectangle(pred_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                pred_image[mask > 0] = [0, 0, 255]
-            cv2.imwrite(f"{ścieżka_zapisu}/pred_image_{idx}_{i}.png", pred_image)
-
-            # Obliczenie IoU dla pełnych masek
-            if full_pred_mask.sum() > 0 and full_gt_mask.sum() > 0:
-                intersection = np.logical_and(full_pred_mask, full_gt_mask).sum()
-                union = np.logical_or(full_pred_mask, full_gt_mask).sum()
-                full_iou = intersection / union if union > 0 else 0
-                pełne_iou_sum += full_iou
-                pełne_iou_count += 1
-                print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt:.2f}, IoU pełnych masek: {full_iou:.3f}")
-            else:
-                print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt:.2f}, IoU pełnych masek: 0.000 (puste maski)")
-
-            # Zarządzanie pamięcią
-            del obraz_np, pred_masks, pred_bboxes, pred_scores, pred_labels, full_pred_mask, gt_masks, gt_bboxes, full_gt_mask, pred_image
-            gc.collect()
+    with torch.no_grad():  # Przenosimy cały blok do torch.no_grad()
+        for idx, (obrazy, cele) in enumerate(dataloader):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+
+            # Przeniesienie danych na urządzenie
+            obrazy = [img.to(device, dtype=torch.bfloat16) for img in obrazy]
+            nowe_cele = [
+                {
+                    k: v.to(device, dtype=torch.float32) if k == 'boxes' else 
+                    v.to(device, dtype=torch.uint8) if k == 'masks' else 
+                    v.to(device) 
+                    for k, v in t.items()
+                } 
+                for t in cele
+            ]
+
+            # Obliczenie straty walidacyjnej i wykonanie inferencji
+            with autocast(device_type='cuda', dtype=torch.bfloat16):
+                model.train()
+                with torch.no_grad():  # Usuwamy ten zagnieżdżony blok, bo już mamy torch.no_grad() na wyższym poziomie
+                    słownik_strat = model(obrazy, nowe_cele)
+                    strata_walidacyjna = sum(strata for strata in słownik_strat.values())
+                całkowita_strata_walidacyjna += strata_walidacyjna.item()
+
+                model.eval()
+                wyniki = model(obrazy)
+
+            # Przetwarzanie wyników dla każdego obrazu
+            for i, (obraz, wynik, cel) in enumerate(zip(obrazy, wyniki, cele)):
+                obraz_np = (obraz.cpu().float().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+                obraz_np = cv2.cvtColor(obraz_np, cv2.COLOR_RGB2BGR)
+                liczba_gt = cel["boxes"].shape[0] if "boxes" in cel and cel["boxes"].numel() > 0 else 0
+                całkowita_liczba_gt += liczba_gt
+
+                if liczba_gt == 0 or "image_id" not in cel:
+                    print(f"Batch {idx}, Obraz {i}: Brak adnotacji GT lub image_id, pomijam.")
+                    continue
+                id_obrazu = int(cel["image_id"].cpu().numpy()[0])
+
+                # Ekstrakcja predykcji modelu
+                pred_masks = [maska.detach().cpu().numpy()[0] > 0.5 for maska in wynik["masks"]]
+                pred_bboxes = [box.detach().cpu().numpy() for box in wynik["boxes"]]
+                pred_scores = wynik["scores"].detach().cpu().numpy()
+                pred_labels = wynik["labels"].detach().cpu().numpy()
+
+                # Tworzenie pełnej maski predykcji
+                full_pred_mask = np.zeros(nowy_rozmiar, dtype=np.uint8)
+                for mask in pred_masks:
+                    full_pred_mask |= mask.astype(np.uint8)
+
+                # Filtrowanie predykcji według progu pewności
+                filtered_preds = [
+                    (box, mask, score, label)
+                    for box, mask, score, label in zip(pred_bboxes, pred_masks, pred_scores, pred_labels)
+                    if score >= 0.1
+                ]
+                liczba_predykcji = len(filtered_preds)
+                całkowita_liczba_predykcji += liczba_predykcji
+
+                # Konwersja predykcji do formatu COCO
+                for box, mask, score, label in filtered_preds:
+                    x1, y1, x2, y2 = map(int, box)
+                    szerokość = max(0, x2 - x1)
+                    wysokość = max(0, y2 - y1)
+                    if szerokość > 0 and wysokość > 0:
+                        mask_cropped = mask[y1:y1 + wysokość, x1:x1 + szerokość]
+                        rle = coco_mask.encode(np.asfortranarray(mask_cropped.astype(np.uint8)))
+                        rle["counts"] = rle["counts"].decode("utf-8")
+                        coco_dt.append({
+                            "image_id": id_obrazu,
+                            "category_id": int(label),
+                            "bbox": [x1, y1, szerokość, wysokość],
+                            "score": float(score),
+                            "segmentation": rle
+                        })
+
+                # Wczytanie adnotacji ground truth dla bieżącego obrazu
+                gt_anns = coco_gt.loadAnns(coco_gt.getAnnIds(imgIds=id_obrazu))
+                gt_masks = [decode_rle_segmentation(ann["segmentation"]) for ann in gt_anns]
+                gt_bboxes = [ann["bbox"] for ann in gt_anns]
+                full_gt_mask = create_full_mask(gt_masks, gt_bboxes, nowy_rozmiar)
+
+                # Generowanie wizualizacji predykcji
+                pred_image = obraz_np.copy()
+                for box, mask, score, label in filtered_preds:
+                    x1, y1, x2, y2 = map(int, box)
+                    cv2.rectangle(pred_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    pred_image[mask > 0] = [0, 0, 255]
+                cv2.imwrite(f"{ścieżka_zapisu}/pred_image_{idx}_{i}.png", pred_image)
+
+                # Obliczenie IoU dla pełnych masek
+                if full_pred_mask.sum() > 0 and full_gt_mask.sum() > 0:
+                    intersection = np.logical_and(full_pred_mask, full_gt_mask).sum()
+                    union = np.logical_or(full_pred_mask, full_gt_mask).sum()
+                    full_iou = intersection / union if union > 0 else 0
+                    pełne_iou_sum += full_iou
+                    pełne_iou_count += 1
+                    print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt:.2f}, IoU pełnych masek: {full_iou:.3f}")
+                else:
+                    print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt:.2f}, IoU pełnych masek: 0.000 (puste maski)")
+
+                # Zarządzanie pamięcią
+                del obraz_np, pred_masks, pred_bboxes, pred_scores, pred_labels, full_pred_mask, gt_masks, gt_bboxes, full_gt_mask, pred_image
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
     # Obliczenie metryk COCO
     if len(coco_dt) == 0:

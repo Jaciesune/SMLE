@@ -161,10 +161,11 @@ def train_model(args, is_api_call=False):
     # Konfiguracja urządzenia i diagnostyka
     #######################
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Czy CUDA jest dostępna: {torch.cuda.is_available()}", flush=True)
     try:
         # Diagnostyka GPU
         if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            print("Włączono torch.backends.cudnn.benchmark dla optymalizacji GPU", flush=True)
             print(f"Nazwa GPU: {torch.cuda.get_device_name(0)}", flush=True)
             print(f"Liczba dostępnych GPU: {torch.cuda.device_count()}", flush=True)
         

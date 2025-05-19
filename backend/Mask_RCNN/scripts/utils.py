@@ -65,24 +65,20 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
         nowe_cele = [
             {
                 k: v.to(device, dtype=torch.float32) if k == 'boxes' else 
-                  v.to(device, dtype=torch.uint8) if k == 'masks' else  # Używamy uint8 dla masek
+                  v.to(device, dtype=torch.uint8) if k == 'masks' else
                   v.to(device) 
                 for k, v in t.items()
             } 
             for t in cele
         ]
 
-        optimizer.zero_grad(set_to_none=True)  # Reset gradientów przed każdym batch-em
+        optimizer.zero_grad(set_to_none=True)
 
-        # Forward pass z mixed precision
-        with autocast(device_type='cuda', dtype=torch.bfloat16):  # Poprawione użycie autocast
+        with autocast(device_type='cuda', dtype=torch.bfloat16):
             słownik_strat = model(obrazy, nowe_cele)
             strata = sum(strata for strata in słownik_strat.values())
 
-        # Skalowanie straty i wsteczne propagowanie
         scaler.scale(strata).backward()
-
-        # Aktualizacja wag bez grad_clip
         scaler.step(optimizer)
         scaler.update()
 
@@ -99,6 +95,16 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch):
     if hasattr(dataloader.dataset, '_shut_down_workers'):
         dataloader.dataset._shut_down_workers()
         logger.info(f"Zamknięto procesy DataLoader po epoce {epoch}")
+
+    try:
+        shm_path = "/dev/shm"
+        for item in os.listdir(shm_path):
+            item_path = os.path.join(shm_path, item)
+            if os.path.isfile(item_path) and "python" in item.lower():
+                os.remove(item_path)
+                logger.info(f"Usunięto plik z /dev/shm: {item_path}")
+    except Exception as e:
+        logger.error(f"Błąd podczas czyszczenia /dev/shm: {e}")
 
     return całkowita_strata / len(dataloader) if len(dataloader) > 0 else 0
 

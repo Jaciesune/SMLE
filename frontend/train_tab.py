@@ -36,10 +36,12 @@ class TrainingThread(QtCore.QThread):
     
     Sygnały:
         log_signal: Emitowany dla każdej nowej linii logu z procesu trenowania
-        finished_signal: Emitowany po zakończeniu treningu z informacją o wyniku
+        finished_signal: Emitowany po zakończeniu treningu (tylko w przypadku sukcesu)
+        error_signal: Emitowany w przypadku błędu treningu
     """
     log_signal = QtCore.pyqtSignal(str)
     finished_signal = QtCore.pyqtSignal(str)
+    error_signal = QtCore.pyqtSignal(str)
 
     def __init__(self, train_api, algorithm, args):
         """
@@ -70,11 +72,13 @@ class TrainingThread(QtCore.QThread):
                     break
                 self.log_signal.emit(log_line)
             if self._stopped_by_user:
-                self.finished_signal.emit("Zatrzymano trening")
+                pass
             else:
                 self.finished_signal.emit("Trening zakończony sukcesem!")
         except Exception as e:
-            self.finished_signal.emit(f"Błąd podczas treningu: {str(e)}")
+            error_message = f"Błąd treningu: {str(e)}"
+            if self._running:
+                self.error_signal.emit(error_message)
 
     def stop(self):
         """
@@ -86,7 +90,7 @@ class TrainingThread(QtCore.QThread):
         self._running = False
         self._stopped_by_user = True
         self.train_api.stop()
-        self.wait()  # Czekamy na pełne zakończenie wątku
+        self.wait()
 
 class TrainTab(QtWidgets.QWidget):
     """
@@ -108,13 +112,14 @@ class TrainTab(QtWidgets.QWidget):
         super().__init__()
         self.username = username  
         self.train_api = TrainAPI()
-        self.api_url = api_url  # nie używane
+        self.api_url = api_url
         self.training_thread = None
         self.DEFAULT_VAL_PATH = os.getenv("DEFAULT_VAL_PATH", "/app/backend/data/val")
         self.initial_epoch = 0
         self.completed_epochs = 0
         self.total_epochs = 0
         self.user_epochs = 0
+        self.error_occurred = False  # Flaga do śledzenia błędów
         self.init_ui()
 
     def init_ui(self):
@@ -272,6 +277,7 @@ class TrainTab(QtWidgets.QWidget):
         self.total_epochs = 0
         self.user_epochs = 0
         self.training_thread = None
+        self.error_occurred = True  # Ustawiamy flagę błędu
         logger.info("Stan zresetowany po błędzie.")
 
     def validate_inputs(self, model_name, train_path, val_path, model_version):
@@ -404,6 +410,7 @@ class TrainTab(QtWidgets.QWidget):
         self.completed_epochs = 0
         self.user_epochs = user_epochs
         self.total_epochs = 0
+        self.error_occurred = False  # Resetujemy flagę błędu przed nowym treningiem
 
         self.progress_bar.setRange(0, user_epochs)
         self.progress_bar.setValue(0)
@@ -415,6 +422,7 @@ class TrainTab(QtWidgets.QWidget):
         self.training_thread = TrainingThread(self.train_api, algorithm, args)
         self.training_thread.log_signal.connect(self.update_log, QtCore.Qt.QueuedConnection)
         self.training_thread.finished_signal.connect(self.training_finished, QtCore.Qt.QueuedConnection)
+        self.training_thread.error_signal.connect(self.training_error, QtCore.Qt.QueuedConnection)
         self.training_thread.start()
         logger.info(f"Rozpoczęto trening modelu z {augmentations} augmentacjami na obraz (przekazano {augmentations + 1} do backendu).")
 
@@ -423,25 +431,23 @@ class TrainTab(QtWidgets.QWidget):
         Zatrzymuje trwający proces trenowania modelu.
         
         Wywołuje metodę stop() na wątku trenowania, aktualizuje
-        interfejs i wyświetla informację o zatrzymaniu.
+        interfejs i wyświetla wyłącznie komunikat "Zatrzymano trening".
         """
         if self.training_thread and self.training_thread.isRunning():
-            logger.info("Rozpoczynanie zatrzymywania treningu...")
             self.training_thread.stop()
-            completed = max(0, self.completed_epochs - self.initial_epoch + 1)
-            self.log_text.appendPlainText(f"Zatrzymywanie treningu... Ukończono {completed} z {self.user_epochs} epok (od epoki {self.initial_epoch} do {self.completed_epochs}).")
-            QtWidgets.QMessageBox.information(self, "Trening", "Zatrzymano trening")
+            self.training_thread.wait()
+            self.log_text.clear()  # Czyścimy logi, aby wyświetlić tylko nowy komunikat
+            self.log_text.appendPlainText("Zatrzymano trening")
             self.stop_btn.setEnabled(False)
             self.progress_bar.setVisible(False)
             self.train_btn.setEnabled(True)
-            logger.info("Zatrzymywanie treningu zakończone.")
         else:
-            self.log_text.appendPlainText("Brak aktywnego treningu do zatrzymania.")
+            self.log_text.clear()  # Czyścimy logi, aby wyświetlić tylko nowy komunikat
+            self.log_text.appendPlainText("Zatrzymano trening")
             self.train_btn.setEnabled(True)
             self.stop_btn.setEnabled(False)
             self.progress_bar.setVisible(False)
             self.training_thread = None
-            logger.info("Próba zatrzymania treningu, ale brak aktywnego wątku.")
 
     def update_log(self, log_line):
         """
@@ -478,6 +484,7 @@ class TrainTab(QtWidgets.QWidget):
         Obsługuje zakończenie procesu trenowania modelu.
         
         Aktualizuje stan interfejsu i wyświetla komunikat o wyniku treningu.
+        Wyświetla komunikat o sukcesie tylko, jeśli nie wystąpił wcześniej błąd.
         
         Args:
             result (str): Komunikat o wyniku treningu
@@ -485,7 +492,30 @@ class TrainTab(QtWidgets.QWidget):
         logger.info(f"Trening zakończony: {result}")
         self.train_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.progress_bar.setValue(self.user_epochs)
         self.progress_bar.setVisible(False)
-        QtWidgets.QMessageBox.information(self, "Trening", result)
+        if not self.error_occurred:  # Wyświetlamy komunikat sukcesu tylko, jeśli nie było błędu
+            self.progress_bar.setValue(self.user_epochs)
+            QtWidgets.QMessageBox.information(self, "Trening", result)
+        self.training_thread = None
+
+    def training_error(self, error_message):
+        """
+        Obsługuje błąd podczas treningu modelu.
+        
+        Wyświetla komunikat o błędzie i resetuje stan interfejsu.
+        
+        Args:
+            error_message (str): Komunikat błędu
+        """
+        self.error_occurred = True  # Ustawiamy flagę błędu
+        logger.error(f"Błąd treningu: {error_message}")
+        self.log_text.appendPlainText(error_message)
+        QtWidgets.QMessageBox.critical(self, "Błąd Treningu", error_message)
+        self.train_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        self.initial_epoch = 0
+        self.completed_epochs = 0
+        self.total_epochs = 0
+        self.user_epochs = 0
         self.training_thread = None

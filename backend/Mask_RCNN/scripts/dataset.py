@@ -493,6 +493,13 @@ class MyDataset(Dataset):
         """Zamyka zasoby multiprocessing, jeśli istnieją."""
         self.mask_cache.clear()
         logger.info("Wyczyszczono cache masek")
+        # Dodatkowe czyszczenie zasobów multiprocessing
+        try:
+            self.manager._process.terminate()
+            self.manager._process.join()
+            logger.info("Zakończono procesy managera multiprocessing")
+        except AttributeError:
+            logger.debug("Brak aktywnych procesów managera do zakończenia")
 
 
 def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=NUM_WORKERS, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):

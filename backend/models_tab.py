@@ -63,7 +63,7 @@ def get_user_id_by_username(username: str):
         user = cursor.fetchone()
         logger.debug(f"Znaleziony użytkownik: {user}")
         if user is None:
-            raise HTTPException(status_code=404, detail="Użytkownik nie znaleziony")
+            raise HTTPException(status_code=400, detail="Użytkownik nie znaleziony")
         return user['id']
     except mysql.connector.Error as err:
         logger.exception(f"Błąd zapytania do bazy danych przy pobieraniu user_id: {err}")
@@ -119,13 +119,23 @@ def add_model(payload: ModelPayload):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
+        # Normalizacja algorytmu do zapisu w bazie
+        normalized_algorithm = payload.algorithm.replace(" ", "-").replace("_", "-").upper()
+        db_algorithm = payload.algorithm
+        if normalized_algorithm == "MASK-RCNN":
+            db_algorithm = "Mask R-CNN"
+        elif normalized_algorithm == "FASTER-RCNN":
+            db_algorithm = "Faster R-CNN"
+        elif normalized_algorithm == "MCNN":
+            db_algorithm = "MCNN"
+
         logger.debug("Wstawianie modelu do bazy danych...")
-        cursor.execute("""
+        cursor.execute(""" 
             INSERT INTO model (name, algorithm, version, creation_date, status, training_date, user_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (
             payload.name,
-            payload.algorithm,
+            db_algorithm,
             "1.0",
             datetime.now(),
             "deployed",
@@ -136,7 +146,7 @@ def add_model(payload: ModelPayload):
         model_id = cursor.lastrowid
 
         logger.debug("Wstawianie wpisu do tabeli archive...")
-        cursor.execute("""
+        cursor.execute(""" 
             INSERT INTO archive (action, user_id, model_id, date)
             VALUES (%s, %s, %s, %s)
         """, (
@@ -195,12 +205,11 @@ def find_file_with_regex(model_name, timestamp_str, suffix, model_dir):
     ]
     return matching_files
 
-
 @router.post("/models/upload")
 def upload_model(
-    algorithm: str = Form(...),  # Algorytm w formularzu
-    file: UploadFile = File(...),  # Plik w formularzu
-    user_name: str = Form(...)  # Nazwa użytkownika
+    algorithm: str = Form(...),
+    file: UploadFile = File(...),
+    user_name: str = Form(...)
 ):
     """
     Endpoint do wczytywania nowego modelu z pliku.
@@ -220,31 +229,36 @@ def upload_model(
         HTTPException: W przypadku błędu podczas wczytywania modelu
     """
     try:
+        logger.debug(f"Przesłana wartość algorithm: '{algorithm}'")
         if not file.filename.endswith(".pth"):
             raise HTTPException(status_code=400, detail="Plik musi mieć rozszerzenie .pth")
 
         # Wyciągamy nazwę modelu do pierwszego _
         model_name = os.path.splitext(file.filename)[0].split('_')[0]
 
+        # Mapowanie algorytmów na ścieżki folderów
         target_dirs = {
             "MCNN": "/app/backend/MCNN/models",
-            "Mask-RCNN": "/app/backend/Mask_RCNN/models",
-            "Faster-RCNN": "/app/backend/FasterRCNN/saved_models"
+            "MASK-RCNN": "/app/backend/Mask_RCNN/models",
+            "FASTER-RCNN": "/app/backend/FasterRCNN/saved_models"
         }
 
-        normalized_algorithm = algorithm.replace(" ", "").replace("_", "").lower()
-        matched_dir = None
-        for key, path in target_dirs.items():
-            if key.replace("-", "").replace("_", "").lower() == normalized_algorithm:
-                matched_dir = path
-                break
+        # Normalizacja przesłanego algorytmu do klucza
+        normalized_algorithm = algorithm.replace(" ", "-").replace("_", "-").upper()
+        logger.debug(f"Normalizowana wartość algorithm do mapowania: '{normalized_algorithm}'")
 
+        matched_dir = target_dirs.get(normalized_algorithm)
         if not matched_dir:
-            raise HTTPException(status_code=400, detail="Nieobsługiwany algorytm")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nieobsługiwany algorytm: '{algorithm}'. Oczekiwane wartości: MCNN, MASK-RCNN, FASTER-RCNN"
+            )
 
         os.makedirs(matched_dir, exist_ok=True)
+        logger.debug(f"Ścieżka docelowa dla modelu: {matched_dir}")
 
         save_path = os.path.join(matched_dir, file.filename)
+        logger.debug(f"Zapisywanie modelu w: {save_path}")
 
         with open(save_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -253,25 +267,32 @@ def upload_model(
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Pobieramy user_id na podstawie user_name
         user_id = get_user_id_by_username(user_name)
 
         now = datetime.now()
         version = "1.0"
         status = "deployed"
 
-        # Używamy user_id z formularza
+        # Normalizacja algorytmu do zapisu w bazie (Mask R-CNN)
+        db_algorithm = algorithm
+        if normalized_algorithm == "MASK-RCNN":
+            db_algorithm = "Mask R-CNN"
+        elif normalized_algorithm == "FASTER-RCNN":
+            db_algorithm = "Faster R-CNN"
+        elif normalized_algorithm == "MCNN":
+            db_algorithm = "MCNN"
+
         cursor.execute(""" 
             INSERT INTO model (name, algorithm, version, creation_date, status, training_date, user_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (
-            model_name,  # Używamy model_name
-            algorithm,
+            model_name,
+            db_algorithm,
             version,
             now,
             status,
             now,
-            user_id  # Używamy user_id
+            user_id
         ))
 
         model_id = cursor.lastrowid
@@ -281,7 +302,7 @@ def upload_model(
             VALUES (%s, %s, %s, %s)
         """, (
             "Import",
-            user_id,  # Używamy user_id
+            user_id,
             model_id,
             now
         ))
@@ -295,7 +316,6 @@ def upload_model(
     except Exception as e:
         logger.exception(f"Błąd podczas uploadu modelu: {e}")
         raise HTTPException(status_code=500, detail=f"Błąd podczas uploadu modelu: {e}")
-
 
 @router.delete("/models/{model_id}")
 def delete_model(model_id: int):
@@ -321,7 +341,6 @@ def delete_model(model_id: int):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Pobieramy dane modelu wraz z datą utworzenia
         cursor.execute("SELECT name, algorithm, user_id, creation_date, status FROM model WHERE id = %s", (model_id,))
         model = cursor.fetchone()
 
@@ -329,33 +348,48 @@ def delete_model(model_id: int):
             raise HTTPException(status_code=404, detail="Model nie znaleziony")
         
         if model['status'] == 'archived':
-            raise HTTPException(status_code=400, detail="Model już jest zarchiwizowany i nie może być ponownie usunięty")
+            logger.warning(f"Próba usunięcia zarchiwizowanego modelu o ID {model_id} (nazwa: {model['name']})")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{model['name']}' (ID: {model_id}) jest już zarchiwizowany i nie może być ponownie usunięty."
+            )
 
         model_name = model['name']
         algorithm = model['algorithm']
         user_id = model['user_id']
 
+        # Mapowanie algorytmów z bazy na foldery
         model_dirs = {
             "MCNN": "/app/backend/MCNN/models",
-            "MaskRCNN": "/app/backend/Mask_RCNN/models",
-            "FasterRCNN": "/app/backend/FasterRCNN/saved_models"
+            "Mask R-CNN": "/app/backend/Mask_RCNN/models",
+            "Faster R-CNN": "/app/backend/FasterRCNN/saved_models"
         }
 
         suffixes = {
             "MCNN": "_checkpoint.pth",
-            "MaskRCNN": "_checkpoint.pth",
-            "FasterRCNN": "_checkpoint.pth"
+            "Mask R-CNN": "_checkpoint.pth",
+            "Faster R-CNN": "_checkpoint.pth"
         }
 
-        model_dir = model_dirs.get(algorithm)
-        suffix = suffixes.get(algorithm)
+        # Normalizacja algorytmu z bazy do klucza w model_dirs
+        normalized_algorithm = algorithm.replace(" ", "-").replace("_", "-").upper()
+        logger.debug(f"Normalizowana wartość algorithm z bazy: '{normalized_algorithm}'")
+
+        # Mapowanie na odpowiedni klucz w model_dirs
+        mapped_algorithm = {
+            "MASK-RCNN": "Mask R-CNN",
+            "FASTER-RCNN": "Faster R-CNN",
+            "MCNN": "MCNN"
+        }.get(normalized_algorithm, algorithm)
+
+        model_dir = model_dirs.get(mapped_algorithm)
+        suffix = suffixes.get(mapped_algorithm)
 
         if not model_dir or not suffix:
-            raise HTTPException(status_code=400, detail="Nieznany algorytm lub brak ścieżki")
+            raise HTTPException(status_code=400, detail=f"Nieznany algorytm lub brak ścieżki dla algorithm: {algorithm}")
 
         logger.debug(f"Szukam pliku z nazwą: {model_name}{suffix}")
 
-        # Znajdowanie pliku za pomocą wzorca nazwy modelu i sufiksu
         matching_files = find_file_with_regex(model_name, "", suffix, model_dir)
 
         if matching_files:
@@ -369,7 +403,6 @@ def delete_model(model_id: int):
         else:
             logger.warning(f"Nie znaleziono plików pasujących do wzorca: {model_name}{suffix}")
 
-        # Archiwizacja w bazie
         cursor.execute("UPDATE model SET status = %s WHERE id = %s", ("archived", model_id))
         cursor.execute(""" 
             INSERT INTO archive (action, user_id, model_id, date)
@@ -383,13 +416,16 @@ def delete_model(model_id: int):
 
         conn.commit()
         logger.info(f"Model {model_name} oznaczony jako zarchiwizowany i plik usunięty.")
-        return {"message": f"Model '{model_name}' został zarchiwizowany i plik usunięty."}
+        return {"message": f"Model '{model_name}' (ID: {model_id}) został zarchiwizowany i plik usunięty."}
 
+    except HTTPException as http_exc:
+        logger.error(f"Wystąpił kontrolowany błąd HTTP: {http_exc.detail}")
+        raise http_exc
     except Exception as ex:
         if conn:
             conn.rollback()
         logger.exception(f"Błąd przy archiwizacji modelu: {ex}")
-        raise HTTPException(status_code=500, detail=f"Błąd: {ex}")
+        raise HTTPException(status_code=500, detail=f"Wystąpił błąd serwera: {str(ex)}")
 
     finally:
         if cursor:

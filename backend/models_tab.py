@@ -233,8 +233,9 @@ def upload_model(
         if not file.filename.endswith(".pth"):
             raise HTTPException(status_code=400, detail="Plik musi mieć rozszerzenie .pth")
 
-        # Wyciągamy nazwę modelu do pierwszego _
-        model_name = os.path.splitext(file.filename)[0].split('_')[0]
+        # Wyodrębnij nazwę modelu, obcinając tylko '_checkpoint' z końca, jeśli istnieje
+        base_filename = os.path.splitext(file.filename)[0]
+        model_name = base_filename if not base_filename.endswith('_checkpoint') else base_filename[:-len('_checkpoint')]
 
         # Mapowanie algorytmów na ścieżki folderów
         target_dirs = {
@@ -273,7 +274,7 @@ def upload_model(
         version = "1.0"
         status = "deployed"
 
-        # Normalizacja algorytmu do zapisu w bazie (Mask R-CNN)
+        # Normalizacja algorytmu do zapisu w bazie
         db_algorithm = algorithm
         if normalized_algorithm == "MASK-RCNN":
             db_algorithm = "Mask R-CNN"

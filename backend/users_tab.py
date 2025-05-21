@@ -2,8 +2,8 @@
 Implementacja funkcji backendu do zarządzania użytkownikami w aplikacji SMLE.
 
 Moduł dostarcza funkcje do komunikacji z bazą danych MySQL, które umożliwiają
-pobieranie listy użytkowników oraz tworzenie nowych kont użytkowników.
-Jest wykorzystywany przez endpointy API związane z zarządzaniem użytkownikami.
+pobieranie listy użytkowników, tworzenie nowych kont, edytowanie danych oraz
+zmianę statusu (blokowanie/odblokowywanie).
 """
 #######################
 # Importy bibliotek
@@ -11,12 +11,33 @@ Jest wykorzystywany przez endpointy API związane z zarządzaniem użytkownikami
 import mysql.connector
 from fastapi import HTTPException
 import logging
+from pydantic import BaseModel
 
 #######################
 # Konfiguracja logowania
 #######################
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+class UserUpdate(BaseModel):
+    """
+    Model danych dla aktualizacji użytkownika.
+    
+    Attributes:
+        username (str): Nowa nazwa użytkownika
+        password (str, optional): Nowe hasło użytkownika
+    """
+    username: str
+    password: str = None
+
+class UserStatusUpdate(BaseModel):
+    """
+    Model danych dla aktualizacji statusu użytkownika.
+    
+    Attributes:
+        status (str): Nowy status użytkownika ('active' lub 'inactive')
+    """
+    status: str
 
 def get_db_connection():
     """
@@ -149,3 +170,106 @@ def create_user(data: dict):
         conn.close()
     
     return {"message": "Użytkownik dodany!", "username": username, "role": role}
+
+def update_user(user_id: int, data: UserUpdate):
+    """
+    Aktualizuje dane użytkownika w bazie danych.
+    
+    Args:
+        user_id (int): ID użytkownika do aktualizacji
+        data (UserUpdate): Dane do aktualizacji (nazwa i/lub hasło)
+        
+    Returns:
+        dict: Komunikat o powodzeniu operacji
+        
+    Raises:
+        HTTPException: W przypadku błędu bazy danych lub gdy użytkownik nie istnieje
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Sprawdzanie, czy użytkownik istnieje
+        cursor.execute("SELECT COUNT(*) FROM user WHERE id = %s", (user_id,))
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            logger.warning(f"Próba edycji nieistniejącego użytkownika ID {user_id}")
+            raise HTTPException(status_code=404, detail="Użytkownik nie istnieje")
+        
+        # Sprawdzanie, czy nowa nazwa użytkownika już istnieje (jeśli zmieniana)
+        if data.username:
+            cursor.execute("SELECT COUNT(*) FROM user WHERE name = %s AND id != %s", (data.username, user_id))
+            if cursor.fetchone()[0] > 0:
+                logger.warning(f"Próba zmiany nazwy na już istniejącą: {data.username}")
+                raise HTTPException(status_code=400, detail=f"Nazwa '{data.username}' jest już zajęta")
+
+        # Budowanie zapytania SQL
+        query = "UPDATE user SET name = %s"
+        params = [data.username]
+        
+        if data.password:
+            query += ", password = %s"
+            params.append(data.password)
+            
+        query += " WHERE id = %s"
+        params.append(user_id)
+        
+        cursor.execute(query, params)
+        conn.commit()
+        logger.info(f"Zaktualizowano użytkownika ID {user_id}")
+        
+    except mysql.connector.Error as err:
+        conn.rollback()
+        logger.error(f"Błąd bazy danych podczas edycji użytkownika ID {user_id}: {err}")
+        raise HTTPException(status_code=400, detail=f"Błąd: {err}")
+    
+    finally:
+        cursor.close()
+        conn.close()
+    
+    return {"message": "Użytkownik zaktualizowany!", "username": data.username}
+
+def update_user_status(user_id: int, data: UserStatusUpdate):
+    """
+    Aktualizuje status użytkownika w bazie danych.
+    
+    Args:
+        user_id (int): ID użytkownika
+        data (UserStatusUpdate): Nowy status ('active' lub 'inactive')
+        
+    Returns:
+        dict: Komunikat o powodzeniu operacji
+        
+    Raises:
+        HTTPException: W przypadku błędu bazy danych lub gdy użytkownik nie istnieje
+    """
+    if data.status not in ["active", "inactive"]:
+        logger.warning(f"Nieprawidłowy status: {data.status}")
+        raise HTTPException(status_code=400, detail="Status musi być 'active' lub 'inactive'")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT COUNT(*) FROM user WHERE id = %s", (user_id,))
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            logger.warning(f"Próba zmiany statusu nieistniejącego użytkownika ID {user_id}")
+            raise HTTPException(status_code=404, detail="Użytkownik nie istnieje")
+        
+        cursor.execute("UPDATE user SET status = %s WHERE id = %s", (data.status, user_id))
+        conn.commit()
+        logger.info(f"Zmieniono status użytkownika ID {user_id} na {data.status}")
+        
+    except mysql.connector.Error as err:
+        conn.rollback()
+        logger.error(f"Błąd bazy danych podczas zmiany statusu użytkownika ID {user_id}: {err}")
+        raise HTTPException(status_code=400, detail=f"Błąd: {err}")
+    
+    finally:
+        cursor.close()
+        conn.close()
+    
+    return {"message": f"Status użytkownika zmieniony na {data.status}!"}

@@ -18,7 +18,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-
 #######################
 # Dodanie katalogu nadrzędnego do ścieżki importu
 #######################
@@ -29,7 +28,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 #######################
 from models_tab import get_db_connection, router as models_router
 from login import verify_credentials
-from users_tab import get_users, create_user
+from users_tab import get_users, create_user, update_user, update_user_status
 
 #######################
 # Importy API i routerów
@@ -173,6 +172,13 @@ class TrainingRequest(BaseModel):
     num_workers: int = 10
     patience: int = 8
 
+class UserUpdate(BaseModel):
+    username: str
+    password: str = None
+
+class UserStatusUpdate(BaseModel):
+    status: str
+
 @app.post("/login")
 def login(request: LoginRequest):
     """
@@ -249,6 +255,7 @@ def get_archives():
     
     Endpoint zwraca historię działań wykonanych w systemie,
     takich jak operacje na modelach czy działania użytkowników.
+    Zwraca nazwę użytkownika zamiast ID oraz nazwę modelu w formacie 'algorithm - name'.
     
     Returns:
         list: Lista słowników z wpisami archiwum
@@ -259,9 +266,28 @@ def get_archives():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT id, action, user_id, model_id, date FROM archive")
-        models = cursor.fetchall()
-        logger.debug(f"[DEBUG] Pobrano archiwa: {models}")
+        cursor.execute("""
+            SELECT archive.id, archive.action, archive.user_id, archive.model_id, 
+                   archive.date, user.name AS username, model.name AS model_name, 
+                   model.algorithm
+            FROM archive
+            LEFT JOIN user ON archive.user_id = user.id
+            LEFT JOIN model ON archive.model_id = model.id
+        """)
+        archives = cursor.fetchall()
+        logger.debug(f"[DEBUG] Pobrano archiwa: {archives}")
+        # Formatowanie odpowiedzi
+        formatted_archives = [
+            {
+                "id": a["id"],
+                "action": a["action"],
+                "model_display_name": f"{a['algorithm']} - {a['model_name']}" if a["model_name"] and a["algorithm"] else "Nieznany model",
+                "username": a["username"] or "Nieznany",
+                "date": a["date"].strftime("%Y-%m-%d %H:%M:%S") if a["date"] else None
+            }
+            for a in archives
+        ]
+        return formatted_archives
     except mysql.connector.Error as err:
         conn.close()
         logger.error(f"[DEBUG] Błąd zapytania do archiwów: {err}")
@@ -269,7 +295,6 @@ def get_archives():
     finally:
         cursor.close()
         conn.close()
-    return models
 
 @app.post("/train")
 def train(request: TrainingRequest):
@@ -316,6 +341,35 @@ def train(request: TrainingRequest):
 # Dodanie endpointów dla zarządzania użytkownikami
 app.add_api_route("/users", get_users, methods=["GET"])
 app.add_api_route("/users", create_user, methods=["POST"])
+
+@app.put("/users/{user_id}")
+def update_user_endpoint(user_id: int, request: UserUpdate):
+    """
+    Aktualizuje dane użytkownika.
+    
+    Args:
+        user_id (int): ID użytkownika
+        request (UserUpdate): Nowe dane użytkownika
+        
+    Returns:
+        dict: Komunikat o powodzeniu operacji
+    """
+    return update_user(user_id, request)
+
+@app.put("/users/{user_id}/status")
+def update_user_status_endpoint(user_id: int, request: UserStatusUpdate):
+    """
+    Aktualizuje status użytkownika.
+    
+    Args:
+        user_id (int): ID użytkownika
+        request (UserStatusUpdate): Nowy status
+        
+    Returns:
+        dict: Komunikat o powodzeniu operacji
+    """
+    return update_user_status(user_id, request)
+
 
 # Uruchomienie serwera
 if __name__ == "__main__":

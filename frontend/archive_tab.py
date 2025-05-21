@@ -61,10 +61,10 @@ class ArchiveTab(QtWidgets.QWidget):
         header.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
 
         # Ustawienie stałej szerokości dla każdej kolumny
-        self.archive_table.setColumnWidth(0, 200)
+        self.archive_table.setColumnWidth(0, 400)
         self.archive_table.setColumnWidth(1, 200)
         self.archive_table.setColumnWidth(2, 200)
-        self.archive_table.setColumnWidth(3, 200)
+        self.archive_table.setColumnWidth(3, 150)
 
         # Włączamy rozciąganie tabeli, aby zajmowała całą przestrzeń
         self.archive_table.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -73,12 +73,12 @@ class ArchiveTab(QtWidgets.QWidget):
         layout.addWidget(self.archive_table, stretch=1)
 
         # Układ przycisków
-        btn_layout = QtWidgets.QHBoxLayout()
-        self.view_details_btn = QtWidgets.QPushButton("Zobacz szczegóły")
-        btn_layout.addWidget(self.view_details_btn)
+        # btn_layout = QtWidgets.QHBoxLayout()
+        # self.view_details_btn = QtWidgets.QPushButton("Zobacz szczegóły")
+        # btn_layout.addWidget(self.view_details_btn)
 
-        # Dodajemy przyciski do layoutu
-        layout.addLayout(btn_layout)
+        # # Dodajemy przyciski do layoutu
+        # layout.addLayout(btn_layout)
 
         self.setLayout(layout)
 
@@ -106,15 +106,15 @@ class ArchiveTab(QtWidgets.QWidget):
         
         Args:
             archive_data (list): Lista słowników z danymi archiwalnymi
-                                 zawierającymi pola: model_id, action, date, user_id
+                                 zawierającymi pola: model_display_name, action, date, username
         """
         self.archive_table.setRowCount(len(archive_data))
         for row, record in enumerate(archive_data):
             # Przypisanie danych do odpowiednich kolumn
-            self.archive_table.setItem(row, 0, QtWidgets.QTableWidgetItem(str(record["model_id"])))  # Model
+            self.archive_table.setItem(row, 0, QtWidgets.QTableWidgetItem(str(record["model_display_name"])))  # Model
             self.archive_table.setItem(row, 1, QtWidgets.QTableWidgetItem(record["action"]))  # Operacja
             self.archive_table.setItem(row, 2, QtWidgets.QTableWidgetItem(record["date"]))  # Data
-            self.archive_table.setItem(row, 3, QtWidgets.QTableWidgetItem(str(record["user_id"])))  # Użytkownik
+            self.archive_table.setItem(row, 3, QtWidgets.QTableWidgetItem(str(record["username"])))  # Użytkownik
             
     def view_details(self):
         """

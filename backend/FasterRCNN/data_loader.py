@@ -438,16 +438,16 @@ def get_data_loaders(train_path, val_path, train_annotations, val_annotations, b
         shuffle=True,
         num_workers=num_workers,
         collate_fn=lambda x: tuple(zip(*x)),
-        pin_memory=use_pin_memory,
+        pin_memory=False, # Pin memory nie działa z albumentations, więc wyłączamy, TODO poprawić, False / use_pin_memory
         prefetch_factor=2 if num_workers > 0 else None
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=batch_size,
+        batch_size=max(1, batch_size // 2),
         shuffle=False,
         num_workers=num_workers,
         collate_fn=lambda x: tuple(zip(*x)),
-        pin_memory=use_pin_memory,
+        pin_memory=False, # Pin memory nie działa z albumentations, więc wyłączamy, TODO poprawić, False / use_pin_memory
         prefetch_factor=2 if num_workers > 0 else None
     )
 

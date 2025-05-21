@@ -96,7 +96,7 @@ class CustomDialog(QtWidgets.QDialog):
             detections_count (int): Liczba wykrytych obiektów
             parent (QtWidgets.QWidget): Widget rodzica (CountTab)
             temp_file_path (str): Ścieżka do tymczasowego pliku z przetworzonym obrazem
-            image_label_size (QtCore.QSize): Rozmiar etykiety wyświetlającej obraz
+            image_label_size (QtCore QSize): Rozmiar etykiety wyświetlającej obraz
         """
         super().__init__(parent)
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
@@ -208,7 +208,7 @@ class ImageUpdateThread(QtCore.QThread):
         
         Args:
             temp_file_path (str): Ścieżka do tymczasowego pliku obrazu
-            size (QtCore.QSize): Docelowy rozmiar obrazu
+            size (QtCore QSize): Docelowy rozmiar obrazu
         """
         super().__init__()
         self.temp_file_path = temp_file_path
@@ -309,6 +309,7 @@ class CountTab(QtWidgets.QWidget):
         self.api_url = api_url
         self.analysis_thread = None
         self.progress_thread = None
+        self.model_mapping = {}  # Słownik do mapowania wyświetlonych nazw na oryginalne nazwy
         self.init_ui()
 
     def init_ui(self):
@@ -470,9 +471,11 @@ class CountTab(QtWidgets.QWidget):
         Pobiera listę dostępnych modeli dla wybranego algorytmu i wypełnia nimi ComboBox.
         
         Wywołuje API backendu z parametrem wybranego algorytmu, by pobrać
-        odpowiednie wersje modeli. W przypadku błędu wyświetla komunikat.
+        odpowiednie wersje modeli. Wyświetla nazwy bez '_checkpoint.pth',
+        ale zachowuje oryginalne nazwy w mapowaniu.
         """
         self.model_version_combo.clear()
+        self.model_mapping.clear()  # Wyczyść poprzednie mapowanie
         algorithm = self.algorithm_combo.currentText()
         if not algorithm or algorithm == "Brak dostępnych algorytmów":
             self.model_version_combo.addItem("Brak dostępnych modeli")
@@ -484,7 +487,11 @@ class CountTab(QtWidgets.QWidget):
             response.raise_for_status()
             model_versions = response.json()
             if model_versions:
-                self.model_version_combo.addItems(model_versions)
+                for original_model in model_versions:
+                    # Usuń '_checkpoint.pth' z wyświetlanego tekstu
+                    display_model = original_model.replace('_checkpoint.pth', '')
+                    self.model_version_combo.addItem(display_model)
+                    self.model_mapping[display_model] = original_model  # Mapowanie wyświetlanego tekstu na oryginalną nazwę
             else:
                 self.model_version_combo.addItem("Brak dostępnych modeli")
         except requests.exceptions.RequestException as e:
@@ -512,6 +519,9 @@ class CountTab(QtWidgets.QWidget):
         if not model_version or model_version == "Brak dostępnych modeli":
             QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać model.")
             return
+        
+        # Pobierz oryginalną nazwę modelu z mapowania
+        original_model_version = self.model_mapping.get(model_version, model_version)
         
         preprocessing_enabled = self.preprocessing_checkbox.isChecked()
 
@@ -551,7 +561,7 @@ class CountTab(QtWidgets.QWidget):
         self.progress_thread.start()
 
         self.analysis_thread = AnalysisThread(
-            self.current_image_path, self.api_url, algorithm, model_version,
+            self.current_image_path, self.api_url, algorithm, original_model_version,
             self.username, preprocessing_enabled
         )
         self.analysis_thread.finished.connect(self.on_analysis_finished)

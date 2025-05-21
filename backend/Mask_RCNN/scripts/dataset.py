@@ -493,6 +493,13 @@ class MyDataset(Dataset):
         """Zamyka zasoby multiprocessing, jeśli istnieją."""
         self.mask_cache.clear()
         logger.info("Wyczyszczono cache masek")
+        # Dodatkowe czyszczenie zasobów multiprocessing
+        try:
+            self.manager._process.terminate()
+            self.manager._process.join()
+            logger.info("Zakończono procesy managera multiprocessing")
+        except AttributeError:
+            logger.debug("Brak aktywnych procesów managera do zakończenia")
 
 
 def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=NUM_WORKERS, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):
@@ -565,13 +572,13 @@ def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=NUM_WORKER
 
     # Dostosowanie num_workers w zależności od obciążenia systemu
     if available_memory < 4:
-        num_workers = min(num_workers, max(1, cpu_count // 2))
+        num_workers = min(num_workers, max(1, cpu_count // 3))
         logger.warning("Mało pamięci systemowej (%.2f GB), zmniejszam num_workers do %d", available_memory, num_workers)
     elif cpu_usage > 70:
-        num_workers = min(num_workers, max(1, cpu_count // 2))
+        num_workers = min(num_workers, max(1, cpu_count // 3))
         logger.warning("Wysokie obciążenie CPU (%.1f%%), zmniejszam num_workers do %d", cpu_usage, num_workers)
     else:
-        num_workers = min(num_workers, cpu_count)
+        num_workers = min(num_workers, cpu_count // 1.5)
 
     # Decyzja o użyciu pin_memory na podstawie dostępności zasobów
     use_pin_memory = False
@@ -615,18 +622,18 @@ def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=NUM_WORKER
         shuffle=True,
         num_workers=num_workers,
         collate_fn=custom_collate_fn,
-        pin_memory=use_pin_memory,
+        pin_memory=False,       # Pin memory nie działa z albumentations, więc wyłączamy, TODO poprawić, False / use_pin_memory
         prefetch_factor=2 if num_workers > 0 else None
     )
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=batch_size,
+        batch_size=max(1, batch_size // 2),
         shuffle=False,
         num_workers=num_workers,
         collate_fn=custom_collate_fn,
-        pin_memory=use_pin_memory,
-        prefetch_factor=2 if num_workers > 0 else None
+        pin_memory=False, # Pin memory nie działa z albumentations, więc wyłączamy, TODO poprawić, False / use_pin_memory
+        prefetch_factor=1 if num_workers > 0 else None
     )
 
     return train_loader, val_loader

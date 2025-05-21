@@ -18,7 +18,7 @@ import threading         # Do obsługi wątków
 import queue             # Do komunikacji między wątkami
 import requests          # Do komunikacji HTTP
 import signal            # Do obsługi sygnałów procesów
-import time              # Do operacji związanych z czasem
+import time              # Do operacje związanych z czasem
 import logging           # Do logowania informacji i błędów
 
 #######################
@@ -154,14 +154,20 @@ class TrainAPI:
 
     def stop(self):
         """
-        Zatrzymuje bieżący proces treningu.
-        
-        Najpierw próbuje znaleźć i zabić proces w kontenerze Docker, a następnie
-        zatrzymuje lokalny proces Popen. Zamyka również strumienie stdout i stderr.
-        
+        Zatrzymuje bieżący proces treningu i czyści zasoby serwera, w tym pamięć VRAM.
+
+        Wysyła SIGTERM do procesu w kontenerze Docker, aby umożliwić skryptowi
+        train_maskrcnn.py wykonanie sekcji finally i zwolnienie VRAM. Następnie
+        zatrzymuje lokalny proces Popen. Zamyka strumienie stdout i stderr.
+        Na koniec usuwa tymczasowe katalogi danych.
+
         Returns:
             None
         """
+        if not self._running:
+            logger.warning("Proces już zatrzymany, pomijam zatrzymywanie.")
+            return
+
         self._running = False
         if self._process is not None:
             try:
@@ -176,35 +182,67 @@ class TrainAPI:
                     if script_name in line and "python" in line.lower():
                         pid = line.split()[0]
                         break
-                        
-                # Zabij proces w kontenerze, jeśli znaleziony
+                
+                # Zatrzymaj proces w kontenerze za pomocą SIGTERM
                 if pid:
-                    logger.debug(f"Znaleziono PID: {pid}, zabijam proces...")
-                    kill_cmd = ["docker", "exec", self.container_name, "kill", "-9", pid]
-                    subprocess.run(kill_cmd, check=True)
+                    logger.debug(f"Znaleziono PID: {pid}, wysyłam SIGTERM do procesu...")
+                    term_cmd = ["docker", "exec", self.container_name, "kill", "-SIGTERM", pid]
+                    subprocess.run(term_cmd, check=True)
                     
-                # Zatrzymaj lokalny proces
-                self._process.terminate()
-                self._process.wait(timeout=2)
-                logger.info("Proces zakończony pomyślnie.")
+                    # Poczekaj na zakończenie procesu, aby sekcja finally mogła się wykonać
+                    logger.debug("Oczekiwanie na zakończenie procesu po SIGTERM...")
+                    wait_cmd = ["docker", "exec", self.container_name, "ps", "-p", pid]
+                    for _ in range(10):  # Czekaj maksymalnie 10 sekund
+                        try:
+                            subprocess.run(wait_cmd, check=True, capture_output=True)
+                            time.sleep(1)
+                        except subprocess.CalledProcessError:
+                            logger.debug("Proces zakończony.")
+                            break
+                    else:
+                        logger.warning("Proces nie zakończył się po SIGTERM, wysyłam SIGKILL...")
+                        kill_cmd = ["docker", "exec", self.container_name, "kill", "-9", pid]
+                        subprocess.run(kill_cmd, check=True)
+                
+                # Zatrzymaj lokalny proces, jeśli istnieje
+                if self._process is not None:
+                    logger.debug("Zatrzymywanie lokalnego procesu...")
+                    self._process.terminate()
+                    self._process.wait(timeout=2)
+                    logger.info("Proces zakończony pomyślnie.")
                 
             except subprocess.TimeoutExpired:
                 logger.warning("Proces nie zakończył się w czasie, wymuszam zamknięcie...")
-                self._process.kill()
+                if self._process is not None:
+                    self._process.kill()
                 
             except Exception as e:
                 logger.error("Błąd podczas przerywania procesu: %s", e)
                 
             finally:
                 # Zamknij strumienie wyjściowe
-                if hasattr(self._process, 'stdout') and self._process.stdout:
-                    self._process.stdout.close()
-                if hasattr(self._process, 'stderr') and self._process.stderr:
-                    self._process.stderr.close()
+                if self._process is not None:
+                    if hasattr(self._process, 'stdout') and self._process.stdout:
+                        self._process.stdout.close()
+                    if hasattr(self._process, 'stderr') and self._process.stderr:
+                        self._process.stderr.close()
                 self._process = None
                 logger.debug("Proces wyczyszczony, self._process ustawione na None.")
+        
         else:
             logger.warning("Brak aktywnego procesu do zatrzymania (self._process jest None).")
+        
+        # Czyszczenie zasobów systemowych
+        try:
+            data_dir = self.base_path / "data"
+            for subdir in data_dir.iterdir():
+                if subdir.is_dir() and subdir.name.startswith(("train_user_", "val_user_")):
+                    logger.info(f"Usuwam tymczasowy katalog: {subdir}")
+                    shutil.rmtree(subdir, ignore_errors=True)
+        except Exception as e:
+            logger.error(f"Błąd podczas usuwania tymczasowych katalogów: {e}")
+        
+        logger.info("Zasoby systemowe wyczyszczone, proces zatrzymany.")
 
     #######################
     # Trenowanie modeli
@@ -216,7 +254,7 @@ class TrainAPI:
         
         Kopiuje dane treningowe i walidacyjne do odpowiednich katalogów, 
         uruchamia skrypt treningu w kontenerze Docker i zwraca wyjście
-        procesu jako generator.
+        procesu jako generator. W przypadku błędu rzuca wyjątek.
         
         Parameters:
             algorithm (str): Nazwa algorytmu do trenowania
@@ -226,21 +264,12 @@ class TrainAPI:
         Yields:
             str: Kolejne linie wyjścia procesu trenowania
             
-        Note:
-            Rozpoznawane argumenty specjalne to:
-            - train_dir: katalog treningowy w kontenerze
-            - host_train_path: ścieżka do danych treningowych na hoście
-            - host_val_path: ścieżka do danych walidacyjnych na hoście
-            - num_augmentations: liczba augmentacji na obraz
-            - epochs: liczba epok treningu
-            - model_name: nazwa modelu do zapisania
-            - username: nazwa użytkownika inicjującego trening
+        Raises:
+            RuntimeError: W przypadku błędu podczas trenowania (np. niepowodzenie skryptu)
         """
-        # Sprawdź, czy algorytm jest obsługiwany
         if algorithm not in self.train_scripts:
             logger.error(f"Algorytm {algorithm} nie jest wspierany.")
-            yield f"Błąd: Algorytm {algorithm} nie jest wspierany."
-            return
+            raise RuntimeError(f"Algorytm {algorithm} nie jest wspierany.")
 
         self._running = True
         self.current_algorithm = algorithm
@@ -259,7 +288,6 @@ class TrainAPI:
         model_name = ""
         username = ""
 
-        # Wyciągnięcie wartości z argumentów
         for i in range(0, len(args), 2):
             if args[i] == "--train_dir":
                 train_dir = args[i + 1]
@@ -279,23 +307,19 @@ class TrainAPI:
         logger.debug("Parsowanie argumentów: train_dir=%s, host_train_path=%s, host_val_path=%s, augmentations=%s, epochs=%s, model=%s, user=%s",
                      train_dir, host_train_path, host_val_path, num_augmentations, epochs, model_name, self.username)
 
-        # Walidacja ścieżek
         if not train_dir or not host_train_path or not os.path.exists(host_train_path):
             logger.error("Niepoprawna ścieżka do danych treningowych: %s", host_train_path)
-            yield f"Błąd: Niepoprawna ścieżka do danych treningowych."
-            return
+            raise RuntimeError("Niepoprawna ścieżka do danych treningowych.")
 
         #######################
         # Kopiowanie danych treningowych
         #######################
         
         try:
-            # Przygotowanie ścieżki docelowej
             host_train_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1]
             host_train_dir.mkdir(parents=True, exist_ok=True)
             logger.debug("Utworzono katalog dla danych treningowych: %s", host_train_dir)
 
-            # Kopiowanie danych treningowych
             for item in os.listdir(host_train_path):
                 src_path = os.path.join(host_train_path, item)
                 dst_path = os.path.join(host_train_dir, item)
@@ -307,8 +331,7 @@ class TrainAPI:
             yield f"Skopiowano dane treningowe do {host_train_dir}"
         except Exception as e:
             logger.error("Błąd kopiowania danych treningowych: %s", e)
-            yield f"Błąd kopiowania danych treningowych: {e}"
-            return
+            raise RuntimeError(f"Błąd kopiowania danych treningowych: {e}")
 
         #######################
         # Kopiowanie danych walidacyjnych
@@ -316,12 +339,10 @@ class TrainAPI:
         
         if host_val_path:
             try:
-                # Przygotowanie ścieżki docelowej dla danych walidacyjnych
                 host_val_dir = self.base_path / "data" / train_dir.split("/app/backend/data/")[1].replace("train", "val")
                 host_val_dir.mkdir(parents=True, exist_ok=True)
                 logger.debug("Utworzono katalog dla danych walidacyjnych: %s", host_val_dir)
                 
-                # Kopiowanie danych walidacyjnych
                 for item in os.listdir(host_val_path):
                     src_path = os.path.join(host_val_path, item)
                     dst_path = os.path.join(host_val_dir, item)
@@ -334,8 +355,7 @@ class TrainAPI:
                 yield f"Skopiowano dane walidacyjne do {host_val_dir}"
             except Exception as e:
                 logger.error("Błąd kopiowania danych walidacyjnych: %s", e)
-                yield f"Błąd kopiowania danych walidacyjnych: {e}"
-                return
+                raise RuntimeError(f"Błąd kopiowania danych walidacyjnych: {e}")
         else:
             logger.warning("Nie podano ścieżki danych walidacyjnych, używam domyślnej")
             val_dir = "/app/backend/data/val"
@@ -344,31 +364,18 @@ class TrainAPI:
         # Przygotowanie argumentów do treningu
         #######################
         
-        # Funkcja pomocnicza do usuwania argumentów
         def remove_arg_pair(args_list, key):
-            """
-            Usuwa argument i jego wartość z listy argumentów.
-            
-            Parameters:
-                args_list (list): Lista argumentów
-                key (str): Nazwa argumentu do usunięcia
-                
-            Returns:
-                list: Lista argumentów bez usuniętego argumentu i jego wartości
-            """
             args = list(args_list)
             if key in args:
                 idx = args.index(key)
                 del args[idx:idx+2]
             return args
 
-        # Usuń argumenty, które nie są przeznaczone dla skryptu treningowego
         filtered_args = list(args)
         for arg_name in ["--host_train_path", "--host_val_path", "--username"]:
             filtered_args = remove_arg_pair(filtered_args, arg_name)
         logger.debug("Argumenty po filtrowaniu: %s", filtered_args)
 
-        # Dodaj katalog walidacyjny do argumentów
         if val_dir:
             filtered_args.extend(["--val_dir", val_dir])
 
@@ -377,7 +384,6 @@ class TrainAPI:
         #######################
         
         try:
-            # Wybór odpowiedniego skryptu treningowego
             if algorithm == "Mask R-CNN":
                 script_path = f"/app/backend/Mask_RCNN/scripts/{script_name}"
             elif algorithm == "MCNN":
@@ -386,10 +392,8 @@ class TrainAPI:
                 script_path = f"/app/backend/FasterRCNN/{script_name}"
             else:
                 logger.error("Algorytm %s nie jest obsługiwany", algorithm)
-                yield f"Błąd: Algorytm {algorithm} nie jest obsługiwany."
-                return
+                raise RuntimeError(f"Algorytm {algorithm} nie jest obsługiwany.")
 
-            # Przygotowanie komendy do uruchomienia w kontenerze
             command = ["docker", "exec", "-e", "PYTHONUNBUFFERED=1", self.container_name, "python", script_path]
             command.extend(filtered_args)
             logger.info("Uruchamiam trening z %s augmentacjami na obraz...", num_augmentations)
@@ -397,7 +401,6 @@ class TrainAPI:
             logger.debug("Komenda: %s", ' '.join(command))
             yield f"Komenda: {' '.join(command)}"
 
-            # Uruchomienie procesu
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
@@ -411,25 +414,17 @@ class TrainAPI:
             self._process = process
             logger.debug("Uruchomiono proces treningowy z PID: %s", process.pid)
 
-            #######################
-            # Obsługa wyjścia procesu
-            #######################
-            
-            # Utworzenie kolejki i wątków do obsługi strumieni stdout/stderr
             output_queue = queue.Queue()
             stdout_thread = threading.Thread(target=self._read_stream, args=(process.stdout, output_queue))
             stderr_thread = threading.Thread(target=self._read_stream, args=(process.stderr, output_queue))
             
-            # Oznacz wątki jako daemon, aby nie blokowały zakończenia programu
             stdout_thread.daemon = True
             stderr_thread.daemon = True
             
-            # Uruchom wątki
             stdout_thread.start()
             stderr_thread.start()
             logger.debug("Uruchomiono wątki do obsługi stdout i stderr")
 
-            # Pętla odczytu wyjścia procesu
             while process.poll() is None or not output_queue.empty() or stdout_thread.is_alive() or stderr_thread.is_alive():
                 if not self._running:
                     logger.warning("Flaga _running ustawiona na False, przerywam trening")
@@ -447,55 +442,53 @@ class TrainAPI:
                 except queue.Empty:
                     continue
 
-            # Zakończenie wątków
             logger.debug("Oczekiwanie na zakończenie wątków")
             stdout_thread.join()
             stderr_thread.join()
             logger.debug("Wątki zakończone")
 
-            #######################
-            # Obsługa wyniku treningu
-            #######################
-            
-            # Sprawdź kod zakończenia procesu
             returncode = process.returncode if process.returncode is not None else -1
             logger.info("Proces treningowy zakończony z kodem: %s", returncode)
             
-            # Jeśli trening zakończył się sukcesem, zarejestruj model w bazie danych
-            if returncode == 0:
-                try:
-                    # Dane do rejestracji modelu
-                    model_data = {
-                        "name": model_name,
-                        "algorithm": algorithm,
-                        "path": model_name + "_checkpoint.pth",
-                        "epochs": int(epochs),
-                        "augmentations": int(num_augmentations),
-                        "username": self.username
-                    }
-                    logger.debug("Rejestruję model w bazie danych: %s", model_data)
-                    
-                    # Wywołaj endpoint do rejestracji modelu
-                    response = requests.post("http://localhost:8000/models/add", json=model_data)
-                    
-                    # Sprawdź wynik rejestracji
-                    if response.status_code == 200:
-                        logger.info("Model pomyślnie zarejestrowany w bazie danych")
-                        yield f"Model zapisany do bazy danych przez models_tab"
-                    else:
-                        logger.warning("Błąd rejestracji modelu: %s %s", response.status_code, response.text)
-                        yield f"[OSTRZEŻENIE] Błąd rejestracji modelu: {response.status_code} {response.text}"
-                except Exception as e:
-                    logger.error("Nie udało się wysłać modelu do models_tab: %s", e)
-                    yield f"[OSTRZEŻENIE] Nie udało się wysłać modelu do models_tab: {e}"
-            else:
+            if returncode != 0:
                 logger.error("Błąd podczas uruchamiania skryptu %s: kod %s", script_name, returncode)
-                yield f"Błąd podczas uruchamiania skryptu {script_name}: kod {returncode}"
+                raise RuntimeError(f"Błąd podczas uruchamiania skryptu {script_name}: kod {returncode}")
+
+            try:
+                model_data = {
+                    "name": model_name,
+                    "algorithm": algorithm,
+                    "path": model_name + "_checkpoint.pth",
+                    "epochs": int(epochs),
+                    "augmentations": int(num_augmentations),
+                    "username": self.username
+                }
+                logger.debug("Rejestruję model w bazie danych: %s", model_data)
+                
+                response = requests.post("http://localhost:8000/models/add", json=model_data)
+                
+                if response.status_code == 200:
+                    logger.info("Model pomyślnie zarejestrowany w bazie danych")
+                    yield f"Model zapisany do bazy danych przez models_tab"
+                else:
+                    logger.warning("Błąd rejestracji modelu: %s %s", response.status_code, response.text)
+                    yield f"[OSTRZEŻENIE] Błąd rejestracji modelu: {response.status_code} {response.text}"
+            except Exception as e:
+                logger.error("Nie udało się wysłać modelu do models_tab: %s", e)
+                yield f"[OSTRZEŻENIE] Nie udało się wysłać modelu do models_tab: {e}"
         except Exception as e:
             logger.exception("Nieoczekiwany błąd podczas trenowania modelu: %s", e)
-            yield f"Nieoczekiwany błąd: {e}"
+            raise
         finally:
-            # Zakończ proces jeśli wciąż działa
             if self._process and self._process.poll() is None:
                 logger.info("Czyszczenie procesu w finally")
                 self.stop()
+                
+            try:
+                data_dir = self.base_path / "data"
+                for subdir in data_dir.iterdir():
+                    if subdir.is_dir() and subdir.name.startswith(("train_user_", "val_user_")):
+                        logger.info(f"Usuwam tymczasowy katalog: {subdir}")
+                        shutil.rmtree(subdir, ignore_errors=True)
+            except Exception as e:
+                logger.error(f"Błąd podczas usuwania tymczasowych katalogów: {e}")

@@ -197,7 +197,7 @@ class ModelsTab(QtWidgets.QWidget):
         # Algorytm
         algo_label = QtWidgets.QLabel("Wybierz algorytm:")
         algo_combo = QtWidgets.QComboBox()
-        algo_combo.addItems(["Mask R-CNN", "FasterRCNN", "MCNN"])
+        algo_combo.addItems(["Mask-RCNN", "Faster-RCNN", "MCNN"])
         dialog_layout.addWidget(algo_label)
         dialog_layout.addWidget(algo_combo)
 
@@ -250,7 +250,6 @@ class ModelsTab(QtWidgets.QWidget):
                     'algorithm': algorithm,
                     'user_name': self.user_name
                 }
-                # Naprawiony URL - dodane f przed stringiem dla formatowania
                 response = requests.post(f"{self.api_url}/models/upload", files=files, data=data)
                 response.raise_for_status()
                 QtWidgets.QMessageBox.information(self, "Sukces", "Model został wczytany.")

@@ -67,7 +67,7 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
     if image.mode != 'RGB':
         image = image.convert('RGB')
 
-    resize_transform = transforms.Compose([ 
+    resize_transform = transforms.Compose([
         transforms.Resize(resize_shape),
         transforms.ToTensor()
     ])
@@ -79,112 +79,113 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
     density_map = gaussian_filter(density_map, sigma=sigma)
     binary_map = threshold_by_kmeans(density_map, k=2)
     binary_map_cv = (binary_map * 255).astype(np.uint8)
-
     contours, _ = cv2.findContours(binary_map_cv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    image_cv = np.array(image)
-    h_ratio, w_ratio = image_cv.shape[0] / density_map.shape[0], image_cv.shape[1] / density_map.shape[1]
 
-    valid_contours = []
-    for contour in contours:
-        if len(contour) >= 5 and cv2.contourArea(contour) >= MIN_CONTOUR_AREA:
-            valid_contours.append(contour)
+    image_cv_orig = np.array(image)
+    h_ratio, w_ratio = image_cv_orig.shape[0] / density_map.shape[0], image_cv_orig.shape[1] / density_map.shape[1]
 
-    marked_contours = 0
-    marked_centroids = []
+    valid_contours = [cnt for cnt in contours if len(cnt) >= 5 and cv2.contourArea(cnt) >= MIN_CONTOUR_AREA]
 
-    # Ustalanie dynamicznych wartości dla parametrów
-    detections_count = len(valid_contours)
+    # Zestawy parametrów do przetestowania
+    parameter_sets = [
+        (50, 25000, 75),
+        (2500, 10000, 200),
+        (250, 10000, 50),
+        (100, 2500, 25),
+        (5, 1000, 5),
+    ]
 
-    if detections_count < 50:
-        MIN_ELLIPSE_AREA = 50
-        MAX_ELLIPSE_AREA = 25000
-        MIN_DISTANCE_BETWEEN_CENTROIDS = 75
-    elif detections_count < 75:
-        MIN_ELLIPSE_AREA = 2500
-        MAX_ELLIPSE_AREA = 10000
-        MIN_DISTANCE_BETWEEN_CENTROIDS = 200
-    elif detections_count < 150:
-        MIN_ELLIPSE_AREA = 250
-        MAX_ELLIPSE_AREA = 10000
-        MIN_DISTANCE_BETWEEN_CENTROIDS = 50
-    elif detections_count < 500:
-        MIN_ELLIPSE_AREA = 100
-        MAX_ELLIPSE_AREA = 2500
-        MIN_DISTANCE_BETWEEN_CENTROIDS = 25
-    else:
-        MIN_ELLIPSE_AREA = 5
-        MAX_ELLIPSE_AREA = 1000
-        MIN_DISTANCE_BETWEEN_CENTROIDS = 5
+    best_score = -1
+    best_result_img = None
+    best_count = 0
 
-    ellipses_info = []
+    for min_area, max_area, min_dist in parameter_sets:
+        ellipses_info = []
 
-    for contour in valid_contours:
-        if len(contour) >= 5:
-            ellipse = cv2.fitEllipse(contour)
+        for contour in valid_contours:
+            if len(contour) >= 5:
+                ellipse = cv2.fitEllipse(contour)
+                (center, axes, angle) = ellipse
+                area = np.pi * (axes[0] / 2) * (axes[1] / 2)
+                major_axis = max(axes)
+                minor_axis = min(axes)
+                if minor_axis == 0:
+                    continue
+                aspect_ratio = major_axis / minor_axis
+                if aspect_ratio > 3.5 or area < min_area or area > max_area:
+                    continue
+                ellipses_info.append({
+                    "contour": contour,
+                    "ellipse": ellipse,
+                    "area": area,
+                    "center": center,
+                    "aspect_ratio": aspect_ratio
+                })
+
+        if not ellipses_info:
+            continue
+
+        # Filtrowanie aspect ratio
+        aspect_ratios = [e["aspect_ratio"] for e in ellipses_info]
+        median_ar = np.median(aspect_ratios)
+        lower_ar, upper_ar = median_ar * 0.7, median_ar * 1.6
+        ellipses_info = [e for e in ellipses_info if lower_ar <= e["aspect_ratio"] <= upper_ar]
+
+        # Filtrowanie przez sąsiadów
+        ellipses_info.sort(key=lambda e: e["center"][0])
+        filtered_ellipses = []
+        for i, current in enumerate(ellipses_info):
+            area = current["area"]
+            neighbors = []
+            if i > 0:
+                neighbors.append(ellipses_info[i - 1]["area"])
+            if i < len(ellipses_info) - 1:
+                neighbors.append(ellipses_info[i + 1]["area"])
+            if neighbors:
+                avg_neighbors = sum(neighbors) / len(neighbors)
+                if area < 0.35 * avg_neighbors:
+                    continue
+            filtered_ellipses.append(current)
+
+        # Oznaczanie na kopii obrazu
+        marked_centroids = []
+        image_copy = image_cv_orig.copy()
+        marked_contours = 0
+
+        for item in filtered_ellipses:
+            ellipse = item["ellipse"]
             (center, axes, angle) = ellipse
-            area = np.pi * (axes[0] / 2) * (axes[1] / 2)
+            x, y = int(center[0] * w_ratio), int(center[1] * h_ratio)
+            axes_scaled = (int(axes[0] * w_ratio / 2), int(axes[1] * h_ratio / 2))
+            centroid = calculate_centroid(item["contour"])
+            if centroid:
+                cx, cy = int(centroid[0] * w_ratio), int(centroid[1] * h_ratio)
+                too_close = any(np.linalg.norm(np.array((cx, cy)) - np.array(existing)) < min_dist
+                                for existing in marked_centroids)
+                if too_close:
+                    continue
+                marked_centroids.append((cx, cy))
+                cv2.ellipse(image_copy, (x, y), axes_scaled, angle, 0, 360, (0, 255, 0), 2)
+                cv2.circle(image_copy, (cx, cy), 4, (255, 0, 0), -1)
+                marked_contours += 1
 
-            major_axis = max(axes)
-            minor_axis = min(axes)
+        # Metryka jakości — liczba oznaczeń * średni dystans między centroidami
+        if len(marked_centroids) >= 2:
+            dists = [np.linalg.norm(np.array(c1) - np.array(c2))
+                     for i, c1 in enumerate(marked_centroids)
+                     for j, c2 in enumerate(marked_centroids) if i < j]
+            avg_dist = np.mean(dists)
+        else:
+            avg_dist = 1  # zapobiega dzieleniu przez 0 lub braku centroidów
 
-            if minor_axis == 0:
-                continue
+        score = marked_contours * avg_dist
 
-            aspect_ratio = major_axis / minor_axis
+        if score > best_score:
+            best_score = score
+            best_result_img = image_copy
+            best_count = marked_contours
 
-            if aspect_ratio > 3.5 or area < MIN_ELLIPSE_AREA or area > MAX_ELLIPSE_AREA:
-                continue
-
-            ellipses_info.append({
-                "contour": contour,
-                "ellipse": ellipse,
-                "area": area,
-                "center": center
-            })
-
-    ellipses_info.sort(key=lambda e: e["center"][0])
-
-    filtered_ellipses = []
-    for i, current in enumerate(ellipses_info):
-        area = current["area"]
-
-        neighbor_areas = []
-        if i > 0:
-            neighbor_areas.append(ellipses_info[i - 1]["area"])
-        if i < len(ellipses_info) - 1:
-            neighbor_areas.append(ellipses_info[i + 1]["area"])
-
-        if neighbor_areas:
-            avg_neighbors = sum(neighbor_areas) / len(neighbor_areas)
-            if area < 0.5 * avg_neighbors:
-                continue
-
-        filtered_ellipses.append(current)
-
-    for item in filtered_ellipses:
-        ellipse = item["ellipse"]
-        (center, axes, angle) = ellipse
-
-        x, y = int(center[0] * w_ratio), int(center[1] * h_ratio)
-        axes_scaled = (int(axes[0] * w_ratio / 2), int(axes[1] * h_ratio / 2))
-
-        centroid = calculate_centroid(item["contour"])
-        if centroid:
-            cx, cy = int(centroid[0] * w_ratio), int(centroid[1] * h_ratio)
-
-            too_close = any(np.linalg.norm(np.array((cx, cy)) - np.array(existing)) < MIN_DISTANCE_BETWEEN_CENTROIDS
-                            for existing in marked_centroids)
-            if too_close:
-                continue
-
-            marked_centroids.append((cx, cy))
-
-            cv2.ellipse(image_cv, (x, y), axes_scaled, angle, 0, 360, (0, 255, 0), 2)
-            cv2.circle(image_cv, (cx, cy), 4, (255, 0, 0), -1)
-
-            marked_contours += 1
-
-    return marked_contours, image_cv, density_map
+    return best_count, best_result_img, density_map
 
 
 

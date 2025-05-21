@@ -406,7 +406,7 @@ def estimate_batch_size(image_size, max_objects, max_batch_size=16, min_batch_si
                 cpu_count, use_amp, is_training, max_objects)
     return batch_size
 
-def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=4, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):
+def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=3, num_augmentations=1, coco_train_path=None, coco_val_path=None, num_processes=4):
     """
     Tworzy DataLoader'y dla danych treningowych i walidacyjnych.
 
@@ -488,7 +488,7 @@ def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=4, num_aug
                                 0.5 * 1024 ** 3 * 0.6 * 1.5)
             estimated_memory_usage = model_memory + cuda_overhead + memory_per_image * batch_size
             if gpu_memory_free - estimated_memory_usage > 2.0 * 1024 ** 3 and available_memory > 8:
-                use_pin_memory = True
+                use_pin_memory = False
                 logger.info("Włączam pin_memory, dostępna pamięć GPU: %.2f GB, szacowane zużycie: %.2f GB, RAM: %.2f GB",
                             gpu_memory_free / (1024 ** 3), estimated_memory_usage / (1024 ** 3), available_memory)
             else:
@@ -509,7 +509,7 @@ def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=4, num_aug
         shuffle=True,
         num_workers=num_workers,
         collate_fn=custom_collate_fn,
-        pin_memory=use_pin_memory,
+        pin_memory=False,
         prefetch_factor=2 if num_workers > 0 else None
     )
 

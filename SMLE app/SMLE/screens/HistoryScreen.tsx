@@ -58,7 +58,7 @@ const PhotoPair: React.FC<PhotoPairProps> = ({ photoBefore, photoAfter, index, p
           <Text style={styles.errorText}>Zdjęcie niedostępne</Text>
         )}
       </View>
-      <Text style={styles.statsText}>Zdjęcie {index + 1}: {pipes} rur</Text>
+      <Text style={styles.statsText}>Zdjęcie {index + 1}: {pipes} elementów</Text>
     </View>
   );
 };
@@ -144,7 +144,7 @@ const HistoryScreen: React.FC = () => {
           <Text style={styles.errorText}>Brak zdjęć dla tej analizy.</Text>
         )}
         <View style={styles.statsContainer}>
-          <Text style={styles.statsText}>Łącznie: {item.totalPipes} rur</Text>
+          <Text style={styles.statsText}>Łącznie: {item.totalPipes} elementów</Text>
           <Text style={styles.statsText}>Algorytm: {item.algorithm}</Text>
           <Text style={styles.statsText}>Model: {item.model}</Text>
         </View>

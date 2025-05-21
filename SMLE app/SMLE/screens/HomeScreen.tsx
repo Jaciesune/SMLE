@@ -607,7 +607,7 @@ const HomeScreen: React.FC = () => {
       PushNotification.localNotification({
         channelId: 'smle-analysis-channel',
         title: 'Analiza zakończona',
-        message: `Wykryto ${totalPipes} rur.`,
+        message: `Wykryto ${totalPipes} elementów.`,
         smallIcon: 'ic_notification',
         color: '#00A1D6',
         vibrate: true,
@@ -654,7 +654,7 @@ const HomeScreen: React.FC = () => {
         <Text style={styles.imageLabel}>Po</Text>
         <Image source={{ uri: item.after }} style={styles.resultImage} />
       </View>
-      <Text style={styles.statsText}>Zdjęcie {index + 1}: {item.pipes} rur</Text>
+      <Text style={styles.statsText}>Zdjęcie {index + 1}: {item.pipes} elementów</Text>
     </View>
   );
 
@@ -688,7 +688,7 @@ const HomeScreen: React.FC = () => {
                   renderItem={renderResultPhotoPair}
                   keyExtractor={(item, index) => `result-${index}`}
                 />
-                <Text style={styles.modalText}>Łącznie: {analysisResult.totalPipes} rur</Text>
+                <Text style={styles.modalText}>Łącznie: {analysisResult.totalPipes} elementów</Text>
               </>
             )}
             <TouchableOpacity style={styles.closeButton} onPress={closeModal}>

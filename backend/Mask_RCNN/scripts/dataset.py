@@ -598,7 +598,7 @@ def get_data_loaders(train_dir, val_dir, batch_size=None, num_workers=NUM_WORKER
             
             # Włączenie pin_memory tylko jeśli jest wystarczająco pamięci
             if gpu_memory_free - estimated_memory_usage > 2.0 * 1024 ** 3 and available_memory > 8:
-                use_pin_memory = True
+                use_pin_memory = False
                 logger.info("Włączam pin_memory, dostępna pamięć GPU: %.2f GB, szacowane zużycie: %.2f GB, RAM: %.2f GB",
                             gpu_memory_free / (1024 ** 3), estimated_memory_usage / (1024 ** 3), available_memory)
             else:

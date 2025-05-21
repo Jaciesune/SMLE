@@ -65,56 +65,88 @@ class AugmentedGroundTruth:
             raise ValueError(f"Brak obrazów z adnotacjami i bboxami w {self.image_dir}")
 
         # Pipeline augmentacji
-        self.augment_transform = A.Compose([
-            A.HorizontalFlip(p=0.5),
-            A.VerticalFlip(p=0.5),
-            A.Rotate(limit=50, p=0.5),
-            A.RandomBrightnessContrast(p=0.5),
-            A.HueSaturationValue(p=0.5),
-            A.GaussNoise(p=0.2),
-            A.MultiplicativeNoise(multiplier=[0.5, 1.5], per_channel=True, p=0.2),
-            A.Blur(blur_limit=(3, 7), p=0.2),
-            A.MedianBlur(blur_limit=5, p=0.1),
-            A.ISONoise(p=0.1),
-            A.Perspective(scale=(0.05, 0.1), keep_size=True, p=0.3),
-            A.RandomResizedCrop(
-                size=(image_size[1], image_size[0]),
-                scale=(0.9, 1.0),
-                ratio=(0.75, 1.33),
-                p=0.3
-            ),
-            A.Affine(
-                scale=(0.9, 1.1),
-                translate_percent=(-0.1, 0.1),
-                rotate=(-30, 30),
-                shear=(-5, 5),
-                p=0.3
-            ),
-            A.MotionBlur(blur_limit=(3, 15), p=0.2),
-            A.Defocus(radius=(3, 10), alias_blur=(0.1, 0.5), p=0.2),
-            A.RandomShadow(
-                shadow_roi=(0, 0.5, 1, 1),
-                num_shadows_limit=(1, 3),
-                shadow_dimension=5,
-                p=0.3
-            ),
-            A.RandomSunFlare(
-                flare_roi=(0, 0, 1, 0.5),
-                num_flare_circles=(1, 3),
-                src_radius=150,
-                p=0.2
-            ),
-            A.RandomFog(fog_coef=(0.1, 0.3), p=0.1),
-            A.RandomRain(brightness_coefficient=0.9, drop_length=20, p=0.1),
-            A.RandomSnow(snow_point=(0.1, 0.3), p=0.1),
-            A.CoarseDropout(num_holes_limit=8, hole_height=64, hole_width=64, p=0.3),
+        all_transforms = [
+            # Geometryczne transformacje z SomeOf
+            A.SomeOf([
+                A.HorizontalFlip(p=0.5),
+                A.VerticalFlip(p=0.5),
+                A.RandomRotate90(p=0.5),
+                A.Rotate(limit=15, p=0.2),
+                A.Perspective(scale=(0.05, 0.15), keep_size=True, p=0.4),
+                A.Affine(
+                    scale=(0.85, 1.15),
+                    translate_percent=(-0.1, 0.1),
+                    rotate=(-30, 30),
+                    shear=(-5, 5),
+                    p=0.4
+                ),
+                A.RandomResizedCrop(
+                    size=self.image_size,
+                    scale=(0.9, 1.0),
+                    ratio=(0.75, 1.33),
+                    p=0.3
+                ),
+                A.Affine(shear=(-15, 15), p=0.3),
+                A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.3),
+                A.PiecewiseAffine(scale=(0.01, 0.05), nb_rows=4, nb_cols=4, p=0.2),
+                A.RandomScale(scale_limit=(-0.2, 0.2), p=0.3),
+                A.CoarseDropout(
+                    num_holes_range=(1, 5),  # Nowość: Zakres liczby dziur
+                    fill=0,
+                    fill_mask=0,
+                    p=0.3
+                ),  # Nowość: CoarseDropout z zakresami
+            ], n=6, p=0.8),
+
+            # Wizualne transformacje z SomeOf
+            A.SomeOf([
+                A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
+                A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.5),
+                A.GaussNoise(p=0.3),
+                A.MultiplicativeNoise(multiplier=(0.5, 1.5), per_channel=True, p=0.2),
+                A.Blur(blur_limit=(3, 7), p=0.2),
+                A.MotionBlur(blur_limit=(3, 15), p=0.2),
+                A.RandomFog(alpha_coef=0.2, p=0.1),
+                A.RandomRain(brightness_coefficient=0.9, drop_length=20, p=0.1),
+                A.RandomSnow(p=0.1),
+                A.RandomSunFlare(
+                    flare_roi=(0, 0, 1, 0.5),
+                    src_radius=150,
+                    p=0.2
+                ),
+                A.RandomShadow(
+                    shadow_roi=(0, 0.5, 1, 1),
+                    num_shadows_limit=(1, 3),
+                    shadow_dimension=5,
+                    p=0.3
+                ),
+                A.RandomGamma(gamma_limit=(80, 120), p=0.3),
+                A.Emboss(p=0.2),
+                A.Sharpen(p=0.2),
+                A.CLAHE(p=0.2),
+                A.ImageCompression(quality_range=(50, 90), p=0.2),
+                A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
+                A.RandomToneCurve(scale=0.1, p=0.3),
+                A.Solarize(p=0.2),
+                A.Posterize(num_bits=(4, 8), p=0.2),
+                A.Downscale(scale_range=(0.25,0.5), p=0.2),
+                A.Superpixels(p_replace=0.1, n_segments=100, p=0.2),
+            ], n=6, p=0.8),
+
+            # Końcowe skalowanie
             A.Resize(height=image_size[1], width=image_size[0]),
-        ], bbox_params=A.BboxParams(
-            format='coco',
-            label_fields=['category_ids'],
-            min_area=3,
-            min_visibility=0.3
-        ), additional_targets={'mask': 'mask'})
+        ]
+
+        self.augment_transform = A.Compose(
+            all_transforms,
+            bbox_params=A.BboxParams(
+                format='coco',
+                label_fields=['category_ids'],
+                min_area=10,
+                min_visibility=0.1
+            ),
+            additional_targets={'mask': 'mask'}
+        )
 
         # Cache masek
         self.mask_cache = {}
@@ -147,7 +179,15 @@ class AugmentedGroundTruth:
         return image
 
     def process_image(self, image_id):
-        """Przetwarza pojedynczy obraz z augmentacjami i zapisuje wyniki"""
+        """
+        Przetwarza pojedynczy obraz z augmentacjami i zapisuje wyniki.
+        
+        Args:
+            image_id: ID obrazu z datasetu COCO.
+        
+        Returns:
+            Tuple: (lista informacji o obrazie, lista adnotacji) dla augmentowanych danych.
+        """
         image_info = self.image_info[image_id]
         image_path = os.path.join(self.image_dir, image_info['file_name'])
 
@@ -204,21 +244,26 @@ class AugmentedGroundTruth:
             aug_mask = augmented['mask']
             aug_labels = augmented['category_ids']
 
-            # Filtruj bboxy
+            # Filtruj i przycinaj bboxy
             filtered_boxes = []
             filtered_labels = []
             height, width = aug_image.shape[:2]
 
             for bbox, label in zip(aug_boxes, aug_labels):
-                x, y, w, h = map(int, bbox)
-                x = max(0, min(x, width - 1))
-                y = max(0, min(y, height - 1))
-                x_end = max(0, min(x + w, width - 1))
-                y_end = max(0, min(y + h, height - 1))
-                w = x_end - x
-                h = y_end - y
-                if w > 0 and h > 0:
-                    filtered_boxes.append([x, y, w, h])
+                x, y, w, h = bbox
+                # Przycinanie współrzędnych do granic obrazu
+                x_start = max(0, min(x, width))
+                y_start = max(0, min(y, height))
+                x_end = max(0, min(x + w, width))
+                y_end = max(0, min(y + h, height))
+
+                # Obliczenie nowej szerokości i wysokości
+                new_w = x_end - x_start
+                new_h = y_end - y_start
+
+                # Sprawdzenie, czy bbox jest prawidłowy
+                if new_w > 0 and new_h > 0:
+                    filtered_boxes.append([x_start, y_start, new_w, new_h])
                     filtered_labels.append(label)
 
             if len(filtered_boxes) == 0:

@@ -1,3 +1,15 @@
+"""
+Implementacja zakładki Auto-Labeling w aplikacji SMLE.
+
+Moduł dostarcza kompletny interfejs użytkownika do półautomatycznego 
+i automatycznego oznaczania obiektów na obrazach, umożliwiając zarówno
+ręczne rysowanie masek, jak i wykorzystanie modeli uczenia maszynowego
+do automatycznej segmentacji instancji.
+"""
+
+#######################
+# Importy bibliotek
+#######################
 from PyQt5 import QtWidgets, QtGui, QtCore
 import winsound
 import requests
@@ -13,13 +25,24 @@ import zipfile
 import logging
 from PIL import Image
 
-from utils import load_stylesheet  # Załadowanie funkcji z utils
+#######################
+# Importy lokalne
+#######################
+from utils import load_stylesheet
 
+#######################
 # Konfiguracja logowania
+#######################
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class LoadingDialog(QtWidgets.QDialog):
+    """
+    Okno dialogowe wyświetlające animację podczas wykonywania operacji w tle.
+    
+    Zawiera animowaną etykietę z kropkami, która informuje użytkownika
+    o trwającym procesie auto-labelingu.
+    """
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
@@ -45,11 +68,10 @@ class LoadingDialog(QtWidgets.QDialog):
         layout.addWidget(self.dots_label)
         self.setLayout(layout)
 
-        # Timer do animacji kropek
         self.dot_count = 1
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.update_dots)
-        self.timer.start(500)  # Zmiana co 500 ms
+        self.timer.start(500)
 
     def update_dots(self):
         self.dot_count = (self.dot_count % 3) + 1
@@ -59,6 +81,7 @@ class LoadingDialog(QtWidgets.QDialog):
         self.timer.stop()
 
 class ProgressThread(QtCore.QThread):
+    update_progress = QtCore.pyqtSignal(str)
     stop_progress = QtCore.pyqtSignal()
 
     def __init__(self, dialog):
@@ -217,9 +240,16 @@ class ImageViewer(QtWidgets.QWidget):
         self.is_panning = False
         self.last_global_pos = None
         self.mouse_pos = QtCore.QPoint(0, 0)
-        self.sensitivity = 1.0  # Czułość przesuwania
+        self.sensitivity = 1.0
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.setMouseTracking(True)
+        # NOWE: Cache dla masek i konturów
+        self.mask_cache = {}
+        # NOWE: Timer do ograniczenia częstotliwości odświeżeń
+        self.update_timer = QtCore.QTimer(self)
+        self.update_timer.setSingleShot(True)
+        self.update_timer.timeout.connect(self._deferred_update)
+        self.last_update_time = 0
         self.adjust_initial_scale()
 
     def adjust_initial_scale(self):
@@ -240,7 +270,6 @@ class ImageViewer(QtWidgets.QWidget):
         else:
             self.scale = container_height / self.original_height
 
-        # Ustaw min_scale tak, aby obraz nie był mniejszy niż viewport
         self.min_scale = min(container_width / self.original_width, container_height / self.original_height)
         logger.debug("Początkowa skala: %s, min_scale: %s", self.scale, self.min_scale)
         self.update_viewer_size()
@@ -262,15 +291,49 @@ class ImageViewer(QtWidgets.QWidget):
         final_height = max(scaled_height, container_height)
         self.setFixedSize(final_width, final_height)
 
-        # Ustaw zakresy pasków przewijania
         h_scroll = container.horizontalScrollBar()
         v_scroll = container.verticalScrollBar()
         h_scroll.setRange(0, max(0, scaled_width - container_width))
         v_scroll.setRange(0, max(0, scaled_height - container_height))
 
-        logger.debug("Zaktualizowano rozmiar widżetu: %sx%s, skala: %s, h_range: %s, v_range: %s",
+        logger.debug("Zaktualizowano rozmiar92 widżetu: %sx%s, skala: %s, h_range: %s, v_range: %s",
                      final_width, final_height, self.scale, h_scroll.maximum(), v_scroll.maximum())
         self.update()
+
+    # NOWE: Metoda do aktualizacji cache'u masek
+    def update_mask_cache(self, shape, idx):
+        mask_base64 = shape["mask"]
+        mask_data = base64.b64decode(mask_base64)
+        mask_np = cv2.imdecode(np.frombuffer(mask_data, np.uint8), cv2.IMREAD_GRAYSCALE)
+        if mask_np is None:
+            return
+        points = shape["points"]
+        x_min, y_min = map(int, points[0])
+        x_max, y_max = map(int, points[1])
+        bbox_width = x_max - x_min
+        bbox_height = y_max - y_min
+        mask_resized = cv2.resize(mask_np, (bbox_width, bbox_height), interpolation=cv2.INTER_NEAREST)
+        full_mask = np.zeros((self.original_height, self.original_width), dtype=np.uint8)
+        target_slice = full_mask[y_min:y_max, x_min:x_max]
+        if target_slice.shape != mask_resized.shape:
+            mask_resized = cv2.resize(mask_resized, (target_slice.shape[1], target_slice.shape[0]), interpolation=cv2.INTER_NEAREST)
+        full_mask[y_min:y_max, x_min:x_max] = mask_resized
+        scaled_mask = cv2.resize(
+            full_mask,
+            (int(self.original_width * self.scale), int(self.original_height * self.scale)),
+            interpolation=cv2.INTER_NEAREST
+        )
+        contours, _ = cv2.findContours(scaled_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        self.mask_cache[idx] = {
+            "mask": mask_resized,
+            "full_mask": full_mask,
+            "x_min": x_min,
+            "y_min": y_min,
+            "x_max": x_max,
+            "y_max": y_max,
+            "contours": contours,
+            "scale": self.scale
+        }
 
     def wheelEvent(self, event):
         logger.debug("wheelEvent wywołane: angleDelta=%s, modifiers=%s", event.angleDelta(), QtWidgets.QApplication.keyboardModifiers())
@@ -289,19 +352,16 @@ class ImageViewer(QtWidgets.QWidget):
             zoom_factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
             mouse_pos = event.pos()
 
-            # Sprawdź, czy obraz jest w pełni widoczny w viewport
             viewport_size = container.viewport().size()
             viewport_width = viewport_size.width()
             viewport_height = viewport_size.height()
             scaled_width = self.original_width * self.scale
             scaled_height = self.original_height * self.scale
 
-            # Zablokuj pomniejszanie, jeśli obraz jest w pełni widoczny
             if zoom_factor < 1.0 and scaled_width <= viewport_width and scaled_height <= viewport_height:
                 logger.debug("Pomniejszanie zablokowane: obraz w pełni widoczny")
                 return
 
-            # Oblicz pozycję myszy w przestrzeni obrazu
             viewport_x = mouse_pos.x() + h_scroll.value()
             viewport_y = mouse_pos.y() + v_scroll.value()
             image_x = viewport_x / self.scale
@@ -313,21 +373,17 @@ class ImageViewer(QtWidgets.QWidget):
 
             self.update_viewer_size()
 
-            # Oblicz nowe wymiary obrazu po zmianie skali
             new_scaled_width = self.original_width * self.scale
             new_scaled_height = self.original_height * self.scale
 
-            # Oblicz nowe wartości przewijania, aby zachować punkt pod kursorem i ograniczyć do granic obrazu
             new_viewport_x = (image_x * self.scale) - mouse_pos.x()
             new_viewport_y = (image_y * self.scale) - mouse_pos.y()
 
-            # Ogranicz przewijanie, aby obraz nie wychodził poza granice
             max_h_scroll = max(0, new_scaled_width - viewport_width)
             max_v_scroll = max(0, new_scaled_height - viewport_height)
             new_viewport_x = max(0, min(new_viewport_x, max_h_scroll))
             new_viewport_y = max(0, min(new_viewport_y, max_v_scroll))
 
-            # Jeśli obraz jest mniejszy niż viewport, wyśrodkuj go
             if new_scaled_width <= viewport_width:
                 new_viewport_x = (viewport_width - new_scaled_width) // 2
             if new_scaled_height <= viewport_height:
@@ -335,6 +391,10 @@ class ImageViewer(QtWidgets.QWidget):
 
             h_scroll.setValue(int(new_viewport_x))
             v_scroll.setValue(int(new_viewport_y))
+
+            # ZMIANA: Aktualizuj cache konturów po zmianie skali
+            for idx in self.mask_cache:
+                self.update_mask_cache(self.annotations[idx], idx)
 
             container.viewport().update()
             self.auto_labeling_tab.update_status_bar()
@@ -371,35 +431,29 @@ class ImageViewer(QtWidgets.QWidget):
         )
         painter.drawImage(-h_scroll, -v_scroll, scaled_image)
 
+        # ZMIANA: Używanie cache'owanych masek i konturów
         for idx, shape in enumerate(self.annotations):
             if shape.get("shape_type") != "mask":
                 continue
-            mask_base64 = shape["mask"]
-            mask_data = base64.b64decode(mask_base64)
-            mask_np = cv2.imdecode(np.frombuffer(mask_data, np.uint8), cv2.IMREAD_GRAYSCALE)
-            if mask_np is None:
+            if idx not in self.mask_cache:
+                self.update_mask_cache(shape, idx)
+            cached = self.mask_cache.get(idx)
+            if not cached:
                 continue
 
-            points = shape["points"]
-            x_min, y_min = points[0]
-            x_max, y_max = points[1]
-            x_min, y_min, x_max, y_max = map(int, [x_min, y_min, x_max, y_max])
-            bbox_width = x_max - x_min
-            bbox_height = y_max - y_min
+            if cached.get("scale") != self.scale:
+                full_mask = cached["full_mask"]
+                scaled_mask = cv2.resize(
+                    full_mask,
+                    (int(self.original_width * self.scale), int(self.original_height * self.scale)),
+                    interpolation=cv2.INTER_NEAREST
+                )
+                contours, _ = cv2.findContours(scaled_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                self.mask_cache[idx]["contours"] = contours
+                self.mask_cache[idx]["scale"] = self.scale
+            else:
+                contours = cached["contours"]
 
-            mask_resized = cv2.resize(mask_np, (bbox_width, bbox_height), interpolation=cv2.INTER_NEAREST)
-            full_mask = np.zeros((self.original_height, self.original_width), dtype=np.uint8)
-            target_slice = full_mask[y_min:y_max, x_min:x_max]
-            if target_slice.shape != mask_resized.shape:
-                mask_resized = cv2.resize(mask_resized, (target_slice.shape[1], target_slice.shape[0]), interpolation=cv2.INTER_NEAREST)
-            full_mask[y_min:y_max, x_min:x_max] = mask_resized
-
-            scaled_mask = cv2.resize(
-                full_mask,
-                (int(self.original_width * self.scale), int(self.original_height * self.scale)),
-                interpolation=cv2.INTER_NEAREST
-            )
-            contours, _ = cv2.findContours(scaled_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if not contours:
                 continue
 
@@ -422,6 +476,18 @@ class ImageViewer(QtWidgets.QWidget):
                 painter.drawLine(qpoints[i], qpoints[i + 1])
             for pt in qpoints:
                 painter.drawEllipse(pt, 3 / self.scale, 3 / self.scale)
+
+    # NOWE: Metoda do ograniczenia częstotliwości odświeżeń
+    def _deferred_update(self):
+        super().update()
+
+    def update(self):
+        current_time = QtCore.QTime.currentTime().msec()
+        if current_time - self.last_update_time > 50:  # Ograniczenie do 20 FPS
+            self.last_update_time = current_time
+            super().update()
+        else:
+            self.update_timer.start(50)
 
     def mousePressEvent(self, event):
         if self.image is None:
@@ -449,20 +515,15 @@ class ImageViewer(QtWidgets.QWidget):
                 for idx, shape in enumerate(self.annotations):
                     if shape.get("shape_type") != "mask":
                         continue
-                    mask_base64 = shape["mask"]
-                    mask_data = base64.b64decode(mask_base64)
-                    mask_np = cv2.imdecode(np.frombuffer(mask_data, np.uint8), cv2.IMREAD_GRAYSCALE)
-                    if mask_np is None:
+                    cached = self.mask_cache.get(idx)
+                    if not cached:
+                        self.update_mask_cache(shape, idx)
+                        cached = self.mask_cache.get(idx)
+                    if not cached:
                         continue
 
-                    points = shape["points"]
-                    x_min, y_min = points[0]
-                    x_max, y_max = points[1]
-                    x_min, y_min, x_max, y_max = map(int, [x_min, y_min, x_max, y_max])
-                    bbox_width = x_max - x_min
-                    bbox_height = y_max - y_min
-
-                    mask_resized = cv2.resize(mask_np, (bbox_width, bbox_height), interpolation=cv2.INTER_NEAREST)
+                    mask_resized = cached["mask"]
+                    x_min, y_min, x_max, y_max = cached["x_min"], cached["y_min"], cached["x_max"], cached["y_max"]
                     full_mask = np.zeros((self.original_height, self.original_width), dtype=np.uint8)
                     target_slice = full_mask[y_min:y_max, x_min:x_max]
                     if target_slice.shape != mask_resized.shape:
@@ -495,13 +556,13 @@ class ImageViewer(QtWidgets.QWidget):
         self.mouse_pos = event.pos()
         self.auto_labeling_tab.update_status_bar()
 
+        # ZMIANA: Warunkowe wywoływanie update()
         if self.is_panning:
             new_global_pos = event.globalPos()
             if self.last_global_pos is None:
                 self.last_global_pos = new_global_pos
                 return
 
-            # Oblicz przesunięcie na podstawie globalnych współrzędnych, odwracając kierunek
             delta_x = (self.last_global_pos.x() - new_global_pos.x()) * self.sensitivity
             delta_y = (self.last_global_pos.y() - new_global_pos.y()) * self.sensitivity
 
@@ -509,22 +570,15 @@ class ImageViewer(QtWidgets.QWidget):
             h_scroll = container.horizontalScrollBar()
             v_scroll = container.verticalScrollBar()
 
-            # Aktualizuj pozycję przewijania
             new_h_value = h_scroll.value() + int(delta_x)
             new_v_value = v_scroll.value() + int(delta_y)
 
-            # Ogranicz wartości przewijania
             h_scroll.setValue(max(0, min(new_h_value, h_scroll.maximum())))
             v_scroll.setValue(max(0, min(new_v_value, v_scroll.maximum())))
 
-            # Zaktualizuj pozycję globalną
             self.last_global_pos = new_global_pos
-
-            # Odśwież widok
             self.update()
-            return
-
-        if self.drawing:
+        elif self.drawing:
             self.update()
 
     def mouseReleaseEvent(self, event):
@@ -585,6 +639,7 @@ class ImageViewer(QtWidgets.QWidget):
                     "mask": mask_base64
                 }
                 self.annotations.append(new_shape)
+                self.update_mask_cache(new_shape, len(self.annotations) - 1)  # NOWE: Aktualizacja cache'u
                 self.auto_labeling_tab.add_to_history(new_shape)
                 self.auto_labeling_tab.update_mask_list()
                 self.auto_labeling_tab.add_label_to_list(label)
@@ -636,11 +691,16 @@ class AutoLabelingTab(QtWidgets.QWidget):
         self.current_image_idx = 0
         self.annotations = []
         self.labels = ["obiekt"]
-        self.default_label = "obiekt"  # Domyślna etykieta dla wszystkich obrazów
+        self.default_label = "obiekt"
         self.history = []
         self.edit_mode = False
         self.labeling_thread = None
         self.progress_thread = None
+        # NOWE: Timer do ograniczenia aktualizacji statusu
+        self.status_update_timer = QtCore.QTimer(self)
+        self.status_update_timer.setSingleShot(True)
+        self.status_update_timer.timeout.connect(self._deferred_update_status_bar)
+        self.last_status_update = 0
         self.init_ui()
 
     def init_ui(self):
@@ -663,7 +723,7 @@ class AutoLabelingTab(QtWidgets.QWidget):
         autolabelingtab_stylesheet = load_stylesheet("AutoLabelingTab_style.css")
         if not autolabelingtab_stylesheet:
             logger.error("[ERROR] Nie udało się wczytać AutoLabelingTab_style.css")
-            autolabelingtab_stylesheet = ""  # Fallback na pusty styl
+            autolabelingtab_stylesheet = ""
         else:
             logger.debug("[DEBUG] Załadowano AutoLabelingTab_style.css")
         self.right_panel.setStyleSheet(autolabelingtab_stylesheet)
@@ -806,7 +866,8 @@ class AutoLabelingTab(QtWidgets.QWidget):
         if hasattr(self, 'image_viewer') and self.image_viewer:
             self.image_viewer.adjust_initial_scale()
 
-    def update_status_bar(self):
+    # ZMIANA: Debouncing aktualizacji statusu
+    def _deferred_update_status_bar(self):
         if not hasattr(self, 'image_viewer') or self.image_viewer.image is None:
             self.status_bar.setText("Zoom: 100% | Pozycja: (0, 0) | Tryb: Oznaczanie")
             return
@@ -814,6 +875,14 @@ class AutoLabelingTab(QtWidgets.QWidget):
         x, y = self.image_viewer.get_mouse_position()
         mode_text = "Edycja" if self.edit_mode else "Oznaczanie"
         self.status_bar.setText(f"Zoom: {zoom_percent}% | Pozycja: ({x}, {y}) | Tryb: {mode_text}")
+
+    def update_status_bar(self):
+        current_time = QtCore.QTime.currentTime().msec()
+        if current_time - self.last_status_update > 100:  # Ograniczenie do 10 FPS dla statusu
+            self.last_status_update = current_time
+            self._deferred_update_status_bar()
+        else:
+            self.status_update_timer.start(100)
 
     def select_input_directory(self):
         directory = QtWidgets.QFileDialog.getExistingDirectory(self, "Wybierz katalog ze zdjęciami")
@@ -893,12 +962,10 @@ class AutoLabelingTab(QtWidgets.QWidget):
                 logger.warning("Oznaczanie już w toku, zignorowano ponowne kliknięcie.")
                 return
 
-            # Wczytaj pierwszy obraz jako wizja
             self.current_image_idx = 0
             self.load_current_image()
             self.update_image_list()
 
-            # Zablokuj interfejs użytkownika tylko dla tej karty
             self.main_splitter.setEnabled(False)
             self.right_panel.setEnabled(False)
             self.mode_widget.setEnabled(False)
@@ -907,7 +974,6 @@ class AutoLabelingTab(QtWidgets.QWidget):
             self.mask_list_widget.setEnabled(False)
             self.image_list_widget.setEnabled(False)
 
-            # Pokazanie okna z animacją kropek
             self.loading_dialog = LoadingDialog(self)
             self.loading_dialog.move(
                 self.image_viewer_container.width() // 2 - self.loading_dialog.width() // 2,
@@ -938,17 +1004,13 @@ class AutoLabelingTab(QtWidgets.QWidget):
 
     def on_labeling_finished(self, result):
         logger.debug("Oznaczanie zakończone")
-        
-        # Odtwórz dźwięk powiadomienia
         winsound.PlaySound("SystemNotification", winsound.SND_ALIAS)
-        
         self.loading_dialog.close()
 
         if self.progress_thread:
             self.progress_thread.stop()
             self.progress_thread.wait()
 
-        # Odblokuj interfejs użytkownika dla tej karty
         self.main_splitter.setEnabled(True)
         self.right_panel.setEnabled(True)
         self.mode_widget.setEnabled(True)
@@ -979,7 +1041,6 @@ class AutoLabelingTab(QtWidgets.QWidget):
             self.progress_thread.stop()
             self.progress_thread.wait()
 
-        # Odblokuj interfejs użytkownika dla tej karty
         self.main_splitter.setEnabled(True)
         self.right_panel.setEnabled(True)
         self.mode_widget.setEnabled(True)
@@ -1013,12 +1074,10 @@ class AutoLabelingTab(QtWidgets.QWidget):
                 with open(annotation_path, 'r', encoding='utf-8') as f:
                     json_data = json.load(f)
                 self.annotations = json_data["shapes"]
-                # Znajdź pierwszą etykietę na obrazie i ustaw jako domyślną
                 if self.annotations:
                     first_label = self.annotations[0]["label"]
                     self.default_label = first_label
                     logger.debug(f"Ustawiono domyślną etykietę dla obrazu {image_path}: {first_label}")
-                    # Ustaw wszystkie maski na tę samą etykietę
                     for shape in self.annotations:
                         shape["label"] = first_label
             except Exception as e:
@@ -1033,12 +1092,14 @@ class AutoLabelingTab(QtWidgets.QWidget):
             self.image_viewer_container.setWidget(self.image_viewer)
             self.image_viewer.setFocus(QtCore.Qt.OtherFocusReason)
             self.image_viewer.adjust_initial_scale()
+            # NOWE: Wypełnij cache dla wszystkich masek
+            for idx, shape in enumerate(self.annotations):
+                self.image_viewer.update_mask_cache(shape, idx)
         except Exception as e:
             logger.error(f"Błąd wczytywania obrazu {image_path}: {e}")
             QtWidgets.QMessageBox.warning(self, "Błąd", f"Błąd wczytywania obrazu: {e}")
             return
 
-        # Ustaw domyślną etykietę w polu wyboru
         custom_label = self.custom_label_input.text().strip()
         if custom_label:
             self.default_label = custom_label
@@ -1094,6 +1155,9 @@ class AutoLabelingTab(QtWidgets.QWidget):
     def delete_mask(self):
         if self.image_viewer.selected_mask_idx >= 0:
             self.annotations.pop(self.image_viewer.selected_mask_idx)
+            # NOWE: Usuń maskę z cache'u
+            if self.image_viewer.selected_mask_idx in self.image_viewer.mask_cache:
+                del self.image_viewer.mask_cache[self.image_viewer.selected_mask_idx]
             self.image_viewer.selected_mask_idx = -1
             self.update_mask_list()
             self.image_viewer.update()
@@ -1107,7 +1171,11 @@ class AutoLabelingTab(QtWidgets.QWidget):
         if self.history:
             last_shape = self.history.pop()
             if last_shape in self.annotations:
+                idx = self.annotations.index(last_shape)
                 self.annotations.remove(last_shape)
+                # NOWE: Usuń maskę z cache'u
+                if idx in self.image_viewer.mask_cache:
+                    del self.image_viewer.mask_cache[idx]
             self.image_viewer.selected_mask_idx = -1
             self.update_mask_list()
             self.image_viewer.update()
@@ -1119,7 +1187,6 @@ class AutoLabelingTab(QtWidgets.QWidget):
         if self.image_viewer.selected_mask_idx >= 0:
             new_label = self.get_current_label()
             if new_label:
-                # Zmiana etykiety na wszystkich maskach na obrazie
                 for shape in self.annotations:
                     shape["label"] = new_label
                 self.default_label = new_label

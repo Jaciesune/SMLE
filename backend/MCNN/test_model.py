@@ -1,3 +1,14 @@
+"""
+Skrypt do testowania modelu MCNN (Multi-Column CNN) na obrazach.
+
+Ten moduł implementuje pełny potok przetwarzania obrazów przy użyciu wytrenowanego 
+modelu MCNN do zliczania obiektów i generowania map gęstości. Skrypt automatycznie 
+dostosowuje parametry przetwarzania w zależności od złożoności obrazu.
+"""
+
+#######################
+# Importy bibliotek
+#######################
 import sys
 print("Interpreter:", sys.executable)
 
@@ -15,7 +26,23 @@ from sklearn.cluster import KMeans
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MIN_CONTOUR_AREA = 15
 
+#######################
+# Funkcja wczytująca model
+#######################
 def load_model(model_path, device):
+    """
+    Wczytuje zapisany model MCNN z pliku checkpointu.
+    
+    Args:
+        model_path (str): Ścieżka do pliku modelu
+        device (torch.device): Urządzenie, na którym ma działać model (CPU/GPU)
+        
+    Returns:
+        MCNN: Wczytany model w trybie ewaluacji
+        
+    Raises:
+        SystemExit: Gdy plik modelu nie istnieje lub ma niepoprawny format
+    """
     if not model_path.endswith('_checkpoint.pth'):
         print(f"Błąd: Ścieżka do modelu {model_path} nie kończy się na _checkpoint.pth.")
         sys.exit(1)
@@ -28,12 +55,25 @@ def load_model(model_path, device):
     model.eval()
     return model
 
+#######################
+# Foldery wyjściowe
+#######################
 output_folder = "/app/backend/MCNN/data/detectes"
 maps_folder = "/app/backend/MCNN/maps"
 os.makedirs(output_folder, exist_ok=True)
 os.makedirs(maps_folder, exist_ok=True)
 
+#######################
+# Funkcja zapisywania mapy gęstości
+#######################
 def save_density_map(density_map, image_path):
+    """
+    Zapisuje wizualizację mapy gęstości jako obraz.
+    
+    Args:
+        density_map (numpy.ndarray): Mapa gęstości wygenerowana przez model
+        image_path (str): Ścieżka do oryginalnego obrazu (używana do nazwy pliku wyjściowego)
+    """
     plt.figure(figsize=(10, 8))
     plt.imshow(density_map, cmap='jet')
     plt.colorbar()
@@ -73,12 +113,16 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
     ])
     img_tensor = resize_transform(image).unsqueeze(0).to(device)
 
+    # Wygenerowanie mapy gęstości przy użyciu modelu MCNN
     with torch.no_grad():
         density_map = model(img_tensor).cpu().numpy()[0, 0]
 
+    # Wygładzanie mapy gęstości filtrem Gaussa
     density_map = gaussian_filter(density_map, sigma=sigma)
     binary_map = threshold_by_kmeans(density_map, k=2)
     binary_map_cv = (binary_map * 255).astype(np.uint8)
+
+    # Wykrywanie konturów obiektów
     contours, _ = cv2.findContours(binary_map_cv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     image_cv_orig = np.array(image)
@@ -193,15 +237,30 @@ def process_and_choose_best(image_path, resize_shape=(2048, 2048)):
     params_method_1 = (1.5, None)
     params_method_2 = (2.75, None)
 
+    # Przetworzenie obrazu obiema metodami
     marked_1, img_1, map_1 = process_image(image_path, *params_method_1, resize_shape=resize_shape)
     marked_2, img_2, map_2 = process_image(image_path, *params_method_2, resize_shape=resize_shape)
 
+    # Wybór metody, która wykryła więcej obiektów
     if marked_1 >= marked_2:
         return marked_1, img_1, map_1
     else:
         return marked_2, img_2, map_2
-
+    
+#######################
+# Zapis wyniku
+#######################
 def save_result(image, image_path):
+    """
+    Zapisuje przetworzony obraz z wykrytymi obiektami.
+    
+    Args:
+        image (numpy.ndarray): Przetworzony obraz z zaznaczonymi obiektami
+        image_path (str): Ścieżka do oryginalnego obrazu
+        
+    Returns:
+        str: Ścieżka do zapisanego pliku wynikowego
+    """
     result_image_path = os.path.join(output_folder, f"{os.path.splitext(os.path.basename(image_path))[0]}_detected.jpg")
     image_cv_resized = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     if image_cv_resized.shape[0] < 1024 or image_cv_resized.shape[1] < 1024:
@@ -209,6 +268,9 @@ def save_result(image, image_path):
     cv2.imwrite(result_image_path, image_cv_resized)
     return result_image_path
 
+#######################
+# Główne wywołanie
+#######################
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Użycie: python test_model.py <ścieżka_do_obrazu> <ścieżka_do_modelu>")
@@ -221,6 +283,7 @@ if __name__ == "__main__":
 
     detections_count, best_image, density_map = process_and_choose_best(image_path, resize_shape=(1024, 1024))
 
+    # Adaptacyjna strategia przetwarzania w zależności od liczby wykrytych obiektów
     if detections_count < 100:
         print("Liczba wykrytych obiektów < 100. Przetwarzanie ponownie w 512x512...")
         detections_count, best_image, density_map = process_and_choose_best(image_path, resize_shape=(512, 512))

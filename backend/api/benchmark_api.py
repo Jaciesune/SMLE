@@ -314,13 +314,13 @@ class BenchmarkAPI:
                 if "Błąd" in result:
                     logger.error(f"[DEBUG] Błąd detekcji dla {img_path}: {result}")
                     raise HTTPException(status_code=500, detail=f"Błąd detekcji dla {img_path}: {result}")
-                logger.debug(f"[DEBUG] Liczba wykrytych rur: {num_predicted} dla {img_path}")
+                logger.debug(f"[DEBUG] Liczba wykrytych elementów: {num_predicted} dla {img_path}")
 
                 # Policz obiekty z annotacji (format LabelMe)
                 num_ground_truth = len(annotations)
                 ground_truth_counts.append(num_ground_truth)
                 predicted_counts.append(num_predicted)
-                logger.debug(f"[DEBUG] Liczba rur w annotacji: {num_ground_truth} dla {img_path}")
+                logger.debug(f"[DEBUG] Liczba elementów w annotacji: {num_ground_truth} dla {img_path}")
 
                 # Oblicz metrykę dla tego obrazu (różnica między liczbą wykrytą a rzeczywistą)
                 metric = abs(num_predicted - num_ground_truth)

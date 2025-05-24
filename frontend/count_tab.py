@@ -472,7 +472,7 @@ class CountTab(QtWidgets.QWidget):
         Pobiera listę dostępnych modeli dla wybranego algorytmu i wypełnia nimi ComboBox.
         
         Wyświetla nazwy bez '_checkpoint.pth', zachowuje oryginalne nazwy w mapowaniu.
-        Modele są grupowane w kategorie (Rury, Deski, Książki, Inne).
+        Modele są grupowane w kategorie (Rury, Deski, Książki, inne).
         Kategorie są pogrubione, a domyślny wybór to pierwszy model w kategorii Rury (jeśli istnieje).
         """
         self.model_version_combo.clear()
@@ -492,7 +492,7 @@ class CountTab(QtWidgets.QWidget):
                 self.model_version_combo.setModel(model)
                 self.model_mapping.clear()
                 # Kategorie: pipes, deski, książki, inne
-                categorized_models = {"Rury": [], "Deski": [], "Książki": [], "Inne": []}
+                categorized_models = {"Rury": [], "Deski": [], "Książki": [], "inne": []}
                 for original_model in model_versions:
                     display_model = original_model.replace('_checkpoint.pth', '')
                     prefix = display_model.lower().split('_')[0]  # pierwszy człon przed "_"
@@ -504,10 +504,10 @@ class CountTab(QtWidgets.QWidget):
                     elif prefix == "książki":
                         categorized_models["Książki"].append((display_model, original_model))
                     else:
-                        categorized_models["Inne"].append((display_model, original_model))
+                        categorized_models["inne"].append((display_model, original_model))
 
                 # Dodawanie kategorii i modeli
-                for category in ["Rury", "Deski", "Książki", "Inne"]:
+                for category in ["Rury", "Deski", "Książki", "inne"]:
                     if categorized_models[category]:
                         # Dodaj kategorię jako nieklikalny element z pogrubioną czcionką
                         item = QStandardItem(category)
@@ -522,15 +522,13 @@ class CountTab(QtWidgets.QWidget):
                             entry = QStandardItem(f"  {display_model}")  # Wcięcie dla czytelności
                             entry.setData(original_model, QtCore.Qt.UserRole)
                             model.appendRow(entry)
-                            self.model_mapping[display_model] = original_model
+                            self.model_mapping[display_model] = original_model  # Klucz bez spacji
 
                 # Ustaw domyślny wybór na pierwszy model w kategorii "Rury", jeśli istnieje
                 if categorized_models["Rury"]:
-                    # Pierwszy model w kategorii Rury to element zaraz po nazwie kategorii
                     first_rury_index = model.index(1, 0)  # Pierwszy model po kategorii "Rury"
                     self.model_version_combo.setCurrentIndex(first_rury_index.row())
                 elif model.rowCount() > 0:
-                    # Jeśli brak modeli w kategorii Rury, wybierz pierwszy dostępny model
                     for i in range(model.rowCount()):
                         if model.item(i).flags() & QtCore.Qt.ItemIsSelectable:
                             self.model_version_combo.setCurrentIndex(i)
@@ -555,16 +553,16 @@ class CountTab(QtWidgets.QWidget):
             return
 
         algorithm = self.algorithm_combo.currentText()
-        model_version = self.model_version_combo.currentText()
+        model_version_display = self.model_version_combo.currentText().strip()  # Usuń spacje z początku i końca
         if not algorithm or algorithm == "Brak dostępnych algorytmów":
             QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać algorytm.")
             return
-        if not model_version or model_version in ["pipes", "deski", "książki", "Inne", "Brak dostępnych modeli"]:
+        if not model_version_display or model_version_display in ["Rury", "Deski", "Książki", "inne", "Brak dostępnych modeli"]:
             QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać konkretny model, a nie kategorię.")
             return
         
         # Pobierz oryginalną nazwę modelu z mapowania
-        original_model_version = self.model_mapping.get(model_version, model_version)
+        original_model_version = self.model_mapping.get(model_version_display, model_version_display)
         
         preprocessing_enabled = self.preprocessing_checkbox.isChecked()
 
@@ -578,13 +576,11 @@ class CountTab(QtWidgets.QWidget):
         pixmap = self.image_label.pixmap()
         if (pixmap and not pixmap.isNull()):
             pixmap_size = pixmap.size()
-            # Oblicz pozycję, aby overlay był wyśrodkowany na obrazku
             x_offset = (self.image_label.width() - pixmap_size.width()) // 2
             y_offset = (self.image_label.height() - pixmap_size.height()) // 2
             self.overlay_label.setFixedSize(pixmap_size)
             self.overlay_label.move(x_offset, y_offset)
         else:
-            # Jeśli brak obrazka, użyj domyślnego rozmiaru (powinno być rzadkie, bo sprawdzamy current_image_path)
             self.overlay_label.setFixedSize(1000, 800)
             self.overlay_label.move(0, 0)
 

@@ -10,6 +10,7 @@ oraz opcjonalne przetwarzanie wstępne obrazów przed analizą.
 # Importy bibliotek
 #######################
 from PyQt5 import QtWidgets, QtGui, QtCore
+from PyQt5.QtGui import QStandardItemModel, QStandardItem
 import winsound
 import requests
 import os
@@ -470,9 +471,9 @@ class CountTab(QtWidgets.QWidget):
         """
         Pobiera listę dostępnych modeli dla wybranego algorytmu i wypełnia nimi ComboBox.
         
-        Wywołuje API backendu z parametrem wybranego algorytmu, by pobrać
-        odpowiednie wersje modeli. Wyświetla nazwy bez '_checkpoint.pth',
-        ale zachowuje oryginalne nazwy w mapowaniu.
+        Wyświetla nazwy bez '_checkpoint.pth', zachowuje oryginalne nazwy w mapowaniu.
+        Modele są grupowane w kategorie (Rury, Deski, Książki, Inne).
+        Kategorie są pogrubione, a domyślny wybór to pierwszy model w kategorii Rury (jeśli istnieje).
         """
         self.model_version_combo.clear()
         self.model_mapping.clear()  # Wyczyść poprzednie mapowanie
@@ -482,16 +483,58 @@ class CountTab(QtWidgets.QWidget):
             return
         try:
             logger.debug("Pobieram modele dla algorytmu %s z %s/detect_model_versions/%s", 
-                         algorithm, self.api_url, algorithm)
+                        algorithm, self.api_url, algorithm)
             response = requests.get(f"{self.api_url}/detect_model_versions/{algorithm}")
             response.raise_for_status()
             model_versions = response.json()
             if model_versions:
+                model = QStandardItemModel()
+                self.model_version_combo.setModel(model)
+                self.model_mapping.clear()
+                # Kategorie: pipes, deski, książki, inne
+                categorized_models = {"Rury": [], "Deski": [], "Książki": [], "Inne": []}
                 for original_model in model_versions:
-                    # Usuń '_checkpoint.pth' z wyświetlanego tekstu
                     display_model = original_model.replace('_checkpoint.pth', '')
-                    self.model_version_combo.addItem(display_model)
-                    self.model_mapping[display_model] = original_model  # Mapowanie wyświetlanego tekstu na oryginalną nazwę
+                    prefix = display_model.lower().split('_')[0]  # pierwszy człon przed "_"
+
+                    if prefix == "pipes":
+                        categorized_models["Rury"].append((display_model, original_model))
+                    elif prefix == "deski":
+                        categorized_models["Deski"].append((display_model, original_model))
+                    elif prefix == "książki":
+                        categorized_models["Książki"].append((display_model, original_model))
+                    else:
+                        categorized_models["Inne"].append((display_model, original_model))
+
+                # Dodawanie kategorii i modeli
+                for category in ["Rury", "Deski", "Książki", "Inne"]:
+                    if categorized_models[category]:
+                        # Dodaj kategorię jako nieklikalny element z pogrubioną czcionką
+                        item = QStandardItem(category)
+                        item.setFlags(QtCore.Qt.NoItemFlags)  # Nieklikalny
+                        font = QtGui.QFont()
+                        font.setBold(True)  # Pogrubienie kategorii
+                        item.setFont(font)
+                        model.appendRow(item)
+
+                        # Dodaj modele w kategorii
+                        for display_model, original_model in categorized_models[category]:
+                            entry = QStandardItem(f"  {display_model}")  # Wcięcie dla czytelności
+                            entry.setData(original_model, QtCore.Qt.UserRole)
+                            model.appendRow(entry)
+                            self.model_mapping[display_model] = original_model
+
+                # Ustaw domyślny wybór na pierwszy model w kategorii "Rury", jeśli istnieje
+                if categorized_models["Rury"]:
+                    # Pierwszy model w kategorii Rury to element zaraz po nazwie kategorii
+                    first_rury_index = model.index(1, 0)  # Pierwszy model po kategorii "Rury"
+                    self.model_version_combo.setCurrentIndex(first_rury_index.row())
+                elif model.rowCount() > 0:
+                    # Jeśli brak modeli w kategorii Rury, wybierz pierwszy dostępny model
+                    for i in range(model.rowCount()):
+                        if model.item(i).flags() & QtCore.Qt.ItemIsSelectable:
+                            self.model_version_combo.setCurrentIndex(i)
+                            break
             else:
                 self.model_version_combo.addItem("Brak dostępnych modeli")
         except requests.exceptions.RequestException as e:
@@ -516,8 +559,8 @@ class CountTab(QtWidgets.QWidget):
         if not algorithm or algorithm == "Brak dostępnych algorytmów":
             QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać algorytm.")
             return
-        if not model_version or model_version == "Brak dostępnych modeli":
-            QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać model.")
+        if not model_version or model_version in ["pipes", "deski", "książki", "Inne", "Brak dostępnych modeli"]:
+            QtWidgets.QMessageBox.warning(self, "Błąd", "Proszę wybrać konkretny model, a nie kategorię.")
             return
         
         # Pobierz oryginalną nazwę modelu z mapowania

@@ -81,6 +81,190 @@ class LoadingDialog(QtWidgets.QDialog):
         """Zatrzymuje timer animacji."""
         self.timer.stop()
 
+class ImageComparisonWidget(QtWidgets.QWidget):
+    """
+    Widget do porównywania dwóch obrazów za pomocą interaktywnego suwaka (draggable handle).
+    
+    Wyświetla dwa obrazy (oryginalny po lewej i oznaczony po prawej) z możliwością przesuwania
+    linii podziału. Początkowo suwak jest przy lewej krawędzi, pokazując w 100% oznaczony obraz.
+    Przesunięcie w prawo stopniowo ujawnia oryginalny obraz po lewej stronie.
+    Suwak ma okrągły uchwyt z pojedynczymi strzałkami (< >) skierowanymi do środka.
+    """
+    def __init__(self, original_pixmap, processed_pixmap, size, parent=None):
+        """
+        Inicjalizuje widget porównywania obrazów.
+        
+        Args:
+            original_pixmap (QtGui.QPixmap): Oryginalny obraz
+            processed_pixmap (QtGui.QPixmap): Przetworzony obraz (z detekcjami)
+            size (QtCore.QSize): Rozmiar widgetu (dopasowany do etykiety obrazu)
+            parent (QtWidgets.QWidget, optional): Widget rodzica
+        """
+        super().__init__(parent)
+        self.setFixedSize(size)
+        self.original_pixmap = original_pixmap
+        self.processed_pixmap = processed_pixmap
+        self.dragging = False
+        self.handle_width = 10  # Szerokość uchwytu suwaka
+        self.is_hovered = False  # Śledzenie najechania na okrąg
+
+        # Skalowanie obrazów do rozmiaru widgetu z zachowaniem proporcji
+        self.original_pixmap = self.original_pixmap.scaled(
+            size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+        )
+        self.processed_pixmap = self.processed_pixmap.scaled(
+            size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+        )
+
+        # Oblicz granice obrazu (po skalowaniu może być mniejszy niż widget)
+        self.image_width = self.original_pixmap.width()
+        self.image_height = self.original_pixmap.height()
+        self.offset_x = (size.width() - self.image_width) // 2
+        self.offset_y = (size.height() - self.image_height) // 2
+        
+        # Ustawienie początkowej pozycji suwaka po obliczeniu offset_x
+        self.split_position = self.offset_x  # Start przy lewej krawędzi, pokazując oznaczony obraz
+
+        self.setMouseTracking(True)
+
+    def paintEvent(self, event):
+        """
+        Rysuje dwa obrazy i suwak podziału, dostosowując się do granic obrazu.
+        Domyślnie pokazuje oznaczony obraz po prawej, a przesunięcie suwaka w prawo ujawnia oryginalny obraz po lewej.
+        """
+        painter = QtGui.QPainter(self)
+
+        # Rysuj oznaczony obraz (domyślnie widoczny w 100% po prawej)
+        painter.drawPixmap(self.offset_x, self.offset_y, self.image_width, self.image_height, self.processed_pixmap)
+
+        # Ustaw obszar przycinania dla oryginalnego obrazu (po lewej stronie suwaka)
+        painter.setClipRect(self.offset_x, self.offset_y, self.split_position - self.offset_x, self.image_height)
+        painter.drawPixmap(self.offset_x, self.offset_y, self.image_width, self.image_height, self.original_pixmap)
+
+        # Wyłącz przycinanie, aby narysować suwak
+        painter.setClipping(False)
+
+        # Styl suwaka
+        # Zielona linia podziału (#00FF00, grubość 2px)
+        line_color = QtGui.QColor(0, 255, 0)
+        line_thickness = 2
+
+        # Uchwyt: półprzezroczysty zielony (RGBA: 0, 255, 0, 150), okrągły
+        handle_color = QtGui.QColor(0, 255, 0, 150)
+        handle_radius = 20
+
+        # Strzałki (< >): białe z czarnym obramowaniem, skierowane do środka
+        arrow_color = QtGui.QColor(255, 255, 255)
+        arrow_size = 8  # Zwiększony rozmiar strzałek
+        padding = 4
+
+        # Duża strzałka na lewej krawędzi: zielona z 50% przezroczystością (RGBA: 0, 255, 0, 128)
+        large_arrow_color = QtGui.QColor(0, 255, 0, 128)
+        large_arrow_size = 10
+
+        # Rysuj linię podziału i uchwyt w zależności od pozycji
+        if self.split_position > self.offset_x:
+            # Rysuj linię podziału
+            painter.setPen(QtGui.QPen(line_color, line_thickness))
+            painter.drawLine(self.split_position, self.offset_y, self.split_position, self.offset_y + self.image_height)
+
+            # Rysuj okrągły uchwyt
+            painter.setBrush(handle_color if not self.is_hovered else QtGui.QColor(0, 255, 0, 200))  # Podświetlenie przy najechaniu
+            painter.setPen(QtCore.Qt.NoPen)  # Bez obramowania dla uchwytu
+            painter.drawEllipse(self.split_position - handle_radius, self.offset_y + self.image_height // 2 - handle_radius, handle_radius * 2, handle_radius * 2)
+
+            # Rysuj pojedyncze strzałki (< >) skierowane do środka
+            painter.setBrush(arrow_color)
+            painter.setPen(QtCore.Qt.NoPen)
+            center_x = self.split_position
+            center_y = self.offset_y + self.image_height // 2
+
+            # Strzałka skierowana w prawo (czubek po prawej)
+            right_tip_x = center_x + handle_radius - padding  # Czubek
+            points_right = [
+                QtCore.QPoint(right_tip_x, center_y),  # czubek
+                QtCore.QPoint(center_x + arrow_size // 2, center_y - arrow_size),
+                QtCore.QPoint(center_x + arrow_size // 2, center_y + arrow_size)
+            ]
+            painter.drawPolygon(QtGui.QPolygon(points_right))
+
+            left_tip_x = center_x - handle_radius + padding  # Czubek
+            points_left = [
+                QtCore.QPoint(left_tip_x, center_y),  # czubek
+                QtCore.QPoint(center_x - arrow_size // 2, center_y - arrow_size),
+                QtCore.QPoint(center_x - arrow_size // 2, center_y + arrow_size)
+            ]
+            painter.drawPolygon(QtGui.QPolygon(points_left))
+        else:
+            # Rysuj tylko większą, przezroczystą strzałkę ">" przy lewej krawędzi
+            painter.setBrush(large_arrow_color)
+            painter.setPen(QtGui.QPen(large_arrow_color, 2))
+            center_x = self.offset_x + large_arrow_size
+            center_y = self.offset_y + self.image_height // 2
+            points = [
+                QtCore.QPoint(center_x, center_y - large_arrow_size),
+                QtCore.QPoint(center_x + large_arrow_size * 2, center_y),
+                QtCore.QPoint(center_x, center_y + large_arrow_size)
+            ]
+            painter.drawPolygon(QtGui.QPolygon(points))
+
+    def mousePressEvent(self, event):
+        """
+        Obsługuje naciśnięcie myszy na uchwycie suwaka.
+        """
+        handle_radius = 20
+        center_x = self.split_position
+        center_y = self.offset_y + self.image_height // 2
+        if self.split_position > self.offset_x and (event.x() - center_x) ** 2 + (event.y() - center_y) ** 2 <= handle_radius ** 2 and \
+           self.offset_y <= event.y() <= self.offset_y + self.image_height:
+            self.dragging = True
+            self.setCursor(QtCore.Qt.SplitHCursor)
+        elif self.split_position <= self.offset_x and self.offset_x <= event.x() <= self.offset_x + 40 and \
+             self.offset_y <= event.y() <= self.offset_y + self.image_height:
+            self.dragging = True
+            self.setCursor(QtCore.Qt.SplitHCursor)
+
+    def mouseMoveEvent(self, event):
+        """
+        Obsługuje ruch myszy podczas przesuwania suwaka, ograniczając go do granic obrazu i sprawdzając najechanie na okrąg.
+        """
+        if self.dragging:
+            # Ogranicz pozycję suwaka do szerokości obrazu
+            self.split_position = min(
+                max(event.x(), self.offset_x),
+                self.offset_x + self.image_width
+            )
+            self.update()  # Odśwież widget
+        else:
+            center_x = self.split_position
+            center_y = self.offset_y + self.image_height // 2
+            handle_radius = 20
+
+            # Sprawdzenie najechania na okrąg
+            if (event.x() - center_x) ** 2 + (event.y() - center_y) ** 2 <= handle_radius ** 2 and \
+               self.offset_y <= event.y() <= self.offset_y + self.image_height:
+                self.is_hovered = True
+                self.setCursor(QtCore.Qt.SplitHCursor)  # Zmiana kursora przy najechaniu
+            else:
+                self.is_hovered = False
+                self.setCursor(QtCore.Qt.ArrowCursor)  # Powrót do domyślnego kursora
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        """
+        Obsługuje zwolnienie myszy po przesunięciu suwaka.
+        """
+        self.dragging = False
+        self.setCursor(QtCore.Qt.ArrowCursor)
+
+    def leaveEvent(self, event):
+        """
+        Resetuje stan najechania po opuszczeniu widgetu.
+        """
+        self.is_hovered = False
+        self.setCursor(QtCore.Qt.ArrowCursor)
+        self.update()
+
 class CustomDialog(QtWidgets.QDialog):
     """
     Niestandardowy dialog wyświetlający wyniki detekcji obiektów.
@@ -97,7 +281,7 @@ class CustomDialog(QtWidgets.QDialog):
             detections_count (int): Liczba wykrytych obiektów
             parent (QtWidgets.QWidget): Widget rodzica (CountTab)
             temp_file_path (str): Ścieżka do tymczasowego pliku z przetworzonym obrazem
-            image_label_size (QtCore QSize): Rozmiar etykiety wyświetlającej obraz
+            image_label_size (QtCore.QSize): Rozmiar etykiety wyświetlającej obraz
         """
         super().__init__(parent)
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
@@ -160,10 +344,19 @@ class CustomDialog(QtWidgets.QDialog):
         parent.overlay_label.setVisible(False)
         QtWidgets.QApplication.processEvents()
 
-        # Podmień obraz w tle
-        self.image_update_thread = ImageUpdateThread(temp_file_path, image_label_size)
-        self.image_update_thread.image_updated.connect(parent.image_label.setPixmap)
-        self.image_update_thread.start()
+        # Podmień obraz w tle na widget porównujący
+        parent.original_pixmap = QtGui.QPixmap(parent.current_image_path).scaled(
+            parent.image_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+        )
+        parent.processed_pixmap = QtGui.QPixmap(temp_file_path).scaled(
+            parent.image_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+        )
+        parent.image_comparison_widget = ImageComparisonWidget(
+            parent.original_pixmap, parent.processed_pixmap, parent.image_label.size(), parent
+        )
+        parent.image_container_layout.replaceWidget(parent.image_label, parent.image_comparison_widget)
+        parent.image_label.deleteLater()  # Usuń starą etykietę
+        parent.image_label = parent.image_comparison_widget  # Aktualizuj referencję
 
 class ProgressThread(QtCore.QThread):
     """
@@ -209,7 +402,7 @@ class ImageUpdateThread(QtCore.QThread):
         
         Args:
             temp_file_path (str): Ścieżka do tymczasowego pliku obrazu
-            size (QtCore QSize): Docelowy rozmiar obrazu
+            size (QtCore.QSize): Docelowy rozmiar obrazu
         """
         super().__init__()
         self.temp_file_path = temp_file_path
@@ -294,7 +487,8 @@ class CountTab(QtWidgets.QWidget):
     
     Umożliwia użytkownikowi wczytanie obrazu, wybór algorytmu i modelu,
     a następnie wykonanie analizy w celu automatycznego zliczenia obiektów.
-    Wyniki prezentowane są w formie wizualnej z liczbą wykrytych obiektów.
+    Wyniki prezentowane są w formie wizualnej z liczbą wykrytych obiektów
+    oraz interaktywnym suwakiem do porównywania oryginalnego i przetworzonego obrazu.
     """
     def __init__(self, username, api_url):
         """
@@ -311,6 +505,9 @@ class CountTab(QtWidgets.QWidget):
         self.analysis_thread = None
         self.progress_thread = None
         self.model_mapping = {}  # Słownik do mapowania wyświetlonych nazw na oryginalne nazwy
+        self.original_pixmap = None  # Przechowuje oryginalny obraz
+        self.processed_pixmap = None  # Przechowuje przetworzony obraz
+        self.image_comparison_widget = None  # Widget do porównywania obrazów
         self.init_ui()
 
     def init_ui(self):
@@ -318,7 +515,7 @@ class CountTab(QtWidgets.QWidget):
         Tworzy i konfiguruje elementy interfejsu użytkownika zakładki.
         
         Komponenty:
-        - Panel widoku obrazu po lewej stronie
+        - Panel widoku obrazu po lewej stronie (z suwakiem po analizie)
         - Panel kontrolny z opcjami po prawej stronie
         - Przyciski do wczytywania obrazów i uruchamiania analizy
         - Pola wyboru algorytmu i modelu
@@ -337,8 +534,8 @@ class CountTab(QtWidgets.QWidget):
 
         image_container = QtWidgets.QWidget()
         image_container.setFixedSize(1000, 800)
-        image_container_layout = QtWidgets.QVBoxLayout(image_container)
-        image_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.image_container_layout = QtWidgets.QVBoxLayout(image_container)  # Zapisujemy layout do późniejszej wymiany widgetu
+        self.image_container_layout.setContentsMargins(0, 0, 0, 0)
 
         self.image_label = QtWidgets.QLabel("Tutaj pojawi się zdjęcie")
         self.image_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -351,7 +548,7 @@ class CountTab(QtWidgets.QWidget):
         self.overlay_label.setVisible(False)
         self.overlay_label.raise_()
 
-        image_container_layout.addWidget(self.image_label)
+        self.image_container_layout.addWidget(self.image_label)
         left_layout.addWidget(image_container)
         container_layout.addWidget(left_widget)
 
@@ -428,7 +625,8 @@ class CountTab(QtWidgets.QWidget):
         Otwiera dialog wyboru pliku obrazu i wyświetla wybrany obraz.
         
         Po wybraniu obrazu z systemu plików, resetuje etykiety wyników
-        i ustawia obraz w centralnym widoku.
+        i ustawia obraz w centralnym widoku. Jeśli widget porównujący istnieje,
+        zastępuje go zwykłą etykietą obrazu.
         """
         options = QtWidgets.QFileDialog.Options()
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -439,6 +637,16 @@ class CountTab(QtWidgets.QWidget):
             pixmap = QtGui.QPixmap(file_path).scaled(
                 self.image_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
             )
+            # Reset widgetu porównującego, jeśli istnieje
+            if self.image_comparison_widget:
+                self.image_container_layout.removeWidget(self.image_comparison_widget)
+                self.image_comparison_widget.deleteLater()
+                self.image_label = QtWidgets.QLabel("Tutaj pojawi się zdjęcie")
+                self.image_label.setAlignment(QtCore.Qt.AlignCenter)
+                self.image_label.setFixedSize(1000, 800)
+                self.image_label.setStyleSheet("background-color: transparent; border: 1px solid #606060;")
+                self.image_container_layout.addWidget(self.image_label)
+                self.image_comparison_widget = None
             self.image_label.setPixmap(pixmap)
             self.image_label.setStyleSheet("background-color: transparent; border: none;")
             self.image_name_label.setVisible(False)
@@ -573,7 +781,7 @@ class CountTab(QtWidgets.QWidget):
         logger.debug("Aktywuję nakładkę szarą i okno ładowania")
 
         # Dopasuj overlay_label do rozmiaru i pozycji obrazka
-        pixmap = self.image_label.pixmap()
+        pixmap = self.image_label.pixmap() if hasattr(self.image_label, 'pixmap') else None
         if (pixmap and not pixmap.isNull()):
             pixmap_size = pixmap.size()
             x_offset = (self.image_label.width() - pixmap_size.width()) // 2

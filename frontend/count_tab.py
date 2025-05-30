@@ -97,7 +97,7 @@ class ImageComparisonWidget(QtWidgets.QWidget):
         Args:
             original_pixmap (QtGui.QPixmap): Oryginalny obraz
             processed_pixmap (QtGui.QPixmap): Przetworzony obraz (z detekcjami)
-            size (QtCore.QSize): Rozmiar widgetu (dopasowany do etykiety obrazu)
+            size (QtCore QSize): Rozmiar widgetu (dopasowany do etykiety obrazu)
             parent (QtWidgets.QWidget, optional): Widget rodzica
         """
         super().__init__(parent)
@@ -281,7 +281,7 @@ class CustomDialog(QtWidgets.QDialog):
             detections_count (int): Liczba wykrytych obiektów
             parent (QtWidgets.QWidget): Widget rodzica (CountTab)
             temp_file_path (str): Ścieżka do tymczasowego pliku z przetworzonym obrazem
-            image_label_size (QtCore.QSize): Rozmiar etykiety wyświetlającej obraz
+            image_label_size (QtCore QSize): Rozmiar etykiety wyświetlającej obraz
         """
         super().__init__(parent)
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
@@ -402,7 +402,7 @@ class ImageUpdateThread(QtCore.QThread):
         
         Args:
             temp_file_path (str): Ścieżka do tymczasowego pliku obrazu
-            size (QtCore.QSize): Docelowy rozmiar obrazu
+            size (QtCore QSize): Docelowy rozmiar obrazu
         """
         super().__init__()
         self.temp_file_path = temp_file_path
@@ -533,13 +533,13 @@ class CountTab(QtWidgets.QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         image_container = QtWidgets.QWidget()
-        image_container.setFixedSize(1000, 800)
+        image_container.setFixedSize(1200, 950)  # Zwiększono z 1000, 800
         self.image_container_layout = QtWidgets.QVBoxLayout(image_container)  # Zapisujemy layout do późniejszej wymiany widgetu
         self.image_container_layout.setContentsMargins(0, 0, 0, 0)
 
         self.image_label = QtWidgets.QLabel("Tutaj pojawi się zdjęcie")
         self.image_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.image_label.setFixedSize(1000, 800)
+        self.image_label.setFixedSize(1200, 950)  # Dopasowano do nowego rozmiaru kontenera
         self.image_label.setStyleSheet("background-color: transparent; border: 1px solid #606060;")
 
         # Nakładka półprzezroczysta podczas analizy
@@ -556,7 +556,7 @@ class CountTab(QtWidgets.QWidget):
         right_widget = QtWidgets.QWidget()
         right_layout = QtWidgets.QVBoxLayout()
         right_widget.setFixedHeight(600)
-        right_widget.setFixedWidth(750)
+        right_widget.setFixedWidth(550)
         
         container_layout.addWidget(right_widget)
         container_widget.setLayout(container_layout)
@@ -643,7 +643,7 @@ class CountTab(QtWidgets.QWidget):
                 self.image_comparison_widget.deleteLater()
                 self.image_label = QtWidgets.QLabel("Tutaj pojawi się zdjęcie")
                 self.image_label.setAlignment(QtCore.Qt.AlignCenter)
-                self.image_label.setFixedSize(1000, 800)
+                self.image_label.setFixedSize(1200, 950)  # Dopasowano do nowego rozmiaru
                 self.image_label.setStyleSheet("background-color: transparent; border: 1px solid #606060;")
                 self.image_container_layout.addWidget(self.image_label)
                 self.image_comparison_widget = None
@@ -789,7 +789,7 @@ class CountTab(QtWidgets.QWidget):
             self.overlay_label.setFixedSize(pixmap_size)
             self.overlay_label.move(x_offset, y_offset)
         else:
-            self.overlay_label.setFixedSize(1000, 800)
+            self.overlay_label.setFixedSize(1200, 950)  # Dopasowano do nowego rozmiaru
             self.overlay_label.move(0, 0)
 
         self.overlay_label.setVisible(True)

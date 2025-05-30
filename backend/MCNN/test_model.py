@@ -154,8 +154,7 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
                 if minor_axis == 0:
                     continue
                 aspect_ratio = major_axis / minor_axis
-                # Złagodzono kryterium aspect_ratio
-                if aspect_ratio > 5.0 or area < min_area or area > max_area:
+                if aspect_ratio > 3.5 or area < min_area or area > max_area:
                     continue
                 ellipses_info.append({
                     "contour": contour,
@@ -171,7 +170,7 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
         # Filtrowanie aspect ratio
         aspect_ratios = [e["aspect_ratio"] for e in ellipses_info]
         median_ar = np.median(aspect_ratios)
-        lower_ar, upper_ar = median_ar * 0.5, median_ar * 2.0  # Złagodzono zakres
+        lower_ar, upper_ar = median_ar * 0.7, median_ar * 1.6 
         ellipses_info = [e for e in ellipses_info if lower_ar <= e["aspect_ratio"] <= upper_ar]
 
         # Filtrowanie przez sąsiadów
@@ -186,7 +185,7 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
                 neighbors.append(ellipses_info[i + 1]["area"])
             if neighbors:
                 avg_neighbors = sum(neighbors) / len(neighbors)
-                if area < 0.25 * avg_neighbors:  # Złagodzono warunek
+                if area < 0.35 * avg_neighbors: 
                     continue
             filtered_ellipses.append(current)
 

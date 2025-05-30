@@ -41,11 +41,9 @@ def load_model(model_path, device):
         MCNN: Wczytany model w trybie ewaluacji
         
     Raises:
-        SystemExit: Gdy plik modelu nie istnieje lub ma niepoprawny format
+        SystemExit: Gdy plik modelu nie istnieje
     """
-    if not model_path.endswith('_checkpoint.pth'):
-        print(f"Błąd: Ścieżka do modelu {model_path} nie kończy się na _checkpoint.pth.")
-        sys.exit(1)
+    # Usunięto warunek na końcówkę '_checkpoint.pth', aby być zgodnym z wcześniejszymi zmianami
     if not os.path.exists(model_path):
         print(f"Błąd: Plik modelu {model_path} nie istnieje.")
         sys.exit(1)
@@ -140,7 +138,7 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
     ]
 
     best_score = -1
-    best_result_img = None
+    best_result_img = image_cv_orig.copy()  # Domyślnie zwracamy oryginalny obraz
     best_count = 0
 
     for min_area, max_area, min_dist in parameter_sets:
@@ -156,7 +154,8 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
                 if minor_axis == 0:
                     continue
                 aspect_ratio = major_axis / minor_axis
-                if aspect_ratio > 3.5 or area < min_area or area > max_area:
+                # Złagodzono kryterium aspect_ratio
+                if aspect_ratio > 5.0 or area < min_area or area > max_area:
                     continue
                 ellipses_info.append({
                     "contour": contour,
@@ -172,7 +171,7 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
         # Filtrowanie aspect ratio
         aspect_ratios = [e["aspect_ratio"] for e in ellipses_info]
         median_ar = np.median(aspect_ratios)
-        lower_ar, upper_ar = median_ar * 0.7, median_ar * 1.6
+        lower_ar, upper_ar = median_ar * 0.5, median_ar * 2.0  # Złagodzono zakres
         ellipses_info = [e for e in ellipses_info if lower_ar <= e["aspect_ratio"] <= upper_ar]
 
         # Filtrowanie przez sąsiadów
@@ -187,7 +186,7 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
                 neighbors.append(ellipses_info[i + 1]["area"])
             if neighbors:
                 avg_neighbors = sum(neighbors) / len(neighbors)
-                if area < 0.35 * avg_neighbors:
+                if area < 0.25 * avg_neighbors:  # Złagodzono warunek
                     continue
             filtered_ellipses.append(current)
 
@@ -231,8 +230,6 @@ def process_image(image_path, sigma, threshold_factor=None, resize_shape=(2048, 
 
     return best_count, best_result_img, density_map
 
-
-
 def process_and_choose_best(image_path, resize_shape=(2048, 2048)):
     params_method_1 = (1.5, None)
     params_method_2 = (2.75, None)
@@ -246,7 +243,7 @@ def process_and_choose_best(image_path, resize_shape=(2048, 2048)):
         return marked_1, img_1, map_1
     else:
         return marked_2, img_2, map_2
-    
+
 #######################
 # Zapis wyniku
 #######################
@@ -261,6 +258,8 @@ def save_result(image, image_path):
     Returns:
         str: Ścieżka do zapisanego pliku wynikowego
     """
+    if image is None:
+        raise ValueError("Przekazany obraz jest None")
     result_image_path = os.path.join(output_folder, f"{os.path.splitext(os.path.basename(image_path))[0]}_detected.jpg")
     image_cv_resized = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     if image_cv_resized.shape[0] < 1024 or image_cv_resized.shape[1] < 1024:

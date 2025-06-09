@@ -49,11 +49,6 @@ checkpoints/
 # 📷 Tymczasowe pliki obrazów i logów
 *.log
 logs/
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
 
 # 🔬 Debug i testy
 debug.log
@@ -80,5 +75,20 @@ backend/Inne/Auto_Labeling/images_before
 backend/Inne/Auto_Labeling/images_debug
 
 backend/FasterRCNN/data
+backend/FasterRCNN/train
+backend/FasterRCNN/val
+
+backend/Mask_RCNN/data
+
+backend/MCNN/data
+backend/MCNN/maps
 
 node_modules
+
+# 🗂 Pliki i foldery specyficzne dla Benchmarka
+backend/benchmark_results.json
+backend/benchmark_history.json
+
+
+/package-lock.json
+/package.json

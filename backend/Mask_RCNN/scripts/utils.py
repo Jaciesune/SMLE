@@ -1,55 +1,122 @@
-import torch
-import cv2
-import numpy as np
-import os
-from pycocotools.coco import COCO
-from pycocotools import mask as coco_mask
-from pycocotools.cocoeval import COCOeval
+"""
+Moduł narzędziowy dla treningu i walidacji modelu Mask R-CNN
 
-# Funkcja do treningu jednej epoki
+Ten moduł implementuje funkcje pomocnicze do treningu i walidacji modeli segmentacji instancji,
+w tym przetwarzanie z mixed precision, zaawansowaną walidację z metrykami COCO,
+wizualizację wyników oraz zarządzanie zasobami systemowymi.
+"""
+
+#######################
+# Importy bibliotek
+#######################
+import torch                              # Framework PyTorch
+from torch.amp import autocast, GradScaler  # Do treningu z mixed precision
+import cv2                                # OpenCV do operacji na obrazach
+import numpy as np                        # Do operacji numerycznych
+import os                                 # Operacje na systemie plików
+from pycocotools.coco import COCO         # Narzędzia do obsługi formatu COCO
+from pycocotools import mask as coco_mask  # Operacje na maskach COCO
+from pycocotools.cocoeval import COCOeval  # Do ewaluacji modeli z metrykami COCO
+import gc                                 # Garbage collector do zarządzania pamięcią
+import psutil                             # Do monitorowania zasobów systemowych
+import shutil                             # Do operacji na plikach
+import logging                            # Do logowania informacji
+
+#######################
+# Konfiguracja logowania
+#######################
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 def train_one_epoch(model, dataloader, optimizer, device, epoch):
     """
-    Trenuje model przez jedną epokę.
+    Trenuje model przez jedną epokę z użyciem mixed precision (AMP), bez akumulacji gradientów i grad_clip.
+    
+    Funkcja implementuje pełną pętlę treningową z wykorzystaniem:
+    - Mixed precision training dla lepszej wydajności
+    - Automatycznego skalowania gradientów za pomocą GradScaler
+    - Zarządzania pamięcią poprzez ręczne wywoływanie garbage collectora
+    - Zamykania procesów DataLoader po epoce
     
     Args:
         model: Model PyTorch do treningu
         dataloader: DataLoader z danymi treningowymi
-        optimizer: Optymalizator (np. Adam)
+        optimizer: Optymalizator (np. SGD)
         device: Urządzenie (CPU/GPU)
         epoch: Numer bieżącej epoki
+        
     Returns:
-        Średnia strata dla epoki
+        float: Średnia strata dla epoki
     """
+    scaler = GradScaler()
     model.train()
     całkowita_strata = 0
 
     print(f"\nEpoka {epoch}... (Batchy: {len(dataloader)})")
 
     for batch_idx, (obrazy, cele) in enumerate(dataloader):
-        obrazy = [img.to(device) for img in obrazy]
-        nowe_cele = [{k: v.to(device) for k, v in t.items()} for t in cele]
+        # Monitorowanie pamięci RAM i /dev/shm
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
 
-        słownik_strat = model(obrazy, nowe_cele)
-        strata = sum(strata for strata in słownik_strat.values())
+        # Przeniesienie danych na urządzenie z odpowiednimi typami danych
+        obrazy = [img.to(device, dtype=torch.bfloat16) for img in obrazy]
+        nowe_cele = [
+            {
+                k: v.to(device, dtype=torch.float32) if k == 'boxes' else 
+                  v.to(device, dtype=torch.uint8) if k == 'masks' else
+                  v.to(device) 
+                for k, v in t.items()
+            } 
+            for t in cele
+        ]
 
-        optimizer.zero_grad()
-        strata.backward()
-        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+
+        with autocast(device_type='cuda', dtype=torch.bfloat16):
+            słownik_strat = model(obrazy, nowe_cele)
+            strata = sum(strata for strata in słownik_strat.values())
+
+        scaler.scale(strata).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         całkowita_strata += strata.item()
         print(f"Batch {batch_idx+1}/{len(dataloader)} - Strata: {strata.item():.4f}")
 
-    return całkowita_strata / len(dataloader)
+        # Czyszczenie zmiennych dla oszczędności pamięci
+        del obrazy, nowe_cele, słownik_strat, strata
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
-# Funkcja do dekodowania RLE
+    # Zamknij procesy DataLoader po epoce
+    if hasattr(dataloader.dataset, '_shut_down_workers'):
+        dataloader.dataset._shut_down_workers()
+        logger.info(f"Zamknięto procesy DataLoader po epoce {epoch}")
+
+    try:
+        shm_path = "/dev/shm"
+        for item in os.listdir(shm_path):
+            item_path = os.path.join(shm_path, item)
+            if os.path.isfile(item_path) and "python" in item.lower():
+                os.remove(item_path)
+                logger.info(f"Usunięto plik z /dev/shm: {item_path}")
+    except Exception as e:
+        logger.error(f"Błąd podczas czyszczenia /dev/shm: {e}")
+
+    return całkowita_strata / len(dataloader) if len(dataloader) > 0 else 0
+
 def decode_rle_segmentation(segmentation):
     """
-    Dekoduje segmentację w formacie RLE do maski binarnej.
+    Dekoduje segmentację z formatu RLE (Run-Length Encoding) do maski binarnej.
     
     Args:
-        segmentation: Słownik z kluczami 'counts' i 'size'
+        segmentation (dict): Słownik z danymi RLE w formacie COCO
+        
     Returns:
-        Maska binarna jako numpy array
+        numpy.ndarray: Zdekodowana maska binarna
     """
     rle = {
         "counts": segmentation["counts"].encode('utf-8'),
@@ -57,17 +124,20 @@ def decode_rle_segmentation(segmentation):
     }
     return coco_mask.decode(rle)
 
-# Funkcja do tworzenia pełnej maski
 def create_full_mask(masks, bboxes, image_shape):
     """
-    Tworzy pełną maskę o rozmiarze obrazu, umieszczając maski w odpowiednich miejscach bboxów.
+    Tworzy pełną maskę z listy masek i ramek ograniczających.
+    
+    Funkcja łączy poszczególne maski w jedną maskę o wymiarach całego obrazu,
+    uwzględniając pozycję każdej maski określoną przez ramkę ograniczającą.
     
     Args:
-        masks: Lista masek binarnych (rozmiar bboxa)
-        bboxes: Lista bboxów w formacie [x_min, y_min, szerokość, wysokość]
-        image_shape: Tuple (wysokość, szerokość) obrazu
+        masks (list): Lista masek binarnych dla każdego obiektu
+        bboxes (list): Lista ramek ograniczających [x, y, w, h]
+        image_shape (tuple): Kształt obrazu wyjściowego (h, w)
+        
     Returns:
-        Pełna maska binarna jako numpy array
+        numpy.ndarray: Połączona maska binarna
     """
     full_mask = np.zeros(image_shape, dtype=np.uint8)
     
@@ -99,10 +169,16 @@ def create_full_mask(masks, bboxes, image_shape):
     
     return full_mask
 
-# Funkcja walidacji modelu
 def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coco_gt):
     """
-    Waliduje model, oblicza metryki (mAP) na podstawie IoU pełnych masek i zapisuje gt_image oraz pred_image.
+    Waliduje model, oblicza metryki (mAP) na podstawie IoU pełnych masek i zapisuje wizualizacje.
+    
+    Funkcja wykonuje następujące kroki:
+    1. Przeprowadza inferencję modelu na zbiorze walidacyjnym
+    2. Konwertuje wyniki do formatu COCO do obliczeń metryk
+    3. Oblicza IoU dla pełnych masek i ramek ograniczających (bbox)
+    4. Generuje i zapisuje wizualizacje predykcji do analizy jakościowej
+    5. Oblicza metryki COCO (mAP) dla ramek i segmentacji
     
     Args:
         model: Model PyTorch do walidacji
@@ -111,8 +187,9 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
         epoch: Numer bieżącej epoki
         nazwa_modelu: Nazwa modelu dla zapisu wyników
         ścieżka_coco_gt: Ścieżka do pliku COCO z ground truth
+        
     Returns:
-        średnia_strata_walidacyjna, liczba_predykcji, liczba_gt, mAP_bbox, mAP_seg
+        tuple: (średnia_strata_walidacyjna, liczba_predykcji, liczba_gt, mAP_bbox, mAP_seg)
     """
     model.eval()
     całkowita_strata_walidacyjna = 0
@@ -120,17 +197,16 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
     całkowita_liczba_gt = 0
     pełne_iou_sum = 0
     pełne_iou_count = 0
-    # Ścieżki dostosowane do struktury Dockera
     ścieżka_zapisu = f"/app/backend/Mask_RCNN/logs/val/{nazwa_modelu}/epoch_{epoch:02d}"
     ścieżka_zapisu_gt = f"/app/backend/Mask_RCNN/logs/val/{nazwa_modelu}/gt_image"
     os.makedirs(ścieżka_zapisu, exist_ok=True)
 
-    # Wczytanie danych ground truth
+    # Wczytanie adnotacji ground truth
     coco_gt = COCO(ścieżka_coco_gt)
     coco_dt = []
-    nowy_rozmiar = (1024, 1024)  # Docelowy rozmiar
+    nowy_rozmiar = (1024, 1024)
 
-    # Przeskalowanie adnotacji ground truth
+    # Skalowanie adnotacji ground truth do rozmiaru wejściowego modelu
     orig_sizes = {img["id"]: (img["height"], img["width"]) for img in coco_gt.loadImgs(coco_gt.getImgIds())}
     ann_ids = coco_gt.getAnnIds(imgIds=coco_gt.getImgIds())
     anns = coco_gt.loadAnns(ann_ids)
@@ -141,159 +217,171 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
             anns_by_image[img_id] = []
         anns_by_image[img_id].append(ann)
 
+    # Przeskalowanie adnotacji ground truth
     for img_id, annotations in anns_by_image.items():
         orig_h, orig_w = orig_sizes[img_id]
         scale_x = nowy_rozmiar[1] / orig_w
         scale_y = nowy_rozmiar[0] / orig_h
-
         for ann in annotations:
             bbox = ann["bbox"]
-            bbox[0] *= scale_x  # x_min
-            bbox[1] *= scale_y  # y_min
-            bbox[2] *= scale_x  # szerokość
-            bbox[3] *= scale_y  # wysokość
-            ann["bbox"] = bbox
-
+            scaled_bbox = [bbox[0] * scale_x, bbox[1] * scale_y, bbox[2] * scale_x, bbox[3] * scale_y]
+            ann["bbox"] = scaled_bbox
             mask = decode_rle_segmentation(ann["segmentation"])
-            mask_resized = cv2.resize(mask, (int(bbox[2]), int(bbox[3])), interpolation=cv2.INTER_NEAREST)
-            rle = coco_mask.encode(np.asfortranarray(mask_resized.astype(np.uint8)))
-            rle["counts"] = rle["counts"].decode("utf-8")
-            ann["segmentation"] = rle
-            ann["area"] = int(np.sum(mask_resized))
+            w, h = int(scaled_bbox[2]), int(scaled_bbox[3])
+            if w > 0 and h > 0:
+                mask_resized = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                rle = coco_mask.encode(np.asfortranarray(mask_resized.astype(np.uint8)))
+                rle["counts"] = rle["counts"].decode("utf-8")
+                ann["segmentation"] = rle
+                ann["area"] = int(np.sum(mask_resized))
+            else:
+                print(f"Pomijam maskę dla img_id {img_id}, bbox o zerowych wymiarach: {scaled_bbox}")
 
     coco_gt.dataset["annotations"] = anns
     coco_gt.createIndex()
 
-    # Jednorazowe generowanie gt_image, jeśli folder nie istnieje
+    # Generowanie obrazów ground truth (tylko raz, jeśli folder nie istnieje)
     if not os.path.exists(ścieżka_zapisu_gt):
         os.makedirs(ścieżka_zapisu_gt, exist_ok=True)
         print("Generowanie gt_image jednorazowo...")
         for idx, (obrazy, cele) in enumerate(dataloader):
             for i, (obraz, cel) in enumerate(zip(obrazy, cele)):
-                obraz_np = (obraz.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+                obraz_np = (obraz.cpu().float().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
                 obraz_np = cv2.cvtColor(obraz_np, cv2.COLOR_RGB2BGR)
-
                 if "image_id" not in cel:
                     print(f"Batch {idx}, Obraz {i}: Brak image_id, pomijam.")
                     continue
                 id_obrazu = int(cel["image_id"].cpu().numpy()[0])
-
-                # Pobieranie GT i tworzenie pełnej maski GT
                 gt_anns = coco_gt.loadAnns(coco_gt.getAnnIds(imgIds=id_obrazu))
                 gt_masks = [decode_rle_segmentation(ann["segmentation"]) for ann in gt_anns]
                 gt_bboxes = [ann["bbox"] for ann in gt_anns]
                 full_gt_mask = create_full_mask(gt_masks, gt_bboxes, nowy_rozmiar)
-
-                # Tworzenie gt_image z boxami i maskami
                 gt_image = obraz_np.copy()
                 for ann in gt_anns:
                     x, y, w, h = map(int, ann["bbox"])
-                    cv2.rectangle(gt_image, (x, y), (x + w, y + h), (255, 0, 0), 2)  # Niebieski obrys
+                    x1, y1, x2, y2 = x, y, x + w, y + h
+                    cv2.rectangle(gt_image, (x1, y1), (x2, y2), (255, 0, 0), 2)
                     mask = decode_rle_segmentation(ann["segmentation"])
                     if mask.shape != (h, w):
                         mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
                     full_mask = np.zeros_like(obraz_np[:, :, 0], dtype=np.uint8)
                     full_mask[y:y + h, x:x + w] = mask
-                    gt_image[full_mask > 0] = [255, 0, 0]  # Czerwony dla maski GT
-
-                # Zapis gt_image
+                    gt_image[full_mask > 0] = [255, 0, 0]
                 cv2.imwrite(f"{ścieżka_zapisu_gt}/gt_image_{idx}_{i}.png", gt_image)
 
     print(f"Walidacja epoki {epoch}...")
 
-    for idx, (obrazy, cele) in enumerate(dataloader):
-        obrazy = [img.to(device) for img in obrazy]
-        nowe_cele = [{k: v.to(device) for k, v in t.items()} for t in cele]
+    # Pętla walidacyjna
+    with torch.no_grad():  # Przenosimy cały blok do torch.no_grad()
+        for idx, (obrazy, cele) in enumerate(dataloader):
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
 
-        # Obliczenie straty w trybie treningowym
-        model.train()
-        with torch.no_grad():
-            słownik_strat = model(obrazy, nowe_cele)
-            strata_walidacyjna = sum(strata for strata in słownik_strat.values())
-        całkowita_strata_walidacyjna += strata_walidacyjna.item()
-
-        # Predykcje w trybie ewaluacji
-        model.eval()
-        with torch.no_grad():
-            wyniki = model(obrazy)
-
-        for i, (obraz, wynik, cel) in enumerate(zip(obrazy, wyniki, cele)):
-            obraz_np = (obraz.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
-            obraz_np = cv2.cvtColor(obraz_np, cv2.COLOR_RGB2BGR)
-
-            liczba_gt = cel["boxes"].shape[0] if "boxes" in cel and cel["boxes"].numel() > 0 else 0
-            całkowita_liczba_gt += liczba_gt
-
-            if liczba_gt == 0 or "image_id" not in cel:
-                print(f"Batch {idx}, Obraz {i}: Brak adnotacji GT lub image_id, pomijam.")
-                continue
-            id_obrazu = int(cel["image_id"].cpu().numpy()[0])
-
-            # Przygotowanie predykcji
-            pred_masks = [maska.cpu().numpy()[0] > 0.5 for maska in wynik["masks"]]
-            pred_bboxes = [box.cpu().numpy() for box in wynik["boxes"]]
-            pred_scores = wynik["scores"].cpu().numpy()
-            pred_labels = wynik["labels"].cpu().numpy()
-
-            # Tworzenie pełnej maski predykcji
-            full_pred_mask = np.zeros(nowy_rozmiar, dtype=np.uint8)
-            for mask in pred_masks:
-                full_pred_mask |= mask.astype(np.uint8)  # Łączenie wszystkich masek w pełnym rozmiarze
-
-            # Filtrowanie predykcji
-            filtered_preds = [
-                (box, mask, score, label)
-                for box, mask, score, label in zip(pred_bboxes, pred_masks, pred_scores, pred_labels)
-                if score >= 0.1  # Obniżony próg
+            # Przeniesienie danych na urządzenie
+            obrazy = [img.to(device, dtype=torch.bfloat16) for img in obrazy]
+            nowe_cele = [
+                {
+                    k: v.to(device, dtype=torch.float32) if k == 'boxes' else 
+                    v.to(device, dtype=torch.uint8) if k == 'masks' else 
+                    v.to(device) 
+                    for k, v in t.items()
+                } 
+                for t in cele
             ]
-            liczba_predykcji = len(filtered_preds)
-            całkowita_liczba_predykcji += liczba_predykcji
 
-            # Tworzenie coco_dt dla bboxów
-            for box, mask, score, label in filtered_preds:
-                x_min, y_min, x_max, y_max = map(int, box)
-                szerokość = max(0, x_max - x_min)
-                wysokość = max(0, y_max - y_min)
-                if szerokość > 0 and wysokość > 0:
-                    mask_cropped = mask[y_min:y_min + wysokość, x_min:x_min + szerokość]
-                    rle = coco_mask.encode(np.asfortranarray(mask_cropped.astype(np.uint8)))
-                    rle["counts"] = rle["counts"].decode("utf-8")
-                    coco_dt.append({
-                        "image_id": id_obrazu,
-                        "category_id": int(label),
-                        "bbox": [x_min, y_min, szerokość, wysokość],
-                        "score": float(score),
-                        "segmentation": rle
-                    })
+            # Obliczenie straty walidacyjnej i wykonanie inferencji
+            with autocast(device_type='cuda', dtype=torch.bfloat16):
+                model.train()
+                with torch.no_grad():  # Usuwamy ten zagnieżdżony blok, bo już mamy torch.no_grad() na wyższym poziomie
+                    słownik_strat = model(obrazy, nowe_cele)
+                    strata_walidacyjna = sum(strata for strata in słownik_strat.values())
+                całkowita_strata_walidacyjna += strata_walidacyjna.item()
 
-            # Pobieranie GT i tworzenie pełnej maski GT (tylko do obliczeń IoU)
-            gt_anns = coco_gt.loadAnns(coco_gt.getAnnIds(imgIds=id_obrazu))
-            gt_masks = [decode_rle_segmentation(ann["segmentation"]) for ann in gt_anns]
-            gt_bboxes = [ann["bbox"] for ann in gt_anns]
-            full_gt_mask = create_full_mask(gt_masks, gt_bboxes, nowy_rozmiar)
+                model.eval()
+                wyniki = model(obrazy)
 
-            # Tworzenie pred_image z boxami i maskami
-            pred_image = obraz_np.copy()
-            for box, mask, score, label in filtered_preds:
-                x_min, y_min, x_max, y_max = map(int, box)
-                cv2.rectangle(pred_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)  # Zielony obrys
-                pred_image[mask > 0] = [0, 0, 255]  # Czerwony dla maski predykcji
+            # Przetwarzanie wyników dla każdego obrazu
+            for i, (obraz, wynik, cel) in enumerate(zip(obrazy, wyniki, cele)):
+                obraz_np = (obraz.cpu().float().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+                obraz_np = cv2.cvtColor(obraz_np, cv2.COLOR_RGB2BGR)
+                liczba_gt = cel["boxes"].shape[0] if "boxes" in cel and cel["boxes"].numel() > 0 else 0
+                całkowita_liczba_gt += liczba_gt
 
-            # Zapis pred_image
-            cv2.imwrite(f"{ścieżka_zapisu}/pred_image_{idx}_{i}.png", pred_image)
+                if liczba_gt == 0 or "image_id" not in cel:
+                    print(f"Batch {idx}, Obraz {i}: Brak adnotacji GT lub image_id, pomijam.")
+                    continue
+                id_obrazu = int(cel["image_id"].cpu().numpy()[0])
 
-            # Obliczanie IoU dla pełnych masek
-            if full_pred_mask.sum() > 0 and full_gt_mask.sum() > 0:
-                intersection = np.logical_and(full_pred_mask, full_gt_mask).sum()
-                union = np.logical_or(full_pred_mask, full_gt_mask).sum()
-                full_iou = intersection / union if union > 0 else 0
-                pełne_iou_sum += full_iou
-                pełne_iou_count += 1
-                print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt}, IoU pełnych masek: {full_iou:.3f}")
-            else:
-                print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt}, IoU pełnych masek: 0.000 (puste maski)")
+                # Ekstrakcja predykcji modelu
+                pred_masks = [maska.detach().cpu().numpy()[0] > 0.5 for maska in wynik["masks"]]
+                pred_bboxes = [box.detach().cpu().numpy() for box in wynik["boxes"]]
+                pred_scores = wynik["scores"].detach().cpu().numpy()
+                pred_labels = wynik["labels"].detach().cpu().numpy()
 
-    # Ocena COCO dla bboxów
+                # Tworzenie pełnej maski predykcji
+                full_pred_mask = np.zeros(nowy_rozmiar, dtype=np.uint8)
+                for mask in pred_masks:
+                    full_pred_mask |= mask.astype(np.uint8)
+
+                # Filtrowanie predykcji według progu pewności
+                filtered_preds = [
+                    (box, mask, score, label)
+                    for box, mask, score, label in zip(pred_bboxes, pred_masks, pred_scores, pred_labels)
+                    if score >= 0.1
+                ]
+                liczba_predykcji = len(filtered_preds)
+                całkowita_liczba_predykcji += liczba_predykcji
+
+                # Konwersja predykcji do formatu COCO
+                for box, mask, score, label in filtered_preds:
+                    x1, y1, x2, y2 = map(int, box)
+                    szerokość = max(0, x2 - x1)
+                    wysokość = max(0, y2 - y1)
+                    if szerokość > 0 and wysokość > 0:
+                        mask_cropped = mask[y1:y1 + wysokość, x1:x1 + szerokość]
+                        rle = coco_mask.encode(np.asfortranarray(mask_cropped.astype(np.uint8)))
+                        rle["counts"] = rle["counts"].decode("utf-8")
+                        coco_dt.append({
+                            "image_id": id_obrazu,
+                            "category_id": int(label),
+                            "bbox": [x1, y1, szerokość, wysokość],
+                            "score": float(score),
+                            "segmentation": rle
+                        })
+
+                # Wczytanie adnotacji ground truth dla bieżącego obrazu
+                gt_anns = coco_gt.loadAnns(coco_gt.getAnnIds(imgIds=id_obrazu))
+                gt_masks = [decode_rle_segmentation(ann["segmentation"]) for ann in gt_anns]
+                gt_bboxes = [ann["bbox"] for ann in gt_anns]
+                full_gt_mask = create_full_mask(gt_masks, gt_bboxes, nowy_rozmiar)
+
+                # Generowanie wizualizacji predykcji
+                pred_image = obraz_np.copy()
+                for box, mask, score, label in filtered_preds:
+                    x1, y1, x2, y2 = map(int, box)
+                    cv2.rectangle(pred_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    pred_image[mask > 0] = [0, 0, 255]
+                cv2.imwrite(f"{ścieżka_zapisu}/pred_image_{idx}_{i}.png", pred_image)
+
+                # Obliczenie IoU dla pełnych masek
+                if full_pred_mask.sum() > 0 and full_gt_mask.sum() > 0:
+                    intersection = np.logical_and(full_pred_mask, full_gt_mask).sum()
+                    union = np.logical_or(full_pred_mask, full_gt_mask).sum()
+                    full_iou = intersection / union if union > 0 else 0
+                    pełne_iou_sum += full_iou
+                    pełne_iou_count += 1
+                    print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt:.2f}, IoU pełnych masek: {full_iou:.3f}")
+                else:
+                    print(f"Batch {idx}, Obraz {i}, Predykcje: {liczba_predykcji}, Liczba GT: {liczba_gt}, Ratio: {liczba_predykcji/liczba_gt:.2f}, IoU pełnych masek: 0.000 (puste maski)")
+
+                # Zarządzanie pamięcią
+                del obraz_np, pred_masks, pred_bboxes, pred_scores, pred_labels, full_pred_mask, gt_masks, gt_bboxes, full_gt_mask, pred_image
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    # Obliczenie metryk COCO
     if len(coco_dt) == 0:
         print("Brak predykcji powyżej progu.")
         mAP_bbox = 0.0
@@ -305,12 +393,91 @@ def validate_model(model, dataloader, device, epoch, nazwa_modelu, ścieżka_coc
         coco_eval_bbox.accumulate()
         coco_eval_bbox.summarize()
         mAP_bbox = coco_eval_bbox.stats[0]
-
-        # mAP_seg jako średnie IoU pełnych masek
         mAP_seg = pełne_iou_sum / pełne_iou_count if pełne_iou_count > 0 else 0
 
+    # Podsumowanie wyników walidacji
     średnia_strata_walidacyjna = całkowita_strata_walidacyjna / len(dataloader) if len(dataloader) > 0 else 0
     print(f"Średnia strata walidacyjna: {średnia_strata_walidacyjna:.4f}")
     print(f"Całkowita liczba predykcji: {całkowita_liczba_predykcji}, GT: {całkowita_liczba_gt}")
     print(f"mAP_bbox: {mAP_bbox:.4f}, mAP_seg (IoU pełnych masek): {mAP_seg:.4f}")
     return średnia_strata_walidacyjna, całkowita_liczba_predykcji, całkowita_liczba_gt, mAP_bbox, mAP_seg
+
+def custom_collate_fn(batch):
+    """
+    Funkcja łącząca próbki w batche dla DataLoadera.
+    
+    Args:
+        batch: Lista próbek zwróconych przez __getitem__
+        
+    Returns:
+        tuple: Próbki złączone w batch
+    """
+    return tuple(zip(*batch))
+
+def estimate_batch_size(image_size, max_objects, max_batch_size=16, min_batch_size=1, use_amp=True, is_training=True):
+    """
+    Estymuje optymalny batch size na podstawie dostępnych zasobów systemu.
+    
+    Uwzględnia dostępną pamięć RAM i VRAM, liczbę obiektów w obrazach oraz
+    dodatkowe czynniki, takie jak użycie mixed precision i tryb (trening/inferencja).
+    
+    Args:
+        image_size (tuple): Rozmiar obrazu (wysokość, szerokość)
+        max_objects (int): Maksymalna liczba obiektów na obraz
+        max_batch_size (int): Maksymalny dozwolony batch size
+        min_batch_size (int): Minimalny batch size
+        use_amp (bool): Czy używać mixed precision
+        is_training (bool): Czy estymacja dotyczy treningu
+        
+    Returns:
+        int: Estymowany batch size
+    """
+    if image_size is None:
+        raise ValueError("image_size musi być podane jako argument w estimate_batch_size")
+
+    # Obliczanie zużycia pamięci dla jednego obrazu
+    image_memory = image_size[0] * image_size[1] * 3 * 4  # Obraz RGB (float32)
+    masks_memory_per_image = max_objects * image_size[0] * image_size[1] * 1  # Maski (uint8)
+    activations_memory_per_image = 0.5 * 1024 ** 3  # Aktywacje
+    model_memory = 0.6 * 1024 ** 3  # Model
+    cuda_overhead = 1.0 * 1024 ** 3  # Overhead CUDA
+    
+    # Współczynnik oszczędności pamięci przy użyciu mixed precision
+    amp_factor = 0.6 if use_amp else 1.0
+    memory_per_image_gpu = (image_memory + masks_memory_per_image + activations_memory_per_image) * amp_factor
+
+    # Dodatkowy narzut dla treningu
+    if is_training:
+        model_memory *= 3  # Gradienty i optymalizator
+        memory_per_image_gpu *= 1.5  # Dodatkowe zużycie podczas treningu
+
+    # Analiza dostępnej pamięci RAM
+    available_memory = psutil.virtual_memory().available
+    cpu_count = os.cpu_count()
+    usable_memory = available_memory * 0.8  # Używamy 80% dostępnej pamięci
+    max_images_by_memory = int(usable_memory // (image_memory + masks_memory_per_image))
+    max_images_by_cpu = cpu_count
+
+    # Analiza dostępnej pamięci GPU
+    max_images_by_gpu = max_batch_size
+    if torch.cuda.is_available():
+        try:
+            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
+            gpu_memory_free = gpu_memory_total - torch.cuda.memory_reserved(0) - torch.cuda.memory_allocated(0)
+            usable_gpu_memory = gpu_memory_free * 0.85  # Używamy 85% wolnej pamięci GPU
+            total_memory_per_image = memory_per_image_gpu + (model_memory + cuda_overhead) / max_batch_size
+            max_images_by_gpu = int(usable_gpu_memory // total_memory_per_image)
+            logger.info("Dostępna pamięć GPU: %.2f GB, szacowane zużycie na obraz: %.2f MB, model: %.2f GB, max obiektów: %d",
+                        gpu_memory_free / (1024 ** 3), total_memory_per_image / (1024 ** 2), model_memory / (1024 ** 3), max_objects)
+        except Exception as e:
+            logger.warning("Nie można sprawdzić pamięci GPU: %s. Używam konserwatywnego batch_size.", str(e))
+            max_images_by_gpu = 1
+
+    # Wyznaczenie finalnego batch size
+    max_possible_batch_size = min(max_images_by_memory, max_images_by_cpu, max_images_by_gpu, max_batch_size)
+    batch_size = max(min_batch_size, min(max_possible_batch_size, max_batch_size))
+
+    logger.info("Estymowany batch_size: %d (pamięć RAM: %.2f GB, pamięć GPU: %.2f GB, CPU: %d rdzeni, AMP: %s, training: %s, max obiektów: %d)",
+                batch_size, available_memory / (1024 ** 3), gpu_memory_free / (1024 ** 3) if torch.cuda.is_available() else 0,
+                cpu_count, use_amp, is_training, max_objects)
+    return batch_size
